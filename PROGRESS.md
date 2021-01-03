@@ -2,7 +2,8 @@
 
 Walking **"Developing A Multi-Threaded Kernel From Scratch"** by Daniel McCarthy (Dragon Zap, 861 pages).
 
-One commit per book chapter. Bugs surface in their natural order and get their own follow-up commit + a `docs/gotchas/Gxx.md` note. Every meaningful commit ships with an end-to-end test under `tests/`.
+
+Use `git log --oneline` to map checkboxes to commits.
 
 Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 
@@ -11,13 +12,13 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 ## Setup
 
 - [ ] Cross-toolchain confirmed (`i686-elf-gcc`, `x86_64-elf-gcc`, `nasm`, `qemu-system-x86_64`)
-- [ ] `bin/` and `build/` directories exist
-- [ ] `.gitignore` covers build artifacts
-- [ ] `tests/run.sh` harness in place
+- [x] `bin/` and `build/` directories exist
+- [x] `.gitignore` covers build artifacts
+- [x] `tests/run.sh` harness in place
 
 ## Part 1 - Introduction & Requirements
 
-- [ ] **Ch 1** - Introduction (prose)
+- [x] **Ch 1** - Introduction (prose) → [Ch01.md](docs/chapters/Ch01.md)
 - [ ] **Ch 2** - Requirements (prose)
 - [ ] **Ch 3** - Who This Book Is For (prose)
 
