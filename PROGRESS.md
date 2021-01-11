@@ -26,7 +26,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 
 - [x] **Ch - What is Memory?** (prose) → [Ch04-what-is-memory.md](docs/chapters/Ch04-what-is-memory.md)
 - [x] **Ch - Memory Management & Virtual Memory** (prose) → [Ch05-memory-management.md](docs/chapters/Ch05-memory-management.md)
-- [ ] **Ch 4** - The Boot Process (prose)
+- [x] **Ch 4** - The Boot Process (prose) → [Ch06-boot-process.md](docs/chapters/Ch06-boot-process.md)
 
 ## Part 3 - Tooling
 
