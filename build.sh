@@ -9,6 +9,10 @@ set -e
 cd "$(dirname "$0")"
 mkdir -p bin build
 
-# Stub: bootloader sources will be assembled here as the chapters progress.
-# The next chapter (Hello World) replaces this stub with a real `nasm` call.
-echo "build: nothing to do yet"
+# Bootloader: assemble flat 512-byte binary.
+nasm -f bin src/boot.asm -o bin/boot.bin
+
+# So far the whole "OS" IS the bootloader. Boot image == boot sector.
+cp bin/boot.bin bin/os.bin
+
+echo "build: bin/os.bin ($(stat -c%s bin/os.bin) bytes)"

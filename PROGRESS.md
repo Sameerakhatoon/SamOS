@@ -35,9 +35,9 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 ## Part 4 - Real Mode Development
 
 - [x] **Ch 5** - Project setup (`boot.asm` placeholder) → [Ch08-project-setup.md](docs/chapters/Ch08-project-setup.md)
-- [ ] **Ch - The Hello World Bootloader** - `org 0x7c00`, BIOS int 0x10, boot signature 0xAA55
-- [ ] **Ch - Compile the bootloader** - `nasm -f bin`, verify 512 bytes ending `55 AA`
-- [ ] **Ch - Run in QEMU**
+- [x] **Ch - The Hello World Bootloader** - `org 0x7c00`, BIOS int 0x10, boot signature 0xAA55 → [Ch09-hello-world-bootloader.md](docs/chapters/Ch09-hello-world-bootloader.md) - test `tests/02-bootloader-prints-hello.sh`
+- [x] **Ch - Compile the bootloader** - `nasm -f bin`, verify 512 bytes ending `55 AA` (verified in same test)
+- [x] **Ch - Run in QEMU** - verified by `tests/02-bootloader-prints-hello.sh`
 - [ ] **Ch 6** - Understanding Real Mode (prose)
 - [ ] **Ch 7** - Segmentation Memory Model (prose)
 - [ ] **Ch 8** - Refining Our Bootloader - `ORG 0`, explicit segments, `cli`/`sti`
