@@ -39,7 +39,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch - Compile the bootloader** - `nasm -f bin`, verify 512 bytes ending `55 AA` (verified in same test)
 - [x] **Ch - Run in QEMU** - verified by `tests/02-bootloader-prints-hello.sh`
 - [x] **Ch 6** - Understanding Real Mode (prose) -> [Ch10-understanding-real-mode.md](docs/chapters/Ch10-understanding-real-mode.md)
-- [ ] **Ch 7** - Segmentation Memory Model (prose)
+- [x] **Ch 7** - Segmentation Memory Model (prose) -> [Ch11-segmentation.md](docs/chapters/Ch11-segmentation.md)
 - [ ] **Ch 8** - Refining Our Bootloader - `ORG 0`, explicit segments, `cli`/`sti`
 - [ ] **Ch 9** - Booting on Real Hardware (prose - staying on QEMU)
 - [ ] **Ch 10** - The Interrupt Vector Table (prose)
