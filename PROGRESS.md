@@ -41,7 +41,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 6** - Understanding Real Mode (prose) -> [Ch10-understanding-real-mode.md](docs/chapters/Ch10-understanding-real-mode.md)
 - [x] **Ch 7** - Segmentation Memory Model (prose) -> [Ch11-segmentation.md](docs/chapters/Ch11-segmentation.md)
 - [x] **Ch 8** - Refining Our Bootloader. `ORG 0`, explicit segments, `cli`/`sti` -> [Ch12-refining-bootloader.md](docs/chapters/Ch12-refining-bootloader.md)
-- [ ] **Ch 9** - Booting on Real Hardware (prose - staying on QEMU)
+- [x] **Ch 9** - Booting on Real Hardware (procedure only, not executed) -> [Ch13-real-hardware.md](docs/chapters/Ch13-real-hardware.md)
 - [ ] **Ch 10** - The Interrupt Vector Table (prose)
 - [ ] **Ch 11** - Implementing Our Own Interrupts in Real Mode
 - [ ] **Ch 13** - Exception Handling Using Interrupts
