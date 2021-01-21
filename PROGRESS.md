@@ -42,8 +42,9 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 7** - Segmentation Memory Model (prose) -> [Ch11-segmentation.md](docs/chapters/Ch11-segmentation.md)
 - [x] **Ch 8** - Refining Our Bootloader. `ORG 0`, explicit segments, `cli`/`sti` -> [Ch12-refining-bootloader.md](docs/chapters/Ch12-refining-bootloader.md)
 - [x] **Ch 9** - Booting on Real Hardware (procedure only, not executed) -> [Ch13-real-hardware.md](docs/chapters/Ch13-real-hardware.md)
-- [ ] **Ch 10** - The Interrupt Vector Table (prose)
-- [ ] **Ch 11** - Implementing Our Own Interrupts in Real Mode
+- [x] **Ch 10** - What Are Interrupts? (prose) -> [Ch14-what-are-interrupts.md](docs/chapters/Ch14-what-are-interrupts.md)
+- [ ] **Ch 11** - The Interrupt Vector Table Explained (prose)
+- [ ] **Ch 12** - Implementing Our Own Interrupts in Real Mode
 - [ ] **Ch 13** - Exception Handling Using Interrupts
 - [ ] **Ch 14** - Disk Access and How It Works (prose)
 - [ ] **Ch 15** - A Bootloader That Reads From Disk
