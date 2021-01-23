@@ -44,7 +44,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 9** - Booting on Real Hardware (procedure only, not executed) -> [Ch13-real-hardware.md](docs/chapters/Ch13-real-hardware.md)
 - [x] **Ch 10** - What Are Interrupts? (prose) -> [Ch14-what-are-interrupts.md](docs/chapters/Ch14-what-are-interrupts.md)
 - [x] **Ch 11** - The Interrupt Vector Table Explained (prose) -> [Ch15-ivt.md](docs/chapters/Ch15-ivt.md)
-- [ ] **Ch 12** - Implementing Our Own Interrupts in Real Mode
+- [x] **Ch 12** - Implementing Our Own Interrupts in Real Mode -> [Ch16-our-own-interrupt.md](docs/chapters/Ch16-our-own-interrupt.md)
 - [ ] **Ch 13** - Exception Handling Using Interrupts
 - [ ] **Ch 14** - Disk Access and How It Works (prose)
 - [ ] **Ch 15** - A Bootloader That Reads From Disk
