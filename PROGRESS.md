@@ -47,7 +47,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 12** - Implementing Our Own Interrupts in Real Mode -> [Ch16-our-own-interrupt.md](docs/chapters/Ch16-our-own-interrupt.md)
 - [x] **Ch 13** - Exception Handling Using Interrupts -> [Ch17-exception-handling.md](docs/chapters/Ch17-exception-handling.md)
 - [x] **Ch 14** - Disk Access and How It Works (prose) -> [Ch18-disk-access.md](docs/chapters/Ch18-disk-access.md)
-- [ ] **Ch 15** - A Bootloader That Reads From Disk
+- [x] **Ch 15** - A Bootloader That Reads From Disk -> [Ch19-bootloader-reads-disk.md](docs/chapters/Ch19-bootloader-reads-disk.md)
 - [ ] **Ch 16** - Master Boot Record (prose)
 - [ ] **Ch 17** - MBR Deeper Understanding (prose)
 - [ ] **Ch 18** - Summary of Real Mode (prose)
