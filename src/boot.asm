@@ -1,52 +1,85 @@
-; src/boot.asm - read sector 2 via BIOS INT 0x13 then print its contents.
+; src/boot.asm - switch CPU into 32-bit Protected Mode.
 ;
-; Boot sector itself (sector 1) is loaded by BIOS at 0x7C00. We then:
-;   1. Set segment registers (DS, ES = 0x07C0; SS = 0).
-;   2. Issue INT 0x13 to read sector 2 into ES:0x0200 = physical 0x7E00.
-;   3. Point SI at offset 0x0200 (DS-relative -> physical 0x7E00).
-;   4. Call print which walks the NUL-terminated string at SI.
+; Real-mode setup, then load a GDT with null/code/data entries, flip CR0.PE,
+; far-jump to 32-bit code, reload segment registers, set up the kernel stack,
+; spin.
 
-ORG 0
+ORG 0x7C00
 BITS 16
 
+CODE_SEG equ gdt_code - gdt_start
+DATA_SEG equ gdt_data - gdt_start
+
+_start:
+    jmp short start
+    nop
+
+    ; 33 bytes reserved so BIOS does not clobber our code if it tries to
+    ; treat the boot sector as a BPB. We are not filling in a real BPB
+    ; right now.
+    times 33 db 0
+
 start:
+    jmp 0:step2
+
+step2:
     cli
-    mov ax, 0x07C0
+    mov ax, 0x00
     mov ds, ax
     mov es, ax
-    mov ax, 0x0000
     mov ss, ax
+    mov sp, 0x7C00
     sti
 
-    ; Read sector 2 from the first HDD into ES:0x0200 = 0x7E00.
-    mov bx, 0x0200
-    mov ah, 0x02            ; read sectors
-    mov al, 0x01            ; 1 sector
-    mov ch, 0x00            ; cylinder 0
-    mov cl, 0x02            ; sector 2 (1-based)
-    mov dh, 0x00            ; head 0
-    mov dl, 0x80            ; drive 0x80 (first HDD)
-    int 0x13
+.load_protected:
+    cli
+    lgdt [gdt_descriptor]
+    mov eax, cr0
+    or eax, 0x1
+    mov cr0, eax
+    jmp CODE_SEG:load32
 
-    mov si, 0x0200
-    call print
+; ---- GDT --------------------------------------------------------------------
+gdt_start:
+gdt_null:
+    dd 0x0
+    dd 0x0
+
+; offset 0x08: kernel code segment, base 0, limit 0xFFFFF (with 4 KiB granularity = 4 GiB).
+gdt_code:
+    dw 0xFFFF              ; segment limit, bits 0..15
+    dw 0                   ; base bits 0..15
+    db 0                   ; base bits 16..23
+    db 0x9A                ; access byte: present, ring 0, code, executable, readable
+    db 11001111b           ; flags (4-bit) + limit bits 16..19: G=1, D=1, limit=0xF
+    db 0                   ; base bits 24..31
+
+; offset 0x10: kernel data segment, same shape as code but access = 0x92 (writable data).
+gdt_data:
+    dw 0xFFFF
+    dw 0
+    db 0
+    db 0x92
+    db 11001111b
+    db 0
+gdt_end:
+
+gdt_descriptor:
+    dw gdt_end - gdt_start - 1
+    dd gdt_start
+
+; ---- 32-bit code ------------------------------------------------------------
+[BITS 32]
+load32:
+    mov ax, DATA_SEG
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+    mov ebp, 0x00200000
+    mov esp, ebp
     jmp $
-
-print:
-    mov bx, 0
-.loop:
-    lodsb
-    cmp al, 0
-    je .done
-    call print_char
-    jmp .loop
-.done:
-    ret
-
-print_char:
-    mov ah, 0x0E
-    int 0x10
-    ret
 
 times 510-($-$$) db 0
 dw 0xAA55
