@@ -58,7 +58,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 20** - Advantages of Protected Mode (prose) -> [Ch24-advantages-of-protected-mode.md](docs/chapters/Ch24-advantages-of-protected-mode.md)
 - [x] **Ch 21** - Entering Protected Mode (prose) -> [Ch25-entering-protected-mode.md](docs/chapters/Ch25-entering-protected-mode.md)
 - [x] **Ch 22** - Switching Our Kernel to Protected Mode (GDT, CR0.PE, far jump to 32-bit) -> [Ch26-switching-to-protected-mode.md](docs/chapters/Ch26-switching-to-protected-mode.md)
-- [ ] **Ch 23** - Stepping Through the Protected Mode Transition with GDB (procedure)
+- [x] **Ch 23** - Stepping Through the Protected Mode Transition with GDB (procedure) -> [Ch27-gdb-walkthrough.md](docs/chapters/Ch27-gdb-walkthrough.md)
 
 > Remaining anchors filled in as we read: A20 line details, paging, IDT, ATA PIO, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
