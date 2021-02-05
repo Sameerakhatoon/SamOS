@@ -11,7 +11,7 @@ set -e
 cd "$(dirname "$0")"
 mkdir -p bin build
 
-nasm -f bin src/boot.asm -o bin/boot.bin
+nasm -f bin src/boot/boot.asm -o bin/boot.bin
 cp bin/boot.bin bin/os.bin
 
 echo "build: bin/os.bin ($(stat -c%s bin/os.bin) bytes)"
