@@ -61,7 +61,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 23** - Stepping Through the Protected Mode Transition with GDB (procedure) -> [Ch27-gdb-walkthrough.md](docs/chapters/Ch27-gdb-walkthrough.md)
 - [x] **Ch 24** - Understanding the Global Descriptor Table (prose) -> [Ch28-understanding-gdt.md](docs/chapters/Ch28-understanding-gdt.md)
 - [x] **Ch 25** - Restructuring Our Project (boot.asm into src/boot/) -> [Ch29-restructure-project.md](docs/chapters/Ch29-restructure-project.md)
-- [ ] **Ch 26** - Automated Building with Makefiles
+- [x] **Ch 26** - Automated Building with Makefiles -> [Ch30-makefile.md](docs/chapters/Ch30-makefile.md)
 - [ ] **Ch 27** - Enabling the A20 Line
 
 > Remaining anchors filled in as we read: paging, IDT, ATA PIO, FAT16, ELF, multitasking, syscalls, keyboard, shell.
