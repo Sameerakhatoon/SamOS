@@ -65,8 +65,11 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 27** - Enabling the A20 Line -> [Ch31-a20-line.md](docs/chapters/Ch31-a20-line.md)
 - [x] **Ch 28** - Protection Rings in 32-bit Protected Mode (prose) -> [Ch32-protection-rings.md](docs/chapters/Ch32-protection-rings.md)
 - [x] **Ch 29** - Creating a Cross Compiler so we can code in C -> [Ch33-cross-compiler.md](docs/chapters/Ch33-cross-compiler.md)
+- [x] **Ch 30** - Understanding ATA Drives (prose) -> [Ch34-understanding-ata.md](docs/chapters/Ch34-understanding-ata.md)
+- [ ] **Ch 31** - LBA vs CHS (prose)
+- [ ] **Ch 32** - Extending Our 32-Bit Kernel Across Multiple Sectors (ATA driver, kernel.asm, linker.ld, Makefile rewrite)
 
-> Remaining anchors filled in as we read: paging, IDT, ATA PIO, FAT16, ELF, multitasking, syscalls, keyboard, shell.
+> Remaining anchors filled in as we read: paging, IDT, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
 ## Part 6 - Graphics, Windowing & Drivers
 
