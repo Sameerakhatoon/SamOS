@@ -1,8 +1,5 @@
-; src/boot/boot.asm - switch CPU into 32-bit Protected Mode, then enable A20.
-;
-; Real-mode setup, then load a GDT with null/code/data entries, flip CR0.PE,
-; far-jump to 32-bit code, reload segment registers, set up the kernel stack,
-; enable the A20 line, spin.
+; src/boot/boot.asm - load the kernel (100 sectors starting at LBA 1) into
+; 0x100000 via ATA PIO, then jump to it.
 
 ORG 0x7C00
 BITS 16
@@ -14,9 +11,7 @@ _start:
     jmp short start
     nop
 
-    ; 33 bytes reserved so BIOS does not clobber our code if it tries to
-    ; treat the boot sector as a BPB. We are not filling in a real BPB
-    ; right now.
+    ; 33 bytes reserved for the BPB region.
     times 33 db 0
 
 start:
@@ -45,16 +40,16 @@ gdt_null:
     dd 0x0
     dd 0x0
 
-; offset 0x08: kernel code segment, base 0, limit 0xFFFFF (with 4 KiB granularity = 4 GiB).
+; offset 0x08: kernel code segment, base 0, limit 0xFFFFF (G=1 -> 4 GiB).
 gdt_code:
-    dw 0xFFFF              ; segment limit, bits 0..15
-    dw 0                   ; base bits 0..15
-    db 0                   ; base bits 16..23
-    db 0x9A                ; access byte: present, ring 0, code, executable, readable
-    db 11001111b           ; flags (4-bit) + limit bits 16..19: G=1, D=1, limit=0xF
-    db 0                   ; base bits 24..31
+    dw 0xFFFF
+    dw 0
+    db 0
+    db 0x9A
+    db 11001111b
+    db 0
 
-; offset 0x10: kernel data segment, same shape as code but access = 0x92 (writable data).
+; offset 0x10: kernel data segment.
 gdt_data:
     dw 0xFFFF
     dw 0
@@ -71,21 +66,78 @@ gdt_descriptor:
 ; ---- 32-bit code ------------------------------------------------------------
 [BITS 32]
 load32:
-    mov ax, DATA_SEG
-    mov ds, ax
-    mov es, ax
-    mov fs, ax
-    mov gs, ax
-    mov ss, ax
-    mov ebp, 0x00200000
-    mov esp, ebp
-
-    ; Enable the A20 line so addresses above 1 MiB no longer wrap.
+    ; Enable the A20 line.
     in al, 0x92
     or al, 2
     out 0x92, al
 
-    jmp $
+    ; Load kernel: 100 sectors starting at LBA 1 (sector 0 is this boot sector)
+    ; into 0x100000.
+    mov eax, 1                  ; starting LBA
+    mov ecx, 100                ; sectors to read
+    mov edi, 0x0100000          ; destination buffer
+    call ata_lba_read
+
+    ; Jump to the kernel. CODE_SEG ensures CS reloads with the kernel code
+    ; selector before we run any of the kernel's instructions.
+    jmp CODE_SEG:0x0100000
+
+; ---- ata_lba_read -----------------------------------------------------------
+; in:  eax = LBA, ecx = sector count, edi = dest buffer
+; clobbers: eax, ebx, ecx, edx
+ata_lba_read:
+    mov ebx, eax                ; backup the LBA
+
+    ; Send the top 8 bits of the LBA plus drive-select bits to port 0x1F6.
+    shr eax, 24
+    or eax, 0xE0                ; 0xE0 = master + LBA mode
+    mov dx, 0x1F6
+    out dx, al
+
+    ; Sector count -> 0x1F2.
+    mov eax, ecx
+    mov dx, 0x1F2
+    out dx, al
+
+    ; LBA byte 0 -> 0x1F3.
+    mov eax, ebx
+    mov dx, 0x1F3
+    out dx, al
+
+    ; LBA byte 1 -> 0x1F4.
+    mov dx, 0x1F4
+    mov eax, ebx
+    shr eax, 8
+    out dx, al
+
+    ; LBA byte 2 -> 0x1F5.
+    mov dx, 0x1F5
+    mov eax, ebx
+    shr eax, 16
+    out dx, al
+
+    ; READ SECTORS command (0x20) -> 0x1F7.
+    mov dx, 0x1F7
+    mov al, 0x20
+    out dx, al
+
+.next_sector:
+    push ecx
+
+.try_again:
+    mov dx, 0x1F7
+    in al, dx
+    test al, 8                  ; DRQ bit, set when data is ready
+    jz .try_again
+
+    ; Pull 256 16-bit words (= 512 bytes = one sector) from port 0x1F0 to [es:di].
+    mov ecx, 256
+    mov dx, 0x1F0
+    rep insw
+
+    pop ecx
+    loop .next_sector
+    ret
 
 times 510-($-$$) db 0
 dw 0xAA55

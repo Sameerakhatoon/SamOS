@@ -67,7 +67,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 29** - Creating a Cross Compiler so we can code in C -> [Ch33-cross-compiler.md](docs/chapters/Ch33-cross-compiler.md)
 - [x] **Ch 30** - Understanding ATA Drives (prose) -> [Ch34-understanding-ata.md](docs/chapters/Ch34-understanding-ata.md)
 - [x] **Ch 31** - LBA vs CHS (prose) -> [Ch35-lba-vs-chs.md](docs/chapters/Ch35-lba-vs-chs.md)
-- [ ] **Ch 32** - Extending Our 32-Bit Kernel Across Multiple Sectors (ATA driver, kernel.asm, linker.ld, Makefile rewrite)
+- [x] **Ch 32** - Extending Our 32-Bit Kernel Across Multiple Sectors (ATA PIO, kernel.asm, linker.ld, Makefile rewrite) -> [Ch36-extending-kernel-multiple-sectors.md](docs/chapters/Ch36-extending-kernel-multiple-sectors.md)
 
 > Remaining anchors filled in as we read: paging, IDT, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
