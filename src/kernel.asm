@@ -1,7 +1,7 @@
-; src/kernel.asm - first sectors of the kernel image, loaded at 0x100000.
+; src/kernel.asm - loaded at 0x100000 by the boot sector.
 ;
-; Just reloads segment selectors and spins for now. Later chapters add
-; a C entry point and call it from here.
+; Reloads segment selectors, sets up the kernel stack, re-enables the A20
+; line for completeness, then spins. Padded to a 512-byte sector boundary.
 
 [BITS 32]
 global _start
@@ -18,4 +18,12 @@ _start:
     mov ss, ax
     mov ebp, 0x00200000
     mov esp, ebp
+
+    ; Enable the A20 line.
+    in al, 0x92
+    or al, 2
+    out 0x92, al
+
     jmp $
+
+times 512-($-$$) db 0
