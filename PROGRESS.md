@@ -71,8 +71,9 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 33** - Debugging Your 32-Bit Kernel (procedure) -> [Ch37-debugging-32bit-kernel.md](docs/chapters/Ch37-debugging-32bit-kernel.md)
 - [x] **Ch 34** - Improving Cleaning in the Makefile -> [Ch38-improving-cleaning.md](docs/chapters/Ch38-improving-cleaning.md)
 - [x] **Ch 35** - Addressing Alignment Issues (linker.ld page-align sections) -> [Ch39-alignment.md](docs/chapters/Ch39-alignment.md)
+- [x] **Ch 36** - Transitioning to C (kernel.c + kernel.h, Makefile C rule, kernel.asm calls kernel_main) -> [Ch40-transitioning-to-c.md](docs/chapters/Ch40-transitioning-to-c.md)
 
-> Remaining anchors filled in as we read: paging, IDT, FAT16, ELF, multitasking, syscalls, keyboard, shell.
+> Remaining anchors filled in as we read: VGA text driver, paging, IDT, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
 ## Part 6 - Graphics, Windowing & Drivers
 
