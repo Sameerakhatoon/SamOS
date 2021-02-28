@@ -75,7 +75,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 37** - Understanding Text Mode in Protected Mode (prose) -> [Ch41-text-mode-protected.md](docs/chapters/Ch41-text-mode-protected.md)
 - [x] **Ch 38** - Implementing Text Mode (VGA text driver, prints "Hello world!") -> [Ch42-implementing-text-mode.md](docs/chapters/Ch42-implementing-text-mode.md)
 - [x] **Ch 39** - Interrupt Descriptor Table (IDT) (prose) -> [Ch43-idt-explained.md](docs/chapters/Ch43-idt-explained.md)
-- [ ] **Ch 40** - Implementing the IDT (config.h, idt/, memory/, kernel hooks)
+- [x] **Ch 40** - Implementing the IDT (config.h, idt/, memory/, kernel hooks) -> [Ch44-implementing-idt.md](docs/chapters/Ch44-implementing-idt.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
