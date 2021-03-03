@@ -77,7 +77,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 39** - Interrupt Descriptor Table (IDT) (prose) -> [Ch43-idt-explained.md](docs/chapters/Ch43-idt-explained.md)
 - [x] **Ch 40** - Implementing the IDT (config.h, idt/, memory/, kernel hooks) -> [Ch44-implementing-idt.md](docs/chapters/Ch44-implementing-idt.md)
 - [x] **Ch 41** - Understanding IN and OUT in Protected Mode (prose) -> [Ch45-in-out-protected-mode.md](docs/chapters/Ch45-in-out-protected-mode.md)
-- [ ] **Ch 42** - Implementing IN and OUT (src/io/io.asm)
+- [x] **Ch 42** - Implementing IN and OUT (src/io/io.asm) -> [Ch46-implementing-in-out.md](docs/chapters/Ch46-implementing-in-out.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
