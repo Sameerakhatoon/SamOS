@@ -62,6 +62,4 @@ void kernel_main(){
     print("Hello world!\ntest");
 
     idt_init();
-
-    outb(0x60, 0xFF);
 }

@@ -80,7 +80,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 42** - Implementing IN and OUT (src/io/io.asm) -> [Ch46-implementing-in-out.md](docs/chapters/Ch46-implementing-in-out.md)
 - [x] **Ch 43** - Programmable Interrupt Controller (PIC) (prose) -> [Ch47-pic.md](docs/chapters/Ch47-pic.md)
 - [x] **Ch 44** - Mapping the Programmable Interrupt Controller (prose) -> [Ch48-mapping-pic.md](docs/chapters/Ch48-mapping-pic.md)
-- [ ] **Ch 45** - Implementing our PIC code (remap, IRQ1 keyboard handler)
+- [x] **Ch 45** - Implementing our PIC code (remap, IRQ1 keyboard handler) -> [Ch49-implementing-pic.md](docs/chapters/Ch49-implementing-pic.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
