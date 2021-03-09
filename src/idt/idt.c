@@ -17,6 +17,10 @@ void idt_zero(){
 
 void int21h_handler(){
     print("Keyboard pressed!\n");
+    // G01: drain the keyboard controller's data port. Without this read,
+    // port 0x60 holds the previous scancode and the controller never raises
+    // IRQ1 again, so only the first key produces output.
+    (void)insb(0x60);
     // Acknowledge the interrupt to the master PIC.
     outb(0x20, 0x20);
 }

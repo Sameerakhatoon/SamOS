@@ -94,6 +94,6 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 
 Each entry: short title + chapter where surfaced + link to the gotcha note.
 
-> None yet - first gotcha gets logged as it surfaces.
+- [G01](docs/gotchas/G01-keyboard-drain.md) - keyboard handler must drain port 0x60 (surfaced in Ch 45)
 
 ---
