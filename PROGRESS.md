@@ -82,7 +82,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 44** - Mapping the Programmable Interrupt Controller (prose) -> [Ch48-mapping-pic.md](docs/chapters/Ch48-mapping-pic.md)
 - [x] **Ch 45** - Implementing our PIC code (remap, IRQ1 keyboard handler) -> [Ch49-implementing-pic.md](docs/chapters/Ch49-implementing-pic.md)
 - [x] **Ch 46** - Memory Allocation in Kernel Development (prose) -> [Ch50-memory-allocation.md](docs/chapters/Ch50-memory-allocation.md)
-- [ ] **Ch 47** - Our Kernel Heap Design (prose)
+- [x] **Ch 47** - Our Kernel Heap Design (prose) -> [Ch51-heap-design.md](docs/chapters/Ch51-heap-design.md)
 - [ ] **Ch 48+** - Implement the kernel heap (heap.h, heap.c, kheap.h, kheap.c, kmalloc/kfree)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
