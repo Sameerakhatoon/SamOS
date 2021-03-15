@@ -1,6 +1,7 @@
 #include "kernel.h"
 #include "idt/idt.h"
 #include "io/io.h"
+#include "memory/heap/kheap.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -57,9 +58,32 @@ void print(const char* str){
     }
 }
 
+// Helper: emit a 32-bit value as 8 hex digits.
+static void print_hex32(unsigned int v){
+    static const char hex[] = "0123456789ABCDEF";
+    char s[9];
+    for(int i = 0; i < 8; i++){
+        s[7 - i] = hex[v & 0xF];
+        v >>= 4;
+    }
+    s[8] = 0;
+    print(s);
+}
+
 void kernel_main(){
     terminal_initialize();
     print("Hello world!\ntest");
 
+    kheap_init();
     idt_init();
+
+    // kmalloc smoke probe: two distinct allocations and one free.
+    void* p1 = kmalloc(100);
+    void* p2 = kmalloc(8000);
+    print("\nkm1=");  print_hex32((unsigned int)p1);
+    print(" km2=");   print_hex32((unsigned int)p2);
+    kfree(p1);
+    void* p3 = kmalloc(100);
+    print(" km3=");   print_hex32((unsigned int)p3);
+    print("\n");
 }
