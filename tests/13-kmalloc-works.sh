@@ -20,9 +20,9 @@ trap 'rm -f "$dump" "$cmd"' EXIT
 
 printf 'pmemsave 0xb8000 4096 "%s"\nquit\n' "$dump" > "$cmd"
 
-( sleep 2; cat "$cmd" ) | timeout 8 qemu-system-x86_64 \
+( sleep 7; cat "$cmd" ) | timeout 25 qemu-system-x86_64 \
         -hda bin/os.bin \
-        -m 16 \
+        -m 256 \
         -accel tcg \
         -display none \
         -vga std \
@@ -36,9 +36,12 @@ chars=$(od -An -v -tx1 -w1 "$dump" \
             | tr '\0' ' ')
 
 ok=1
-echo "$chars" | grep -q 'km1=01000000' || { echo "FAIL: km1 != 0x01000000"; ok=0; }
-echo "$chars" | grep -q 'km2=01001000' || { echo "FAIL: km2 != 0x01001000"; ok=0; }
-echo "$chars" | grep -q 'km3=01000000' || { echo "FAIL: km3 != 0x01000000 (free+realloc reuse)"; ok=0; }
+# After Ch 51 paging setup the kernel heap has used 1025 blocks for the
+# page directory (1) + page tables (1024) before kernel_main's kmalloc
+# smoke probe runs. So km1 lands at 0x01000000 + 1025 * 0x1000 = 0x01402000.
+echo "$chars" | grep -q 'km1=01402000' || { echo "FAIL: km1 != 0x01402000"; ok=0; }
+echo "$chars" | grep -q 'km2=01403000' || { echo "FAIL: km2 != 0x01403000"; ok=0; }
+echo "$chars" | grep -q 'km3=01402000' || { echo "FAIL: km3 != 0x01402000 (free+realloc reuse)"; ok=0; }
 
 if [ $ok -ne 1 ]; then
     echo "      first 600 chars: $(echo "$chars" | head -c 600)"

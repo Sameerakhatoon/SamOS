@@ -14,14 +14,14 @@ dump=$(mktemp)
 trap 'rm -f "$dump"' EXIT
 
 (
-    sleep 2.5
+    sleep 7
     printf 'sendkey a\n'; sleep 0.3
     printf 'sendkey b\n'; sleep 0.3
     printf 'sendkey c\n'; sleep 0.3
     printf 'pmemsave 0xb8000 4096 "%s"\nquit\n' "$dump"
-) | timeout 12 qemu-system-x86_64 \
+) | timeout 25 qemu-system-x86_64 \
         -hda bin/os.bin \
-        -m 16 \
+        -m 256 \
         -accel tcg \
         -display none \
         -vga std \

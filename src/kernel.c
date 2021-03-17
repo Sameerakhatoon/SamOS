@@ -2,8 +2,11 @@
 #include "idt/idt.h"
 #include "io/io.h"
 #include "memory/heap/kheap.h"
+#include "memory/paging/paging.h"
 #include <stddef.h>
 #include <stdint.h>
+
+static struct paging_4gb_chunk* kernel_chunk = 0;
 
 uint16_t* video_mem = 0;
 uint16_t  terminal_row = 0;
@@ -76,6 +79,13 @@ void kernel_main(){
 
     kheap_init();
     idt_init();
+
+    // Set up identity-mapped paging for the entire 4 GiB virtual space.
+    kernel_chunk = paging_new_4gb(
+        PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
+    paging_switch(paging_4gb_chunk_get_directory(kernel_chunk));
+    enable_paging();
+
     enable_interrupts();
 
     // kmalloc smoke probe: two distinct allocations and one free.
