@@ -85,6 +85,8 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 47** - Our Kernel Heap Design (prose) -> [Ch51-heap-design.md](docs/chapters/Ch51-heap-design.md)
 - [x] **Ch 48** - Implementing our Heap (heap.h, heap.c, kheap.h, kheap.c, kmalloc/kfree) -> [Ch52-implementing-heap.md](docs/chapters/Ch52-implementing-heap.md)
 - [x] **Ch 49** - Enable/disable interrupts from C -> [Ch53-enable-disable-interrupts.md](docs/chapters/Ch53-enable-disable-interrupts.md)
+- [x] **Ch 50** - Understanding paging in 32-bit protected mode (prose) -> [Ch54-paging.md](docs/chapters/Ch54-paging.md)
+- [ ] **Ch 51+** - Implement paging (paging.h, paging.c, paging.asm, page directory + tables)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
