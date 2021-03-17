@@ -84,6 +84,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 46** - Memory Allocation in Kernel Development (prose) -> [Ch50-memory-allocation.md](docs/chapters/Ch50-memory-allocation.md)
 - [x] **Ch 47** - Our Kernel Heap Design (prose) -> [Ch51-heap-design.md](docs/chapters/Ch51-heap-design.md)
 - [x] **Ch 48** - Implementing our Heap (heap.h, heap.c, kheap.h, kheap.c, kmalloc/kfree) -> [Ch52-implementing-heap.md](docs/chapters/Ch52-implementing-heap.md)
+- [x] **Ch 49** - Enable/disable interrupts from C -> [Ch53-enable-disable-interrupts.md](docs/chapters/Ch53-enable-disable-interrupts.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
