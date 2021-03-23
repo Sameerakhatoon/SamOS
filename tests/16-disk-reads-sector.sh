@@ -1,11 +1,11 @@
 #!/bin/bash
-# tests/15-paging-remap.sh
+# tests/16-disk-reads-sector.sh
 #
-# Ch 52 - paging_set remaps virtual 0x1000 to a heap-allocated page.
-# kernel_main writes 'A','B' through the literal address 0x1000, then
-# prints the same bytes through the original heap pointer. Both prints
-# should yield "AB", so the VGA buffer should contain "remap:ABAB"
-# somewhere.
+# Ch 54 - disk_read_sector reads one 512-byte sector from LBA 0 (the
+# boot sector) into a stack buffer. kernel_main prints buf[510..511]
+# as a 32-bit hex (top 16 bits 0, bottom 16 bits = the two boot-signature
+# bytes). For a valid PC boot sector buf[510]=0x55, buf[511]=0xAA, so
+# we expect "bootsig=000055AA" on screen.
 
 set -e
 cd "$(dirname "$0")/.."
@@ -33,10 +33,10 @@ chars=$(od -An -v -tx1 -w1 "$dump" \
             | xxd -r -p \
             | tr '\0' ' ')
 
-if echo "$chars" | grep -q 'remap:ABAB'; then
+if echo "$chars" | grep -q 'bootsig=000055AA'; then
     exit 0
 fi
 
-echo "FAIL: VGA buffer did not contain 'remap:ABAB'"
+echo "FAIL: VGA buffer did not contain 'bootsig=000055AA'"
 echo "      first 600 chars: $(echo "$chars" | head -c 600)"
 exit 1
