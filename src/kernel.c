@@ -79,6 +79,7 @@ void kernel_main(){
     print("Hello world!\ntest");
 
     kheap_init();
+    disk_search_and_init();
     idt_init();
 
     // Set up identity-mapped paging for the entire 4 GiB virtual space.
@@ -87,10 +88,10 @@ void kernel_main(){
     paging_switch(paging_4gb_chunk_get_directory(kernel_chunk));
     enable_paging();
 
-    // Ch 54 smoke probe: read sector 0 (the boot sector) off the disk
-    // and print the last two bytes. They must be 55 AA (boot signature).
+    // Ch 55 smoke probe: read sector 0 via the new disk_read_block
+    // abstraction. The last two bytes must be 55 AA (boot signature).
     char buf[512];
-    disk_read_sector(0, 1, buf);
+    disk_read_block(disk_get(0), 0, 1, buf);
     print("\nbootsig=");
     print_hex32(((unsigned int)(unsigned char)buf[510] << 8) | (unsigned char)buf[511]);
 
