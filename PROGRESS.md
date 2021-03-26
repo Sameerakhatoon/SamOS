@@ -91,6 +91,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 53** - PCI IDE controller (prose: master/slave, LBA-28, port map at 0x1F0..0x1F7) -> [Ch57-pci-ide-controller.md](docs/chapters/Ch57-pci-ide-controller.md)
 - [x] **Ch 54** - Implement disk driver in C (disk.h, disk.c, disk_read_sector via 0x1F0..0x1F7) -> [Ch58-implementing-disk-driver.md](docs/chapters/Ch58-implementing-disk-driver.md) - test `tests/16-disk-reads-sector.sh`
 - [x] **Ch 55** - Improve disk driver (struct disk, disk_get, disk_read_block abstraction) -> [Ch59-improving-disk-driver.md](docs/chapters/Ch59-improving-disk-driver.md)
+- [x] **Ch 56** - Understanding file systems (prose) -> [Ch60-understanding-filesystems.md](docs/chapters/Ch60-understanding-filesystems.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
