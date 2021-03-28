@@ -93,6 +93,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 55** - Improve disk driver (struct disk, disk_get, disk_read_block abstraction) -> [Ch59-improving-disk-driver.md](docs/chapters/Ch59-improving-disk-driver.md)
 - [x] **Ch 56** - Understanding file systems (prose) -> [Ch60-understanding-filesystems.md](docs/chapters/Ch60-understanding-filesystems.md)
 - [x] **Ch 57** - Understanding FAT16 (prose: BPB layout, FAT chain, root dir, data clusters) -> [Ch61-understanding-fat16.md](docs/chapters/Ch61-understanding-fat16.md)
+- [x] **Ch 58** - Create src/string/string.{h,c} (strlen, strnlen, isdigit, tonumericdigit) -> [Ch62-string-utils.md](docs/chapters/Ch62-string-utils.md) - test `tests/17-string-utils.sh`
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 

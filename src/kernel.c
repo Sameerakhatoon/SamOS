@@ -4,6 +4,7 @@
 #include "memory/heap/kheap.h"
 #include "memory/paging/paging.h"
 #include "disk/disk.h"
+#include "string/string.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -47,16 +48,8 @@ void terminal_initialize(){
     }
 }
 
-size_t strlen(const char* str){
-    size_t len = 0;
-    while(str[len]){
-        len++;
-    }
-    return len;
-}
-
 void print(const char* str){
-    size_t len = strlen(str);
+    int len = strlen(str);
     for(int i = 0; i < len; i++){
         terminal_writechar(str[i], 15);
     }
@@ -94,6 +87,10 @@ void kernel_main(){
     disk_read_block(disk_get(0), 0, 1, buf);
     print("\nbootsig=");
     print_hex32(((unsigned int)(unsigned char)buf[510] << 8) | (unsigned char)buf[511]);
+
+    // Ch 58 smoke probe: strnlen of "hello" capped at 100 must equal 5.
+    print(" slen=");
+    print_hex32(strnlen("hello", 100));
 
     enable_interrupts();
 
