@@ -5,6 +5,7 @@
 #include "memory/paging/paging.h"
 #include "disk/disk.h"
 #include "string/string.h"
+#include "fs/pparser.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -93,6 +94,20 @@ void kernel_main(){
     print_hex32(strnlen("hello", 100));
 
     enable_interrupts();
+
+    // Ch 59 smoke probe: parse "0:/bin/shell.exe" and print the drive
+    // number plus the first two parts of the linked list.
+    struct path_root* root_path = pathparser_parse("0:/bin/shell.exe", NULL);
+    print("\npp_drv=");
+    print_hex32(root_path ? (unsigned int)root_path->drive_no : 0xDEAD);
+    if(root_path && root_path->first){
+        print(" pp_p1=");
+        print(root_path->first->part);
+        if(root_path->first->next){
+            print(" pp_p2=");
+            print(root_path->first->next->part);
+        }
+    }
 
     // kmalloc smoke probe: two distinct allocations and one free.
     void* p1 = kmalloc(100);
