@@ -96,6 +96,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 58** - Create src/string/string.{h,c} (strlen, strnlen, isdigit, tonumericdigit) -> [Ch62-string-utils.md](docs/chapters/Ch62-string-utils.md) - test `tests/17-string-utils.sh`
 - [x] **Ch 59** - Path parser (SAMOS_MAX_PATH, EBADPATH, memcmp, pparser.{h,c} parses "0:/bin/shell.exe") -> [Ch63-path-parser.md](docs/chapters/Ch63-path-parser.md) - test `tests/18-path-parser.sh`
 - [x] **Ch 60** - Streamed disk reading (streamer.h, streamer.c, byte-position seek/read across sectors) -> [Ch64-streamed-disk-reading.md](docs/chapters/Ch64-streamed-disk-reading.md) - test `tests/19-disk-streamer.sh`
+- [x] **Ch 61** - FAT16 BPB in boot sector + 16 MiB volume padding (hello.txt parked at repo root) -> [Ch65-fat16-bpb.md](docs/chapters/Ch65-fat16-bpb.md) - test `tests/20-fat16-bpb.sh`
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 

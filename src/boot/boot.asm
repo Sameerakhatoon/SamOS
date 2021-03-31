@@ -11,8 +11,28 @@ _start:
     jmp short start
     nop
 
-    ; 33 bytes reserved for the BPB region.
-    times 33 db 0
+; FAT16 BIOS Parameter Block (offset 3..35, 33 bytes)
+OEMIdentifier       db 'SAMOS   '       ; 8 bytes
+BytesPerSector      dw 0x200
+SectorsPerCluster   db 0x80
+ReservedSectors     dw 200
+FATCopies           db 0x02
+RootDirEntries      dw 0x40
+NumSectors          dw 0x00
+MediaType           db 0xF8
+SectorsPerFat       dw 0x100
+SectorsPerTrack     dw 0x20
+NumberOfHeads       dw 0x40
+HiddenSectors       dd 0x00
+SectorsBig          dd 0x773594
+
+; Extended BPB (DOS 4.0, offset 36..61, 26 bytes)
+DriveNumber         db 0x80
+WinNTBit            db 0x00
+Signature           db 0x29
+VolumeID            dd 0xD105
+VolumeIDString      db 'SAMOS BOO  '    ; 11 bytes
+SystemIDString      db 'FAT16   '       ; 8 bytes
 
 start:
     jmp 0:step2
