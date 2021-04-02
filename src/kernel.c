@@ -7,6 +7,7 @@
 #include "string/string.h"
 #include "fs/pparser.h"
 #include "disk/streamer.h"
+#include "fs/file.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -74,6 +75,7 @@ void kernel_main(){
     print("Hello world!\ntest");
 
     kheap_init();
+    fs_init();
     disk_search_and_init();
     idt_init();
 
@@ -105,6 +107,11 @@ void kernel_main(){
     diskstreamer_close(stream);
     print("\nss=");
     print_hex32(((unsigned int)ss[0] << 8) | (unsigned int)ss[1]);
+
+    // Ch 63 smoke probe: fopen is a stub returning -EIO. Print the
+    // signed return as unsigned hex; expect FFFFFFFF.
+    print(" fopen=");
+    print_hex32((unsigned int)fopen("0:/anything", "r"));
 
     // kmalloc smoke probe: two distinct allocations and one free.
     void* p1 = kmalloc(100);
