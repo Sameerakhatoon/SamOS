@@ -99,6 +99,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 61** - FAT16 BPB in boot sector + 16 MiB volume padding (hello.txt parked at repo root) -> [Ch65-fat16-bpb.md](docs/chapters/Ch65-fat16-bpb.md) - test `tests/20-fat16-bpb.sh`
 - [x] **Ch 62** - Understanding virtual filesystems (prose) -> [Ch66-understanding-vfs.md](docs/chapters/Ch66-understanding-vfs.md)
 - [x] **Ch 63** - VFS scaffolding (file.h/file.c, fs_init, fs_resolve, disk.filesystem; fopen stub) -> [Ch67-vfs-scaffolding.md](docs/chapters/Ch67-vfs-scaffolding.md) - test `tests/21-vfs-fopen-stub.sh`
+- [x] **Ch 64** - strcpy (string.h/string.c) -> [Ch68-strcpy.md](docs/chapters/Ch68-strcpy.md) - test `tests/22-strcpy.sh`
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
