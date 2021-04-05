@@ -4,6 +4,7 @@
 #include "memory/heap/kheap.h"
 #include "status.h"
 #include "kernel.h"
+#include "fat/fat16.h"
 
 static struct filesystem**  fs_get_free_filesystem();
 static void                 fs_static_load();
@@ -35,7 +36,7 @@ void fs_insert_filesystem(struct filesystem* filesystem){
 }
 
 static void fs_static_load(){
-    // Filesystem drivers register themselves here once they exist.
+    fs_insert_filesystem(fat16_init());
 }
 
 static void fs_load(){
