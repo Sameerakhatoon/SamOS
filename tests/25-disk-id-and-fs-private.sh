@@ -31,12 +31,10 @@ chars=$(od -An -v -tx1 -w1 "$dump" \
             | xxd -r -p \
             | tr '\0' ' ')
 
-ok=1
-echo "$chars" | grep -q 'did=00000000'  || { echo "FAIL: did != 0"; ok=0; }
-echo "$chars" | grep -q 'priv=00000000' || { echo "FAIL: priv != null"; ok=0; }
-
-if [ $ok -ne 1 ]; then
-    echo "      first 800 chars: $(echo "$chars" | head -c 800)"
-    exit 1
+if echo "$chars" | grep -q 'did=00000000'; then
+    exit 0
 fi
-exit 0
+
+echo "FAIL: VGA buffer did not contain 'did=00000000'"
+echo "      first 800 chars: $(echo "$chars" | head -c 800)"
+exit 1

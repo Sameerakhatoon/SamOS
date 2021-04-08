@@ -133,12 +133,18 @@ void kernel_main(){
     print_hex32(fat16_check_sizes());
 
     // Ch 67 smoke probe: disk.id was initialised to 0 in
-    // disk_search_and_init; disk.fs_private is still null because no
-    // driver has populated it yet. Print id then fs_private.
+    // disk_search_and_init.
     print(" did=");
     print_hex32((unsigned int)disk_get(0)->id);
-    print(" priv=");
-    print_hex32((unsigned int)(uintptr_t)disk_get(0)->fs_private);
+
+    // Ch 68 smoke probe: fat16_resolve allocated a fat_private blob and
+    // stored it; disk.fs_private should now be a heap pointer (non-zero,
+    // upper byte 0x01). The FAT16 root directory should have zero entries
+    // because we haven't mcopy'd any files into the volume yet.
+    print(" pnz=");
+    print_hex32(disk_get(0)->fs_private != 0 ? 1 : 0);
+    print(" rdt=");
+    print_hex32((unsigned int)fat16_root_dir_total(disk_get(0)));
 
     // kmalloc smoke probe: two distinct allocations and one free.
     void* p1 = kmalloc(100);
