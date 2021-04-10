@@ -38,12 +38,22 @@ chars=$(od -An -v -tx1 -w1 "$dump" \
 ok=1
 # After Ch 51 paging: 1025 blocks (1 directory + 1024 page tables).
 # Ch 68 fat16_resolve adds: fat_private (1) + 3 streams (3) + root-dir
-# items buffer (1) + temp resolver stream (1, then closed).
-# Block 1031 ends up free again (the closed temp stream) so km1's
-# first-fit search lands there: 0x01000000 + 1031 * 0x1000 = 0x01407000.
-echo "$chars" | grep -q 'km1=01407000' || { echo "FAIL: km1 != 0x01407000"; ok=0; }
-echo "$chars" | grep -q 'km2=01408000' || { echo "FAIL: km2 != 0x01408000"; ok=0; }
-echo "$chars" | grep -q 'km3=01407000' || { echo "FAIL: km3 != 0x01407000 (free+realloc reuse)"; ok=0; }
+# items buffer (1) + temp resolver stream (1, then closed). Slot 1031
+# becomes free.
+# Ch 70 then runs three fopen probes before kmalloc smoke:
+#   #1 "0:/anything", "r":  path_root + segment string + path_part +
+#                           trailing-string (freed) + descriptor.
+#                           Slots 1031..1033 + 1034 (trailing freed and
+#                           reused for descriptor).
+#   #2 "notapath", "r":     rejected by path parser before any alloc.
+#   #3 "0:/anything", "z":  path_root + segment string + path_part +
+#                           trailing-string (freed). Slots 1035..1037
+#                           taken, slot 1038 freed.
+# km1's first-fit walk picks slot 1038:
+#   0x01000000 + 1038 * 0x1000 = 0x0140E000
+echo "$chars" | grep -q 'km1=0140E000' || { echo "FAIL: km1 != 0x0140E000"; ok=0; }
+echo "$chars" | grep -q 'km2=0140F000' || { echo "FAIL: km2 != 0x0140F000"; ok=0; }
+echo "$chars" | grep -q 'km3=0140E000' || { echo "FAIL: km3 != 0x0140E000 (free+realloc reuse)"; ok=0; }
 
 if [ $ok -ne 1 ]; then
     echo "      first 600 chars: $(echo "$chars" | head -c 600)"

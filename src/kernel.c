@@ -127,10 +127,17 @@ void kernel_main(){
     print("\nss=");
     print_hex32(((unsigned int)ss[0] << 8) | (unsigned int)ss[1]);
 
-    // Ch 63 smoke probe: fopen is a stub returning -EIO. Print the
-    // signed return as unsigned hex; expect FFFFFFFF.
-    print(" fopen=");
+    // Ch 70 smoke probes: fopen now dispatches through the VFS.
+    //   fop_ok  = fopen of a well-formed path returns descriptor index 1
+    //             (fat16_open is still a stub returning null).
+    //   fop_bad = fopen with a malformed path returns 0.
+    //   fop_mod = fopen with an unknown mode returns 0.
+    print(" fop_ok=");
     print_hex32((unsigned int)fopen("0:/anything", "r"));
+    print(" fop_bad=");
+    print_hex32((unsigned int)fopen("notapath", "r"));
+    print(" fop_mod=");
+    print_hex32((unsigned int)fopen("0:/anything", "z"));
 
     // Ch 65 smoke probe: FAT16 driver registered itself with the VFS,
     // and disk.filesystem was filled in via fs_resolve. Print the name.
