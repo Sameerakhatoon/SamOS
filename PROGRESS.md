@@ -106,6 +106,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 68** - FAT16 resolver + root directory walk + EFSNOTUS (reads BPB, validates 0x29 sig, allocates fat_private, walks root dir) -> [Ch72-fat16-resolver.md](docs/chapters/Ch72-fat16-resolver.md) - test `tests/26-fat16-resolver.sh`
 - [x] **Ch 69** - String comparison helpers (tolower, strncmp, istrncmp, strnlen_terminator) -> [Ch73-string-cmp.md](docs/chapters/Ch73-string-cmp.md) - test `tests/27-string-cmp.sh`
 - [x] **Ch 70** - VFS fopen real impl (ERROR/ERROR_I/ISERR macros, file_get_mode_by_string, path-parse + disk lookup + dispatch via disk-&gt;filesystem-&gt;open) -> [Ch74-vfs-fopen.md](docs/chapters/Ch74-vfs-fopen.md) - test `tests/28-vfs-fopen-dispatch.sh`
+- [x] **Ch 71** - memcpy (memory.h/memory.c) -> [Ch75-memcpy.md](docs/chapters/Ch75-memcpy.md) - test `tests/29-memcpy.sh`
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
