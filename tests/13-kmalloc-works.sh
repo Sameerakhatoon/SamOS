@@ -20,7 +20,7 @@ trap 'rm -f "$dump" "$cmd"' EXIT
 
 printf 'pmemsave 0xb8000 4096 "%s"\nquit\n' "$dump" > "$cmd"
 
-( sleep 7; cat "$cmd" ) | timeout 25 qemu-system-x86_64 \
+( sleep 10; cat "$cmd" ) | timeout 25 qemu-system-x86_64 \
         -hda bin/os.bin \
         -m 256 \
         -accel tcg \
@@ -37,20 +37,14 @@ chars=$(od -An -v -tx1 -w1 "$dump" \
 
 ok=1
 # After Ch 51 paging: 1025 blocks (1 directory + 1024 page tables).
-# Ch 68 fat16_resolve adds: fat_private (1) + 3 streams (3) + root-dir
-# items buffer (1) + temp resolver stream (1, then closed). Slot 1031
-# becomes free.
-# Ch 72 runs one fopen("0:/hello.txt", "r") probe before kmalloc smoke:
-#   - pathparser_parse: path_root (1031), segment string (1032),
-#                       path_part struct (1033), trailing string (1034 freed).
-#   - fat16_open: kzalloc fat_file_descriptor -> 1034 (reuses freed).
-#     Then directory miss returns ERROR(-EIO) without freeing the
-#     descriptor (book-bug leak), so the descriptor stays.
-# Slot 1035 is the first free slot when the kmalloc smoke runs:
-#   0x01000000 + 1035 * 0x1000 = 0x0140B000
-echo "$chars" | grep -q 'km1=0140B000' || { echo "FAIL: km1 != 0x0140B000"; ok=0; }
-echo "$chars" | grep -q 'km2=0140C000' || { echo "FAIL: km2 != 0x0140C000"; ok=0; }
-echo "$chars" | grep -q 'km3=0140B000' || { echo "FAIL: km3 != 0x0140B000 (free+realloc reuse)"; ok=0; }
+# Ch 75 now mformats the volume so the root directory has 512 entries
+# (16384 bytes -> 4 heap blocks instead of 1) and fopen actually
+# succeeds, allocating more. By the time kmalloc smoke runs, slot 1045
+# is the first free slot:
+#   0x01000000 + 1045 * 0x1000 = 0x01415000
+echo "$chars" | grep -q 'km1=01415000' || { echo "FAIL: km1 != 0x01415000"; ok=0; }
+echo "$chars" | grep -q 'km2=01416000' || { echo "FAIL: km2 != 0x01416000"; ok=0; }
+echo "$chars" | grep -q 'km3=01415000' || { echo "FAIL: km3 != 0x01415000 (free+realloc reuse)"; ok=0; }
 
 if [ $ok -ne 1 ]; then
     echo "      first 600 chars: $(echo "$chars" | head -c 600)"

@@ -14,7 +14,7 @@ dump=$(mktemp)
 trap 'rm -f "$dump"' EXIT
 
 (
-    sleep 7
+    sleep 10
     printf 'sendkey a\n'; sleep 0.3
     printf 'sendkey b\n'; sleep 0.3
     printf 'sendkey c\n'; sleep 0.3

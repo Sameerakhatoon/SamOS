@@ -135,17 +135,24 @@ void kernel_main(){
     print("\nss=");
     print_hex32(((unsigned int)ss[0] << 8) | (unsigned int)ss[1]);
 
-    // Ch 72 smoke probe: fat16_open now walks the root directory and
-    // returns ERROR(-EIO) if the file isn't found. fopen translates
-    // that to 0. The 16 MiB volume is empty, so any path misses.
-    print(" fop_miss=");
-    print_hex32((unsigned int)fopen("0:/hello.txt", "r"));
-
     // Ch 73 smoke probe: fread of fd=0 hits the EINVARG early-return
     // before any dispatch. Cast -EINVARG (-2) to unsigned -> FFFFFFFE.
     char fbuf[4];
     print(" frd=");
     print_hex32((unsigned int)fread(fbuf, 1, 1, 0));
+
+    // Ch 75 smoke probe: with hello.txt now in the FAT16 volume,
+    // fopen + fread reads "Hello world!\n" (13 bytes) and we print it.
+    int fd = fopen("0:/hello.txt", "r");
+    if(fd){
+        char hbuf[14];
+        fread(hbuf, 13, 1, fd);
+        hbuf[13] = 0x00;
+        print("\nh=");
+        print(hbuf);
+    } else {
+        print("\nh=NOPEN");
+    }
 
     // Ch 65 smoke probe: FAT16 driver registered itself with the VFS,
     // and disk.filesystem was filled in via fs_resolve. Print the name.
