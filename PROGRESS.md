@@ -111,6 +111,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 73** - VFS fread (FS_READ_FUNCTION typedef, struct filesystem.read, fread dispatch with EINVARG short-circuits) -> [Ch77-vfs-fread.md](docs/chapters/Ch77-vfs-fread.md) - test `tests/31-vfs-fread.sh`
 - [x] **Ch 74** - Refine FAT16 init (book corrects Ch 72 `*` to `+` in starting_pos; we already shipped `+`) -> [Ch78-fat16-read-init-fix.md](docs/chapters/Ch78-fat16-read-init-fix.md) (no-op code)
 - [x] **Ch 75** - FAT16 read end-to-end: fat16_read wired into VFS, Makefile mformats + mcopies hello.txt into the volume, kernel reads "Hello world!" off disk -> [Ch79-fat16-read.md](docs/chapters/Ch79-fat16-read.md) - test `tests/32-fat16-read.sh`
+- [x] **Ch 76** - VFS fseek (FS_SEEK_FUNCTION typedef, .seek in struct filesystem, fseek dispatch shell) -> [Ch80-vfs-fseek.md](docs/chapters/Ch80-vfs-fseek.md) (no smoke probe; FAT16 seek lands next chapter)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
