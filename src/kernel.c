@@ -141,17 +141,19 @@ void kernel_main(){
     print(" frd=");
     print_hex32((unsigned int)fread(fbuf, 1, 1, 0));
 
-    // Ch 75 smoke probe: with hello.txt now in the FAT16 volume,
-    // fopen + fread reads "Hello world!\n" (13 bytes) and we print it.
+    // Ch 77 smoke probe: fopen hello.txt, fseek 2 bytes forward, fread 11.
+    // hello.txt contents are "Hello world!\n" so we expect "llo world!\n"
+    // after the seek. Print as "hs=llo world!".
     int fd = fopen("0:/hello.txt", "r");
     if(fd){
         char hbuf[14];
-        fread(hbuf, 13, 1, fd);
-        hbuf[13] = 0x00;
-        print("\nh=");
+        fseek(fd, 2, SEEK_SET);
+        fread(hbuf, 11, 1, fd);
+        hbuf[11] = 0x00;
+        print("\nhs=");
         print(hbuf);
     } else {
-        print("\nh=NOPEN");
+        print("\nhs=NOPEN");
     }
 
     // Ch 65 smoke probe: FAT16 driver registered itself with the VFS,

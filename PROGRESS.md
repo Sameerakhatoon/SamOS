@@ -112,6 +112,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 74** - Refine FAT16 init (book corrects Ch 72 `*` to `+` in starting_pos; we already shipped `+`) -> [Ch78-fat16-read-init-fix.md](docs/chapters/Ch78-fat16-read-init-fix.md) (no-op code)
 - [x] **Ch 75** - FAT16 read end-to-end: fat16_read wired into VFS, Makefile mformats + mcopies hello.txt into the volume, kernel reads "Hello world!" off disk -> [Ch79-fat16-read.md](docs/chapters/Ch79-fat16-read.md) - test `tests/32-fat16-read.sh`
 - [x] **Ch 76** - VFS fseek (FS_SEEK_FUNCTION typedef, .seek in struct filesystem, fseek dispatch shell) -> [Ch80-vfs-fseek.md](docs/chapters/Ch80-vfs-fseek.md) (no smoke probe; FAT16 seek lands next chapter)
+- [x] **Ch 77** - FAT16 fseek (SEEK_SET, SEEK_CUR; SEEK_END returns EUNIMP; fopen+fseek+fread yields "llo world!") -> [Ch81-fat16-fseek.md](docs/chapters/Ch81-fat16-fseek.md) - test `tests/32-fat16-read.sh`
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
