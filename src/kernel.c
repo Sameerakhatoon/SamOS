@@ -159,6 +159,12 @@ void kernel_main(){
         fstat(fd, &s);
         print(" fz=");   print_hex32(s.filesize);
         print(" ffl=");  print_hex32(s.flags);
+
+        // Ch 81 smoke probe: fclose the descriptor and print after.
+        // If fclose double-frees or smashes the heap we wouldn't see
+        // "afterclose" come out.
+        fclose(fd);
+        print(" afterclose=ok");
     } else {
         print("\nhs=NOPEN");
     }
