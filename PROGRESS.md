@@ -115,6 +115,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 77** - FAT16 fseek (SEEK_SET, SEEK_CUR; SEEK_END returns EUNIMP; fopen+fseek+fread yields "llo world!") -> [Ch81-fat16-fseek.md](docs/chapters/Ch81-fat16-fseek.md) - test `tests/32-fat16-read.sh`
 - [x] **Ch 78+79** - VFS fstat + FAT16 fstat (struct file_stat, FILE_STAT_READ_ONLY flag, fstat dispatch; hello.txt reports filesize=13, flags=0) -> [Ch82-vfs-fat16-fstat.md](docs/chapters/Ch82-vfs-fat16-fstat.md) - test `tests/33-fstat.sh`
 - [x] **Ch 80+81** - VFS fclose + FAT16 fclose (FS_CLOSE_FUNCTION typedef, fclose dispatch + file_free_descriptor; fat16_close frees fat_item + descriptor; "afterclose=ok" survives) -> [Ch83-vfs-fat16-fclose.md](docs/chapters/Ch83-vfs-fat16-fclose.md) - test `tests/34-fclose.sh`
+- [x] **Ch 82** - kernel panic() (print + spin) -> [Ch84-kernel-panic.md](docs/chapters/Ch84-kernel-panic.md) (no test; will get one when a real caller lands)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 

@@ -60,6 +60,11 @@ void print(const char* str){
     }
 }
 
+void panic(const char* msg){
+    print(msg);
+    while(1){}
+}
+
 // Helper: emit a 32-bit value as 8 hex digits.
 static void print_hex32(unsigned int v){
     static const char hex[] = "0123456789ABCDEF";
