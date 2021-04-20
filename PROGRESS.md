@@ -116,6 +116,10 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 78+79** - VFS fstat + FAT16 fstat (struct file_stat, FILE_STAT_READ_ONLY flag, fstat dispatch; hello.txt reports filesize=13, flags=0) -> [Ch82-vfs-fat16-fstat.md](docs/chapters/Ch82-vfs-fat16-fstat.md) - test `tests/33-fstat.sh`
 - [x] **Ch 80+81** - VFS fclose + FAT16 fclose (FS_CLOSE_FUNCTION typedef, fclose dispatch + file_free_descriptor; fat16_close frees fat_item + descriptor; "afterclose=ok" survives) -> [Ch83-vfs-fat16-fclose.md](docs/chapters/Ch83-vfs-fat16-fclose.md) - test `tests/34-fclose.sh`
 - [x] **Ch 82** - kernel panic() (print + spin) -> [Ch84-kernel-panic.md](docs/chapters/Ch84-kernel-panic.md) (no test; will get one when a real caller lands)
+- [x] **Ch 83** - Understanding user land (prose: ring 3 vs ring 0, paging-enforced isolation) -> [Ch85-userland-overview.md](docs/chapters/Ch85-userland-overview.md)
+- [x] **Ch 84** - Transitioning between kernel and user land (prose: syscalls, hw IRQs, iret-to-user trick) -> [Ch86-kernel-userland-transitions.md](docs/chapters/Ch86-kernel-userland-transitions.md)
+- [x] **Ch 85** - Getting to userland for the first time (prose: GDT user descriptors, TSS, fake-iret recipe) -> [Ch87-getting-to-userland.md](docs/chapters/Ch87-getting-to-userland.md)
+- [x] **Ch 86** - Understanding the Task State Segment (prose: ring-3-to-ring-0 stack swap via esp0/ss0) -> [Ch88-understanding-tss.md](docs/chapters/Ch88-understanding-tss.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
