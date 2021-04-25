@@ -120,6 +120,8 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 84** - Transitioning between kernel and user land (prose: syscalls, hw IRQs, iret-to-user trick) -> [Ch86-kernel-userland-transitions.md](docs/chapters/Ch86-kernel-userland-transitions.md)
 - [x] **Ch 85** - Getting to userland for the first time (prose: GDT user descriptors, TSS, fake-iret recipe) -> [Ch87-getting-to-userland.md](docs/chapters/Ch87-getting-to-userland.md)
 - [x] **Ch 86** - Understanding the Task State Segment (prose: ring-3-to-ring-0 stack swap via esp0/ss0) -> [Ch88-understanding-tss.md](docs/chapters/Ch88-understanding-tss.md)
+- [x] **Ch 87** - Role of the TSS in our kernel (prose: single TSS, esp0 set-once for single-task design) -> [Ch89-tss-role.md](docs/chapters/Ch89-tss-role.md)
+- [x] **Ch 88** - int 0x80 walkthrough (prose: hardware vs kernel responsibilities during a ring-3 -> ring-0 trap) -> [Ch90-int80-walkthrough.md](docs/chapters/Ch90-int80-walkthrough.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
