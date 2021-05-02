@@ -11,17 +11,22 @@
 #include "fs/file.h"
 #include "fs/fat/fat16.h"
 #include "gdt/gdt.h"
+#include "task/tss.h"
 #include "config.h"
 #include <stddef.h>
 #include <stdint.h>
 
 static struct paging_4gb_chunk* kernel_chunk = 0;
 
+struct tss tss;
 struct gdt gdt_real[SAMOS_TOTAL_GDT_SEGMENTS];
 struct gdt_structured gdt_structured[SAMOS_TOTAL_GDT_SEGMENTS] = {
-    { .base = 0x00, .limit = 0x00,        .type = 0x00 }, // NULL segment
-    { .base = 0x00, .limit = 0xFFFFFFFF,  .type = 0x9A }, // Kernel code segment
-    { .base = 0x00, .limit = 0xFFFFFFFF,  .type = 0x92 }  // Kernel data segment
+    { .base = 0x00,            .limit = 0x00,        .type = 0x00 }, // NULL segment
+    { .base = 0x00,            .limit = 0xFFFFFFFF,  .type = 0x9A }, // Kernel code segment
+    { .base = 0x00,            .limit = 0xFFFFFFFF,  .type = 0x92 }, // Kernel data segment
+    { .base = 0x00,            .limit = 0xFFFFFFFF,  .type = 0xF8 }, // User code segment
+    { .base = 0x00,            .limit = 0xFFFFFFFF,  .type = 0xF2 }, // User data segment
+    { .base = (uint32_t)&tss,  .limit = sizeof(tss), .type = 0xE9 }  // TSS segment
 };
 
 uint16_t* video_mem = 0;
@@ -102,6 +107,13 @@ void kernel_main(){
     fs_init();
     disk_search_and_init();
     idt_init();
+
+    // Ch 90: install the TSS as GDT offset 0x28. The CPU consults this
+    // on ring-3 -> ring-0 traps to find the kernel stack to switch to.
+    memset(&tss, 0x00, sizeof(tss));
+    tss.esp0 = 0x600000;
+    tss.ss0  = KERNEL_DATA_SELECTOR;
+    tss_load(0x28);
 
     // Set up identity-mapped paging for the entire 4 GiB virtual space.
     kernel_chunk = paging_new_4gb(
