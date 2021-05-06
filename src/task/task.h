@@ -4,6 +4,8 @@
 #include "config.h"
 #include "memory/paging/paging.h"
 
+struct process;
+
 struct registers {
     uint32_t edi;
     uint32_t esi;
@@ -23,11 +25,12 @@ struct registers {
 struct task {
     struct paging_4gb_chunk* page_directory;  // Task's own page directory.
     struct registers         registers;       // Saved CPU state when not running.
+    struct process*          process;         // Owning process.
     struct task*             next;
     struct task*             prev;
 };
 
-struct task* task_new();
+struct task* task_new(struct process* process);
 struct task* task_current();
 struct task* task_get_next();
 int          task_free(struct task* task);

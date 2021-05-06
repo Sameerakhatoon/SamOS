@@ -125,6 +125,8 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 89** - Kernel GDT in C (gdt.{h,c,asm}, encodeGdtEntry, gdt_structured_to_gdt, gdt_real + gdt_structured arrays loaded from kernel_main) -> [Ch91-gdt-in-c.md](docs/chapters/Ch91-gdt-in-c.md)
 - [x] **Ch 90** - TSS implementation (struct tss, tss_load asm, GDT expanded to 6 entries with user code/data + TSS at 0x28, esp0=0x600000) -> [Ch92-tss-impl.md](docs/chapters/Ch92-tss-impl.md) - test `tests/35-tss-loaded.sh`
 - [x] **Ch 91** - Task foundations (struct task, registers save area, task_new/free/init, paging_free_4gb destructor, task linked list) -> [Ch93-task-foundations.md](docs/chapters/Ch93-task-foundations.md)
+- [x] **Ch 92+93** - Process abstraction (struct process, process_load_for_slot, paging_map/_to/_range/_align, strncpy, task<->process pointer) -> [Ch94-processes.md](docs/chapters/Ch94-processes.md)
+- [x] **Ch 94** - Packed GDT struct (book one-liner; we already shipped packed in Ch 89) -> noted inline in [Ch94-processes.md](docs/chapters/Ch94-processes.md) (no separate commit)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
