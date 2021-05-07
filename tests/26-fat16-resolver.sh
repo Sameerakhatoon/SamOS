@@ -38,7 +38,7 @@ chars=$(od -An -v -tx1 -w1 "$dump" \
 
 ok=1
 echo "$chars" | grep -q 'pnz=00000001'  || { echo "FAIL: pnz != 1 (resolver did not retain fs_private)"; ok=0; }
-echo "$chars" | grep -q 'rdt=00000001'  || { echo "FAIL: rdt != 1 (expected hello.txt entry)"; ok=0; }
+echo "$chars" | grep -q 'rdt=00000002'  || { echo "FAIL: rdt != 2 (expected hello.txt + blank.bin entries)"; ok=0; }
 
 if [ $ok -ne 1 ]; then
     echo "      first 900 chars: $(echo "$chars" | head -c 900)"
