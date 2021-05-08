@@ -12,7 +12,10 @@
 #include "fs/fat/fat16.h"
 #include "gdt/gdt.h"
 #include "task/tss.h"
+#include "task/task.h"
+#include "task/process.h"
 #include "config.h"
+#include "status.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -236,4 +239,20 @@ void kernel_main(){
     void* p3 = kmalloc(100);
     print(" km3=");   print_hex32((unsigned int)p3);
     print("\n");
+
+    // Ch 98: the actual ring-3 launch is deferred - see
+    // docs/gotchas/G04-iret-to-ring3-resets.md. The CPU triple-faults
+    // shortly after iretd in this build of the kernel, which would
+    // knock out the rest of the test suite. The supporting changes
+    // for Ch 98 (current_task set when the first task is created,
+    // registers.cs = USER_CODE_SEGMENT) are already in task.c so the
+    // wiring is correct; we just don't pull the trigger yet. Once
+    // G04 is investigated and patched, the three lines below get
+    // un-commented and test 37 starts asserting CS=0x1b, EIP=0x400000.
+    print("\nentering userland... (deferred, G04)");
+    // struct process* process = 0;
+    // if(process_load("0:/blank.bin", &process) != SAMOS_ALL_OK){
+    //     panic("Failed to load blank.bin\n");
+    // }
+    // task_run_first_ever_task();
 }

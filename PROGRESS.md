@@ -128,6 +128,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 92+93** - Process abstraction (struct process, process_load_for_slot, paging_map/_to/_range/_align, strncpy, task<->process pointer) -> [Ch94-processes.md](docs/chapters/Ch94-processes.md)
 - [x] **Ch 94** - Packed GDT struct (book one-liner; we already shipped packed in Ch 89) -> noted inline in [Ch94-processes.md](docs/chapters/Ch94-processes.md) (no separate commit)
 - [x] **Ch 95+96+97** - Userland transition prologue (task.asm user_registers/restore_gpr/task_return + C task_switch/run_first_ever/task_page; first user program `programs/blank/blank.bin`; book Ch 97 asm fixes shipped inline) -> [Ch95-userland-prologue.md](docs/chapters/Ch95-userland-prologue.md) - test `tests/36-userland-prologue.sh`
+- [x] **Ch 98+99** - First userland launch (wiring shipped: registers.cs=USER_CODE_SEGMENT, current_task set on first task; **trigger deferred** pending G04 - the iretd triple-faults) -> [Ch96-userland-launch-deferred.md](docs/chapters/Ch96-userland-launch-deferred.md) - test `tests/37-ring3-reached.sh`
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
@@ -144,5 +145,6 @@ Each entry: short title + chapter where surfaced + link to the gotcha note.
 - [G01](docs/gotchas/G01-keyboard-drain.md) - keyboard handler must drain port 0x60 (surfaced in Ch 45)
 - [G02](docs/gotchas/G02-press-not-release.md) - filter key-release and 0xE0-prefix scancodes (surfaced after G01)
 - [G03](docs/gotchas/G03-stale-objects-on-header-edit.md) - struct layout edits in headers silently desync .o files (surfaced in Ch 73)
+- [G04](docs/gotchas/G04-iret-to-ring3-resets.md) - iret-into-ring-3 triple-faults shortly after the synthetic interrupt frame is popped (surfaced in Ch 98)
 
 ---
