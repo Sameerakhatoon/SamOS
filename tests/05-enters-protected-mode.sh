@@ -77,8 +77,13 @@ if [ -z "$cs" ]; then
     exit 1
 fi
 
-if [ "$((16#$cs))" != "8" ]; then
-    echo "FAIL: CS=$cs, expected 0008 (kernel code selector from GDT)"
+# CS should be one of:
+#   0x08 - kernel code (boot reached kernel.asm, kernel hasn't dropped to ring 3)
+#   0x1B - user code (0x18 | RPL=3, post-Ch 98 the kernel drops into ring 3
+#          before our 12 s sample fires)
+cs_dec=$((16#$cs))
+if [ "$cs_dec" != "8" ] && [ "$cs_dec" != "27" ]; then
+    echo "FAIL: CS=$cs, expected 0008 (kernel) or 001B (user code post-iret)"
     echo "      registers:"; sed -n '1,40p' "$regs"
     exit 1
 fi
