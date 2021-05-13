@@ -129,6 +129,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 94** - Packed GDT struct (book one-liner; we already shipped packed in Ch 89) -> noted inline in [Ch94-processes.md](docs/chapters/Ch94-processes.md) (no separate commit)
 - [x] **Ch 95+96+97** - Userland transition prologue (task.asm user_registers/restore_gpr/task_return + C task_switch/run_first_ever/task_page; first user program `programs/blank/blank.bin`; book Ch 97 asm fixes shipped inline) -> [Ch95-userland-prologue.md](docs/chapters/Ch95-userland-prologue.md) - test `tests/36-userland-prologue.sh`
 - [x] **Ch 98+99** - First userland launch (wiring + trigger live; G04 fixed - the kernel now reaches CPL=3, CS=0x1B, EIP=0x400000 with blank.bin's `jmp $` looping forever) -> [Ch96-userland-launch-deferred.md](docs/chapters/Ch96-userland-launch-deferred.md) - test `tests/37-ring3-reached.sh`
+- [x] **Ch 100** - Paging API refactor: paging_switch/map/_range/_to now take struct paging_4gb_chunk* instead of raw uint32_t* -> [Ch97-paging-refactor.md](docs/chapters/Ch97-paging-refactor.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
