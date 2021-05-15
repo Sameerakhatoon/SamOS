@@ -82,6 +82,11 @@ void panic(const char* msg){
     while(1){}
 }
 
+void kernel_page(){
+    kernel_registers();
+    paging_switch(kernel_chunk);
+}
+
 // Helper: emit a 32-bit value as 8 hex digits.
 static void print_hex32(unsigned int v){
     static const char hex[] = "0123456789ABCDEF";

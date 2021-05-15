@@ -3,6 +3,25 @@
 
 #include <stdint.h>
 
+struct interrupt_frame {
+    uint32_t edi;
+    uint32_t esi;
+    uint32_t ebp;
+    uint32_t reserved;
+    uint32_t ebx;
+    uint32_t edx;
+    uint32_t ecx;
+    uint32_t eax;
+
+    // The next five fields are pushed automatically by the CPU on a
+    // ring-3 -> ring-0 trap, before our isr80h_wrapper runs.
+    uint32_t ip;
+    uint32_t cs;
+    uint32_t flags;
+    uint32_t esp;
+    uint32_t ss;
+} __attribute__((packed));
+
 struct idt_desc {
     uint16_t offset_1;     // bits 0..15 of handler address
     uint16_t selector;     // GDT selector for the handler's code segment
