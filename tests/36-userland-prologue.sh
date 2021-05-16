@@ -32,9 +32,15 @@ echo "$nm_out" | grep -q ' user_registers$'                    || { echo "FAIL: 
 echo "$nm_out" | grep -q ' restore_general_purpose_registers$' || { echo "FAIL: restore_general_purpose_registers symbol missing"; ok=0; }
 echo "$nm_out" | grep -q ' task_run_first_ever_task$'          || { echo "FAIL: task_run_first_ever_task symbol missing"; ok=0; }
 
-# blank.bin: jmp short $ encodes as "EB FE" at offset 0 of .text.
-first2=$(od -An -tx1 -N 2 programs/blank/blank.bin | tr -d ' \n')
-[ "$first2" = "ebfe" ] || { echo "FAIL: blank.bin first 2 bytes = $first2 (expected ebfe)"; ok=0; }
+# blank.bin entry sequence (Ch 103+104):
+#   mov eax, 0   ; B8 00 00 00 00
+#   int 0x80     ; CD 80
+#   jmp $        ; EB FE
+first7=$(od -An -tx1 -N 7 programs/blank/blank.bin | tr -d ' \n')
+[ "$first7" = "b800000000cd80" ] || { echo "FAIL: blank.bin first 7 bytes = $first7 (expected mov eax,0; int 0x80)"; ok=0; }
+# Trailing jmp short $.
+last2=$(od -An -tx1 -j 7 programs/blank/blank.bin | tr -d ' \n')
+[ "$last2" = "ebfe" ] || { echo "FAIL: blank.bin tail bytes = $last2 (expected ebfe)"; ok=0; }
 
 [ $ok -eq 1 ] || exit 1
 exit 0

@@ -14,6 +14,7 @@
 #include "task/tss.h"
 #include "task/task.h"
 #include "task/process.h"
+#include "isr80h/isr80h.h"
 #include "config.h"
 #include "status.h"
 #include <stddef.h>
@@ -128,6 +129,8 @@ void kernel_main(){
         PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
     paging_switch(kernel_chunk);
     enable_paging();
+
+    isr80h_register_commands();
 
     // Ch 55 smoke probe: read sector 0 via the new disk_read_block
     // abstraction. The last two bytes must be 55 AA (boot signature).
