@@ -44,13 +44,12 @@ case "$cs" in
     *) echo "FAIL: CS=$cs (expected 001B)"; ok=0; ;;
 esac
 
-# Ch 107: blank.bin is now
-#   push 20  (2) push 30  (2) mov eax,0  (5) int 0x80  (2) add esp,8 (3) jmp $ (2)
-# so the trailing `jmp $` lives at offset 0x0E (0x4000_000E). After
-# the syscall returns the CPU runs add esp,8 then loops at 0x4000_000E.
+# Ch 108: blank.bin runs print then sum then loops on jmp $. The exact
+# loop offset shifts each time the program grows; just require EIP is
+# somewhere in [0x00400000, 0x00400100] (well inside the binary).
 eip_dec=$((16#$eip))
-if [ "$eip_dec" -lt $((16#40000B)) ] || [ "$eip_dec" -gt $((16#400010)) ]; then
-    echo "FAIL: EIP=$eip not in [0x0040000B, 0x00400010]"
+if [ "$eip_dec" -lt $((16#400000)) ] || [ "$eip_dec" -gt $((16#400100)) ]; then
+    echo "FAIL: EIP=$eip not in [0x00400000, 0x00400100]"
     ok=0
 fi
 
