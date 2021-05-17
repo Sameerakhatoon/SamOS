@@ -44,18 +44,20 @@ case "$cs" in
     *) echo "FAIL: CS=$cs (expected 001B)"; ok=0; ;;
 esac
 
-# After `mov eax,0` (5 bytes) + `int 0x80` (2 bytes) the next address
-# is 0x00400007. blank.bin's `jmp $` lives there and loops on itself.
+# Ch 107: blank.bin is now
+#   push 20  (2) push 30  (2) mov eax,0  (5) int 0x80  (2) add esp,8 (3) jmp $ (2)
+# so the trailing `jmp $` lives at offset 0x0E (0x4000_000E). After
+# the syscall returns the CPU runs add esp,8 then loops at 0x4000_000E.
 eip_dec=$((16#$eip))
-if [ "$eip_dec" -lt $((16#400007)) ] || [ "$eip_dec" -gt $((16#400010)) ]; then
-    echo "FAIL: EIP=$eip not in [0x00400007, 0x00400010]"
+if [ "$eip_dec" -lt $((16#40000B)) ] || [ "$eip_dec" -gt $((16#400010)) ]; then
+    echo "FAIL: EIP=$eip not in [0x0040000B, 0x00400010]"
     ok=0
 fi
 
-# Sum stub returns 0; wrapper plumbs that into EAX.
+# Sum command returns 20 + 30 = 50 = 0x32; wrapper plumbs that into EAX.
 case "$eax" in
-    00000000) ;;
-    *) echo "FAIL: EAX=$eax (expected 00000000, sum-stub return)"; ok=0; ;;
+    00000032) ;;
+    *) echo "FAIL: EAX=$eax (expected 00000032, sum(20,30))"; ok=0; ;;
 esac
 
 if [ $ok -ne 1 ]; then

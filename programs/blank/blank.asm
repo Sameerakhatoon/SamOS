@@ -5,10 +5,11 @@ section .asm
 global _start
 
 _start:
-    ; Fire syscall command 0 (SYSTEM_COMMAND0_SUM). The kernel stub
-    ; returns 0; we then spin so the CPU stays in ring 3 with EAX = 0.
-    mov eax, 0
-    int 0x80
+    push 20
+    push 30
+    mov  eax, 0           ; SYSTEM_COMMAND0_SUM
+    int  0x80             ; -> EAX = 50
+    add  esp, 8           ; clean up our two pushed args
 
 label:
     jmp label

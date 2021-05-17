@@ -4,6 +4,8 @@
 #include "status.h"
 #include "memory/heap/kheap.h"
 #include "memory/memory.h"
+#include "memory/paging/paging.h"
+#include "string/string.h"
 #include "idt/idt.h"
 
 static int  task_init(struct task* task, struct process* process);
@@ -126,6 +128,63 @@ void task_current_save_state(struct interrupt_frame* frame){
     }
     struct task* task = task_current();
     task_save_state(task, frame);
+}
+
+int task_page_task(struct task* task){
+    user_registers();
+    paging_switch(task->page_directory);
+    return 0;
+}
+
+// Pull a 32-bit value off the task's stack at `index` slots from the
+// top. Used by syscall handlers to read arguments the user pushed
+// before invoking int 0x80.
+void* task_get_stack_item(struct task* task, int index){
+    void* result = 0;
+    uint32_t* sp_ptr = (uint32_t*)task->registers.esp;
+    task_page_task(task);
+    result = (void*)sp_ptr[index];
+    kernel_page();
+    return result;
+}
+
+// Copy up to `max` bytes of a NUL-terminated string from the task's
+// virtual address `virtual` into the kernel buffer `phys`. The trick
+// is mapping a scratch page identity in both the task and kernel
+// address spaces so we can strncpy across the page-table boundary.
+int copy_string_from_task(struct task* task, void* virtual, void* phys, int max){
+    if(max >= PAGING_PAGE_SIZE){
+        return -EINVARG;
+    }
+
+    int res = 0;
+    char* tmp = kzalloc(max);
+    if(!tmp){
+        res = -ENOMEM;
+        goto out;
+    }
+
+    uint32_t* task_directory = task->page_directory->directory_entry;
+    uint32_t  old_entry      = paging_get(task_directory, tmp);
+
+    paging_map(task->page_directory, tmp, tmp,
+               PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
+    paging_switch(task->page_directory);
+    strncpy(tmp, virtual, max);
+    kernel_page();
+
+    res = paging_set(task_directory, tmp, old_entry);
+    if(res < 0){
+        res = -EIO;
+        goto out_free;
+    }
+
+    strncpy(phys, tmp, max);
+
+out_free:
+    kfree(tmp);
+out:
+    return res;
 }
 
 static int task_init(struct task* task, struct process* process){
