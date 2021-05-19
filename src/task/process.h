@@ -14,6 +14,12 @@ struct process {
     void*          ptr;       // Physical pointer to the process binary in memory.
     void*          stack;     // Physical pointer to the process stack.
     uint32_t       size;      // Size of the binary at ptr.
+
+    struct keyboard_buffer {
+        char buffer[SAMOS_KEYBOARD_BUFFER_SIZE];
+        int  tail;
+        int  head;
+    } keyboard;
 };
 
 int              process_load(const char* filename, struct process** process);

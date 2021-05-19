@@ -32,4 +32,6 @@
 
 #define SAMOS_MAX_ISR80H_COMMANDS        1024
 
+#define SAMOS_KEYBOARD_BUFFER_SIZE       1024
+
 #endif
