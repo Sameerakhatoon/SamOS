@@ -15,6 +15,7 @@ extern void  isr80h_wrapper();
 extern void* interrupt_pointer_table[SAMOS_TOTAL_INTERRUPTS];
 
 static ISR80H_COMMAND isr80h_commands[SAMOS_MAX_ISR80H_COMMANDS];
+static INTERRUPT_CALLBACK_FUNCTION interrupt_callbacks[SAMOS_TOTAL_INTERRUPTS];
 
 void idt_zero(){
     print("Divide by zero error\n");
@@ -26,10 +27,21 @@ void no_interrupt_handler(){
 }
 
 void interrupt_handler(int interrupt, struct interrupt_frame* frame){
-    // Ch 112: catch-all C handler. Real per-interrupt dispatch lands
-    // in Ch 113 with interrupt_callbacks + idt_register_interrupt_callback.
-    // For now just ack the master PIC so the line doesn't latch.
+    kernel_page();
+    if(interrupt_callbacks[interrupt] != 0){
+        task_current_save_state(frame);
+        interrupt_callbacks[interrupt](frame);
+    }
+    task_page();
     outb(0x20, 0x20);
+}
+
+int idt_register_interrupt_callback(int interrupt, INTERRUPT_CALLBACK_FUNCTION interrupt_callback){
+    if(interrupt < 0 || interrupt >= SAMOS_TOTAL_INTERRUPTS){
+        return -EINVARG;
+    }
+    interrupt_callbacks[interrupt] = interrupt_callback;
+    return 0;
 }
 
 void idt_set(int interrupt_no, void* address){
