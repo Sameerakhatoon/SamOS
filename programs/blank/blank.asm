@@ -5,7 +5,9 @@ section .asm
 global _start
 
 _start:
-    ; Ch 108: print a message via syscall command 1.
+    ; Ch 116: block until a key is pressed, then print.
+    call getkey
+
     push message
     mov  eax, 1            ; SYSTEM_COMMAND1_PRINT
     int  0x80
@@ -20,6 +22,13 @@ _start:
 
 label:
     jmp label
+
+getkey:
+    mov eax, 2             ; SYSTEM_COMMAND2_GETKEY
+    int 0x80
+    cmp eax, 0x00
+    je  getkey
+    ret
 
 section .data
 
