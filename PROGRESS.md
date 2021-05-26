@@ -161,5 +161,6 @@ Each entry: short title + chapter where surfaced + link to the gotcha note.
 - [G03](docs/gotchas/G03-stale-objects-on-header-edit.md) - struct layout edits in headers silently desync .o files (surfaced in Ch 73)
 - [G04](docs/gotchas/G04-iret-to-ring3-resets.md) - **[FIXED]** iret-into-ring-3 triple-faulted because task_init forgot `registers.cs = USER_CODE_SEGMENT`; iret popped NULL CS -> #GP cascade -> reset
 - [G05](docs/gotchas/G05-task-page-null-deref.md) - **[FIXED]** Ch 113 `interrupt_handler` called `task_page()` unconditionally; first IRQ before `task_run_first_ever_task` did `task_switch(NULL)` -> triple-fault; guard with `if (task_current())` (test 40)
+- [G06](docs/gotchas/G06-keyboard-pop-inverted.md) - **[FIXED]** Ch 110 `keyboard_pop` shipped with `if (task_current()) return 0;` inverted; getkey syscall always returned 0, user spun in getkey forever; flipped to `!task_current()`
 
 ---

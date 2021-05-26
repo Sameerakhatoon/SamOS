@@ -14,12 +14,15 @@ cd "$(dirname "$0")/.."
 ./build.sh > /dev/null
 
 dump=$(mktemp)
-cmd=$(mktemp)
-trap 'rm -f "$dump" "$cmd"' EXIT
+trap 'rm -f "$dump"' EXIT
 
-printf 'pmemsave 0xb8000 4096 "%s"\nquit\n' "$dump" > "$cmd"
-
-( sleep 12; cat "$cmd" ) | timeout 30 qemu-system-x86_64 \
+# Ch 116: blank.bin blocks on getkey until a key arrives, then prints.
+(
+    sleep 12
+    printf 'sendkey a\n'
+    sleep 1
+    printf 'pmemsave 0xb8000 4096 "%s"\nquit\n' "$dump"
+) | timeout 30 qemu-system-x86_64 \
         -hda bin/os.bin \
         -m 256 \
         -accel tcg \
