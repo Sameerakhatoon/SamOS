@@ -26,9 +26,9 @@ trap 'rm -f "$regs"' EXIT
 (
     sleep 12
     printf 'sendkey a\n'
-    sleep 1
+    sleep 3
     printf 'info registers\nquit\n'
-) | timeout 30 qemu-system-x86_64 \
+) | timeout 40 qemu-system-x86_64 \
         -hda bin/os.bin \
         -m 256 \
         -accel tcg \
@@ -43,24 +43,30 @@ cpl=$(grep -oE 'CPL=[0-9]' "$regs" | head -1 | cut -d= -f2)
 eax=$(grep -oE 'EAX=[0-9a-fA-F]+' "$regs" | head -1 | cut -d= -f2)
 
 ok=1
-[ "$cpl" = "3" ]              || { echo "FAIL: CPL=$cpl (expected 3)"; ok=0; }
-case "$cs" in
-    001b|001B) ;;
-    *) echo "FAIL: CS=$cs (expected 001B)"; ok=0; ;;
-esac
-
-# Ch 108: blank.bin runs print then sum then loops on jmp $. The exact
-# loop offset shifts each time the program grows; just require EIP is
-# somewhere in [0x00400000, 0x00400100] (well inside the binary).
 eip_dec=$((16#$eip))
-if [ "$eip_dec" -lt $((16#400000)) ] || [ "$eip_dec" -gt $((16#400100)) ]; then
-    echo "FAIL: EIP=$eip not in [0x00400000, 0x00400100]"
+
+# Ch 117 turned blank.bin into a getkey -> putchar loop. At any sampled
+# moment we may catch the CPU in ring 3 (inside the user binary) OR in
+# ring 0 (servicing IRQ1 / int 0x80 cmd 2 or 3). Both indicate the system
+# is live and processing the keypress. Accept either:
+#   (a) CPL=3, CS=001B, EIP in [0x00400000, 0x00400100] (user binary), OR
+#   (b) CPL=0 with EIP in [0x00100000, 0x00200000] (kernel image).
+in_user=0
+in_kern=0
+if [ "$cpl" = "3" ]; then
+    case "$cs" in
+        001b|001B)
+            [ "$eip_dec" -ge $((16#400000)) ] && [ "$eip_dec" -le $((16#400100)) ] && in_user=1
+            ;;
+    esac
+fi
+if [ "$cpl" = "0" ]; then
+    [ "$eip_dec" -ge $((16#100000)) ] && [ "$eip_dec" -le $((16#200000)) ] && in_kern=1
+fi
+if [ $in_user -eq 0 ] && [ $in_kern -eq 0 ]; then
+    echo "FAIL: CPU not in expected state. CPL=$cpl CS=$cs EIP=$eip"
     ok=0
 fi
-
-# Ch 117 dropped the sum syscall from blank.asm; the program now loops on
-# getkey -> putchar and never invokes cmd 0 again. We no longer pin EAX
-# to a specific value here - just the CPL/CS/EIP-in-binary assertions.
 
 if [ $ok -ne 1 ]; then
     sed -n '1,40p' "$regs"
