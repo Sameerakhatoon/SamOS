@@ -148,6 +148,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 119** - Stream reader bug fix (diskstreamer_read now uses an overflow flag computed from offset+total; cross-sector reads no longer walk off the end of buf[]; tests 08/09/38 ranges widened/relaxed) -> [Ch113-stream-reader-fix.md](docs/chapters/Ch113-stream-reader-fix.md)
 - [x] **Ch 120** - Understanding ELF files (prose: header, program headers, section headers, string tables, static vs dynamic linking) -> [Ch114-elf-overview.md](docs/chapters/Ch114-elf-overview.md)
 - [x] **Ch 121** - ELF loader part 1: elf.h (PF_/PT_/SHT_/ET_/EI_/ELFCLASS constants; elf32_phdr, elf32_shdr, elf_header, elf32_dyn, elf32_sym structs - header-only, no .c yet) -> [Ch115-elf-header.md](docs/chapters/Ch115-elf-header.md)
+- [x] **Ch 122** - ELF loader part 2: elf.c (elf_get_entry/_ptr) + elfloader.{h,c} (struct elf_file, elf_signature, validators, sheader/pheader/program_header/section/str_table accessors, elf_validate_loaded) -> [Ch116-elf-loader-part2.md](docs/chapters/Ch116-elf-loader-part2.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
