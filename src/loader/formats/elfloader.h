@@ -32,4 +32,12 @@ struct elf32_shdr* elf_section(struct elf_header* header, int index);
 char*              elf_str_table(struct elf_header* header);
 int                elf_validate_loaded(struct elf_header* header);
 
+void*              elf_virtual_base(struct elf_file* file);
+void*              elf_virtual_end(struct elf_file* file);
+void*              elf_phys_base(struct elf_file* file);
+void*              elf_phys_end(struct elf_file* file);
+
+int  elf_load(const char* filename, struct elf_file** file_out);
+void elf_close(struct elf_file* file);
+
 #endif
