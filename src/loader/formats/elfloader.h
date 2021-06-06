@@ -36,6 +36,7 @@ void*              elf_virtual_base(struct elf_file* file);
 void*              elf_virtual_end(struct elf_file* file);
 void*              elf_phys_base(struct elf_file* file);
 void*              elf_phys_end(struct elf_file* file);
+void*              elf_phdr_phys_address(struct elf_file* file, struct elf32_phdr* phdr);
 
 int  elf_load(const char* filename, struct elf_file** file_out);
 void elf_close(struct elf_file* file);

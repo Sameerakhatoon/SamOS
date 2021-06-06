@@ -152,6 +152,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 123** - ELF loader part 3: blank program emits ELF (new linker-elf.ld, Makefile builds both blank.bin + blank.elf; both mcopied into FAT; kernel still loads blank.bin until the kernel-side ELF loader lands) -> [Ch117-elf-loader-part3.md](docs/chapters/Ch117-elf-loader-part3.md)
 - [x] **Ch 124** - ELF loader part 4: elf_load + program-header walk (elf_process_phdr_pt_load tracks lowest base / highest end; elf_process_pheaders iterates e_phnum; elf_load fopen+fstat+fread+process; elf_close kfrees; virtual_base/end + phys_base/end accessors) -> [Ch118-elf-loader-part4.md](docs/chapters/Ch118-elf-loader-part4.md)
 - [x] **Ch 125** - ELF loader part 5: wire into process (EINFORMAT status, paging_align_to_lower_page, PROCESS_FILETYPE_ELF/BINARY + union in struct process, process_load_elf/_map_elf, process_load_data tries ELF then falls back to binary, kernel loads 0:/blank.elf) -> [Ch119-elf-loader-part5.md](docs/chapters/Ch119-elf-loader-part5.md)
+- [x] **Ch 126** - ELF loader part 6: per-PHDR mapping respecting PF_W (process_map_elf walks e_phnum, marks writable only when PF_W set) + ELF entry-point IP (task_init uses elf_header->e_entry for PROCESS_FILETYPE_ELF) -> [Ch120-elf-loader-part6.md](docs/chapters/Ch120-elf-loader-part6.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 

@@ -100,6 +100,10 @@ void* elf_phys_end(struct elf_file* file){
     return file->physical_end_address;
 }
 
+void* elf_phdr_phys_address(struct elf_file* file, struct elf32_phdr* phdr){
+    return elf_memory(file) + phdr->p_offset;
+}
+
 static int elf_process_phdr_pt_load(struct elf_file* elf_file, struct elf32_phdr* phdr){
     if(elf_file->virtual_base_address >= (void*)phdr->p_vaddr || elf_file->virtual_base_address == 0x00){
         elf_file->virtual_base_address  = (void*)phdr->p_vaddr;
