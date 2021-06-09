@@ -154,6 +154,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 125** - ELF loader part 5: wire into process (EINFORMAT status, paging_align_to_lower_page, PROCESS_FILETYPE_ELF/BINARY + union in struct process, process_load_elf/_map_elf, process_load_data tries ELF then falls back to binary, kernel loads 0:/blank.elf) -> [Ch119-elf-loader-part5.md](docs/chapters/Ch119-elf-loader-part5.md)
 - [x] **Ch 126** - ELF loader part 6: per-PHDR mapping respecting PF_W (process_map_elf walks e_phnum, marks writable only when PF_W set) + ELF entry-point IP (task_init uses elf_header->e_entry for PROCESS_FILETYPE_ELF) -> [Ch120-elf-loader-part6.md](docs/chapters/Ch120-elf-loader-part6.md)
 - [x] **Ch 127** - Blank becomes C; stdlib scaffold (programs/blank/blank.c `main() return 0`, programs/stdlib/src/start.asm with `_start: call main; ret`, programs/stdlib/Makefile builds stdlib.elf, blank's Makefile links against it; book ships broken: main returns -> start's ret falls off stack -> triple fault -> qemu exits before monitor probes; QEMU-driven tests red until Ch 128 adds while(1)) -> [Ch121-blank-becomes-c.md](docs/chapters/Ch121-blank-becomes-c.md)
+- [x] **Ch 128** - stdlib `print()` + blank.c uses it (programs/stdlib/src/samos.{asm,h}, print wraps SYSTEM_COMMAND1_PRINT; blank.c calls print then `while(1)` so start's ret never fires; suite back to 32/32) -> [Ch122-stdlib-print.md](docs/chapters/Ch122-stdlib-print.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 

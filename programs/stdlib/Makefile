@@ -1,4 +1,4 @@
-FILES=./build/start.o
+FILES=./build/start.o ./build/samos.o
 INCLUDES=
 
 all: $(FILES)
@@ -7,6 +7,10 @@ all: $(FILES)
 ./build/start.o: ./src/start.asm
 	mkdir -p build
 	nasm -f elf ./src/start.asm -o ./build/start.o
+
+./build/samos.o: ./src/samos.asm
+	mkdir -p build
+	nasm -f elf ./src/samos.asm -o ./build/samos.o
 
 clean:
 	rm -rf $(FILES) ./stdlib.elf
