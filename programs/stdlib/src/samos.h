@@ -2,5 +2,6 @@
 #define SAMOS_H
 
 void print(const char* msg);
+int  getkey();
 
 #endif
