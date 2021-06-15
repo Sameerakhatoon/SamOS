@@ -1,7 +1,10 @@
 #ifndef SAMOS_H
 #define SAMOS_H
 
-void print(const char* msg);
-int  getkey();
+#include <stddef.h>
+
+void* samos_malloc(size_t size);
+void  print(const char* msg);
+int   getkey();
 
 #endif

@@ -219,6 +219,32 @@ out:
     return res;
 }
 
+static int process_find_free_allocation_index(struct process* process){
+    int res = -ENOMEM;
+    for(int i = 0; i < SAMOS_MAX_PROGRAM_ALLOCATIONS; i++){
+        if(process->allocations[i] == 0){
+            res = i;
+            break;
+        }
+    }
+    return res;
+}
+
+void* process_malloc(struct process* process, size_t size){
+    void* ptr = kzalloc(size);
+    if(!ptr){
+        return 0;
+    }
+
+    int index = process_find_free_allocation_index(process);
+    if(index < 0){
+        return 0;
+    }
+
+    process->allocations[index] = ptr;
+    return ptr;
+}
+
 int process_load(const char* filename, struct process** process){
     int res = 0;
     int process_slot = process_get_free_slot();

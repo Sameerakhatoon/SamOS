@@ -1,5 +1,6 @@
-FILES=./build/start.o ./build/samos.o
-INCLUDES=
+FILES=./build/start.o ./build/samos.o ./build/stdlib.o
+INCLUDES=-I./src
+FLAGS=-g
 
 all: $(FILES)
 	i686-elf-ld -m elf_i386 -relocatable $(FILES) -o ./stdlib.elf
@@ -11,6 +12,10 @@ all: $(FILES)
 ./build/samos.o: ./src/samos.asm
 	mkdir -p build
 	nasm -f elf ./src/samos.asm -o ./build/samos.o
+
+./build/stdlib.o: ./src/stdlib.c
+	mkdir -p build
+	i686-elf-gcc $(INCLUDES) $(FLAGS) -ffreestanding -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/stdlib.c -o ./build/stdlib.o
 
 clean:
 	rm -rf $(FILES) ./stdlib.elf
