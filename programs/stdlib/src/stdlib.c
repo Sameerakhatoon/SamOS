@@ -6,5 +6,5 @@ void* malloc(size_t size){
 }
 
 void free(void* ptr){
-    (void)ptr;
+    samos_free(ptr);
 }

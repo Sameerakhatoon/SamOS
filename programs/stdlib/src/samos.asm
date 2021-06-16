@@ -5,6 +5,7 @@ section .asm
 global print:function
 global getkey:function
 global samos_malloc:function
+global samos_free:function
 
 ; void print(const char* msg)
 print:
@@ -31,6 +32,17 @@ samos_malloc:
     push ebp
     mov  ebp, esp
     mov  eax, 4            ; SYSTEM_COMMAND4_MALLOC
+    push dword [ebp+8]
+    int  0x80
+    add  esp, 4
+    pop  ebp
+    ret
+
+; void samos_free(void* ptr)
+samos_free:
+    push ebp
+    mov  ebp, esp
+    mov  eax, 5            ; SYSTEM_COMMAND5_FREE
     push dword [ebp+8]
     int  0x80
     add  esp, 4
