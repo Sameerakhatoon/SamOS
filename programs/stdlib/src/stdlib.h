@@ -1,5 +1,5 @@
-#ifndef STDLIB_H
-#define STDLIB_H
+#ifndef SAMOS_STDLIB_H
+#define SAMOS_STDLIB_H
 
 #include <stddef.h>
 

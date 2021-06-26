@@ -160,6 +160,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 131** - free syscall cmd 5 (SYSTEM_COMMAND5_FREE; isr80h_command5_free; process_is_process_pointer + process_allocation_unjoin + process_free with ownership guard; stdlib samos_free; blank.c calls free) -> [Ch125-free-syscall.md](docs/chapters/Ch125-free-syscall.md)
 - [x] **Ch 132** - process_map_elf uses p_memsz instead of p_filesz (covers .bss-only segments where p_filesz == 0 but runtime needs memory) -> [Ch126-p-memsz.md](docs/chapters/Ch126-p-memsz.md)
 - [x] **Ch 133** - itoa() in stdlib (static buffer; handles negative incl INT_MIN via `i = -i` trick + `'0' - (i%10)`; blank.c prints itoa(8763)) -> [Ch127-itoa.md](docs/chapters/Ch127-itoa.md)
+- [x] **Ch 134** - stdlib putchar() (samos_putchar wraps cmd 3; stdio.{h,c} putchar -> samos_putchar; blank.c calls putchar('Z'); stdlib.h include guard renamed to SAMOS_STDLIB_H) -> [Ch128-putchar.md](docs/chapters/Ch128-putchar.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 

@@ -1,4 +1,4 @@
-FILES=./build/start.o ./build/samos.o ./build/stdlib.o
+FILES=./build/start.o ./build/samos.o ./build/stdlib.o ./build/stdio.o
 INCLUDES=-I./src
 FLAGS=-g
 
@@ -16,6 +16,10 @@ all: $(FILES)
 ./build/stdlib.o: ./src/stdlib.c
 	mkdir -p build
 	i686-elf-gcc $(INCLUDES) $(FLAGS) -ffreestanding -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/stdlib.c -o ./build/stdlib.o
+
+./build/stdio.o: ./src/stdio.c
+	mkdir -p build
+	i686-elf-gcc $(INCLUDES) $(FLAGS) -ffreestanding -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/stdio.c -o ./build/stdio.o
 
 clean:
 	rm -rf $(FILES) ./stdlib.elf

@@ -6,6 +6,7 @@ global print:function
 global getkey:function
 global samos_malloc:function
 global samos_free:function
+global samos_putchar:function
 
 ; void print(const char* msg)
 print:
@@ -43,6 +44,17 @@ samos_free:
     push ebp
     mov  ebp, esp
     mov  eax, 5            ; SYSTEM_COMMAND5_FREE
+    push dword [ebp+8]
+    int  0x80
+    add  esp, 4
+    pop  ebp
+    ret
+
+; void samos_putchar(char c)
+samos_putchar:
+    push ebp
+    mov  ebp, esp
+    mov  eax, 3            ; SYSTEM_COMMAND3_PUTCHAR
     push dword [ebp+8]
     int  0x80
     add  esp, 4
