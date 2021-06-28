@@ -161,6 +161,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 132** - process_map_elf uses p_memsz instead of p_filesz (covers .bss-only segments where p_filesz == 0 but runtime needs memory) -> [Ch126-p-memsz.md](docs/chapters/Ch126-p-memsz.md)
 - [x] **Ch 133** - itoa() in stdlib (static buffer; handles negative incl INT_MIN via `i = -i` trick + `'0' - (i%10)`; blank.c prints itoa(8763)) -> [Ch127-itoa.md](docs/chapters/Ch127-itoa.md)
 - [x] **Ch 134** - stdlib putchar() (samos_putchar wraps cmd 3; stdio.{h,c} putchar -> samos_putchar; blank.c calls putchar('Z'); stdlib.h include guard renamed to SAMOS_STDLIB_H) -> [Ch128-putchar.md](docs/chapters/Ch128-putchar.md)
+- [x] **Ch 135** - stdlib printf() (variadic via <stdarg.h>; %i and %s supported; built on putchar+print+itoa; blank.c prints "My age is %i\n", 98) -> [Ch129-printf.md](docs/chapters/Ch129-printf.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
