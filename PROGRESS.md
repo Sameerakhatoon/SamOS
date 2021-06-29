@@ -163,6 +163,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 134** - stdlib putchar() (samos_putchar wraps cmd 3; stdio.{h,c} putchar -> samos_putchar; blank.c calls putchar('Z'); stdlib.h include guard renamed to SAMOS_STDLIB_H) -> [Ch128-putchar.md](docs/chapters/Ch128-putchar.md)
 - [x] **Ch 135** - stdlib printf() (variadic via <stdarg.h>; %i and %s supported; built on putchar+print+itoa; blank.c prints "My age is %i\n", 98) -> [Ch129-printf.md](docs/chapters/Ch129-printf.md)
 - [x] **Ch 136** - Read lines + getkey rename (samos.asm getkey -> samos_getkey; new samos.c with samos_getkeyblock + samos_terminal_readline; blank.c uses readline; samos.asm output now samos.asm.o, samos.c -> samos.o) -> [Ch130-readline.md](docs/chapters/Ch130-readline.md)
+- [x] **Ch 137** - Shell program (programs/shell/{src/shell.{c,h},linker.ld,Makefile}; kernel loads shell.elf instead of blank.elf; shell prints banner + read-line loop; blank.c trimmed to printf+while(1); FAT root grows to 4 entries) -> [Ch131-shell.md](docs/chapters/Ch131-shell.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 

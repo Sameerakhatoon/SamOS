@@ -11,14 +11,17 @@ all: ./bin/boot.bin ./bin/kernel.bin user_programs
 	mcopy -i ./bin/os.bin ./hello.txt ::/hello.txt > /dev/null
 	mcopy -i ./bin/os.bin ./programs/blank/blank.bin ::/blank.bin > /dev/null
 	mcopy -i ./bin/os.bin ./programs/blank/blank.elf ::/blank.elf > /dev/null
+	mcopy -i ./bin/os.bin ./programs/shell/shell.elf ::/shell.elf > /dev/null
 
 user_programs:
 	cd ./programs/stdlib && $(MAKE) all
 	cd ./programs/blank && $(MAKE) all
+	cd ./programs/shell && $(MAKE) all
 
 user_programs_clean:
 	cd ./programs/stdlib && $(MAKE) clean
 	cd ./programs/blank && $(MAKE) clean
+	cd ./programs/shell && $(MAKE) clean
 
 ./bin/kernel.bin: $(FILES)
 	i686-elf-ld -g -relocatable $(FILES) -o ./build/kernelfull.o
