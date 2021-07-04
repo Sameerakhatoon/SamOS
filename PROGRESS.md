@@ -165,6 +165,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 136** - Read lines + getkey rename (samos.asm getkey -> samos_getkey; new samos.c with samos_getkeyblock + samos_terminal_readline; blank.c uses readline; samos.asm output now samos.asm.o, samos.c -> samos.o) -> [Ch130-readline.md](docs/chapters/Ch130-readline.md)
 - [x] **Ch 137** - Shell program (programs/shell/{src/shell.{c,h},linker.ld,Makefile}; kernel loads shell.elf instead of blank.elf; shell prints banner + read-line loop; blank.c trimmed to printf+while(1); FAT root grows to 4 entries) -> [Ch131-shell.md](docs/chapters/Ch131-shell.md)
 - [x] **Ch 138** - Load programs from shell (cmd 6 SYSTEM_COMMAND6_PROCESS_LOAD_START; isr80h_command6_process_load_start does copy_string_from_task + process_load_switch + task_switch + task_return; samos_process_load_start asm wrapper; shell calls it after readline) -> [Ch132-load-from-shell.md](docs/chapters/Ch132-load-from-shell.md)
+- [x] **Ch 139** - stdlib memory + string (memory.{h,c} memset/memcmp/memcpy; string.{h,c} tolower/strlen/strnlen/strnlen_terminator/istrncmp/strncmp/strcpy/strncpy/isdigit/tonumericdigit/strtok; blank.c demos strtok) -> [Ch133-stdlib-memory-string.md](docs/chapters/Ch133-stdlib-memory-string.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
