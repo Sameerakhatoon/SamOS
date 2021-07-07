@@ -17,7 +17,13 @@ struct command_argument {
     struct command_argument* next;
 };
 
+struct process_arguments {
+    int    argc;
+    char** argv;
+};
+
 struct command_argument* samos_parse_command(const char* command, int max);
+void samos_process_get_arguments(struct process_arguments* arguments);
 void  print(const char* msg);
 
 #endif

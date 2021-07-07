@@ -66,6 +66,12 @@ void* paging_align_to_lower_page(void* addr){
     return (void*)_addr;
 }
 
+void* paging_get_physical_address(uint32_t* directory, void* virt){
+    void* virt_addr_new = paging_align_to_lower_page(virt);
+    void* difference = (void*)((uint32_t)virt - (uint32_t)virt_addr_new);
+    return (void*)((paging_get(directory, virt_addr_new) & 0xfffff000) + (uint32_t)difference);
+}
+
 int paging_map(struct paging_4gb_chunk* directory, void* virt, void* phys, int flags){
     if(((unsigned int)virt % PAGING_PAGE_SIZE) || ((unsigned int)phys % PAGING_PAGE_SIZE)){
         return -EINVARG;
