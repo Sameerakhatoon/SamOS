@@ -24,6 +24,8 @@ struct process_arguments {
 
 struct command_argument* samos_parse_command(const char* command, int max);
 void samos_process_get_arguments(struct process_arguments* arguments);
+int  samos_system(struct command_argument* arguments);
+int  samos_system_run(const char* command);
 void  print(const char* msg);
 
 #endif
