@@ -172,6 +172,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 143** - Process command arguments part 2 (kernel side) (paging_get_physical_address; task_virtual_address_to_physical; struct command_argument + struct process_arguments in process.h; process_get_arguments + process_inject_arguments; SYSTEM_COMMAND7 placeholder + SYSTEM_COMMAND8_GET_PROGRAM_ARGUMENTS; kernel.c injects "Testing!" into blank.elf) -> [Ch137-process-args-kernel.md](docs/chapters/Ch137-process-args-kernel.md)
 - [x] **Ch 144** - c_start bootstrap (start.c calls samos_process_get_arguments then forwards to main(argc, argv); start.asm now `call c_start`; blank.c just `print(argv[0])` to demo) -> [Ch138-c_start.md](docs/chapters/Ch138-c_start.md)
 - [x] **Ch 145** - 'system' command - real cmd 7 (isr80h_command7_invoke_system_command does VA->PA translate + program load + inject_arguments + task_switch; samos_system asm wrapper + samos_system_run C wrapper that parses+invokes; kernel back to shell.elf; shell uses samos_system_run; blank.c prints argv loop) -> [Ch139-system-command.md](docs/chapters/Ch139-system-command.md)
+- [x] **Ch 146** - Process termination (process_terminate composes process_terminate_allocations + process_free_program_data + kfree stack + task_free + process_unlink; process_switch_to_any fallback; book typo "too\n" preserved; no caller yet - wired in Ch 147) -> [Ch140-process-termination.md](docs/chapters/Ch140-process-termination.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
