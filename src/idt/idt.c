@@ -4,6 +4,7 @@
 #include "memory/memory.h"
 #include "io/io.h"
 #include "task/task.h"
+#include "task/process.h"
 #include "status.h"
 
 struct idt_desc  idt_descriptors[SAMOS_TOTAL_INTERRUPTS];
@@ -19,6 +20,11 @@ static INTERRUPT_CALLBACK_FUNCTION interrupt_callbacks[SAMOS_TOTAL_INTERRUPTS];
 
 void idt_zero(){
     print("Divide by zero error\n");
+}
+
+void idt_handle_exception(){
+    process_terminate(task_current()->process);
+    task_next();
 }
 
 void no_interrupt_handler(){
@@ -103,6 +109,12 @@ void idt_init(){
 
     idt_set(0, idt_zero);
     idt_set(0x80, isr80h_wrapper);
+
+    // Ch 147: register the same handler for every CPU exception vector (0..0x1F)
+    // so a faulting user process gets terminated cleanly instead of triple-faulting.
+    for(int i = 0; i < 0x20; i++){
+        idt_register_interrupt_callback(i, idt_handle_exception);
+    }
 
     idt_load(&idtr_descriptor);
 }
