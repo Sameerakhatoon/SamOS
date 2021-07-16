@@ -176,6 +176,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 147** - Handle program crashes (idt_handle_exception calls process_terminate + task_next; task_next picks via task_get_next; idt_init registers handler for every CPU exception vector 0..0x1F) -> [Ch141-handle-crashes.md](docs/chapters/Ch141-handle-crashes.md)
 - [x] **Ch 148** - exit syscall (cmd 9) (SYSTEM_COMMAND9_EXIT; isr80h_command9_exit = process_terminate + task_next; samos_exit asm wrapper; c_start calls samos_exit after main; blank drops trailing while(1)) -> [Ch142-exit-syscall.md](docs/chapters/Ch142-exit-syscall.md)
 - [x] **Ch 149** - Caps lock + case-correct input (KEYBOARD_CAPS_LOCK_* states + capslock_state field on struct keyboard; keyboard_set/get_capslock; classic driver lowercases A-Z when caps off; CAPSLOCK scancode 0x3A toggles) -> [Ch143-caps-lock.md](docs/chapters/Ch143-caps-lock.md)
+- [x] **Ch 150** - GRAND FINALE: timer-driven multitasking (idt_clock on vector 0x20 calls task_next; kernel boots two blank.elf with "Testing!" + "Abc!" argv; blank loops `print(argv[0])`; book-verbatim panic until G07 lands the null-task guard on interrupt_handler) -> [Ch144-multitasking.md](docs/chapters/Ch144-multitasking.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
