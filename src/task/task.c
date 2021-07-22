@@ -66,6 +66,9 @@ static void task_list_remove(struct task* task){
     if(task->prev){
         task->prev->next = task->next;
     }
+    if(task->next){
+        task->next->prev = task->prev;
+    }
 
     if(task == task_head){
         task_head = task->next;
