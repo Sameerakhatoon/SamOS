@@ -59,7 +59,26 @@ void terminal_backspace(){
     terminal_col -= 1;
 }
 
+// Post-book extension (extras/terminal-scroll): shift rows 1..24 up
+// one row, clear the new bottom row, and pin the cursor on row 24.
+// Without this every write past row 24 silently disappeared.
+void terminal_scroll(){
+    for(int y = 0; y < VGA_HEIGHT - 1; y++){
+        for(int x = 0; x < VGA_WIDTH; x++){
+            video_mem[y * VGA_WIDTH + x] = video_mem[(y + 1) * VGA_WIDTH + x];
+        }
+    }
+    for(int x = 0; x < VGA_WIDTH; x++){
+        video_mem[(VGA_HEIGHT - 1) * VGA_WIDTH + x] = terminal_make_char(' ', 0);
+    }
+    terminal_row = VGA_HEIGHT - 1;
+}
+
 void terminal_writechar(char c, char colour){
+    if(terminal_row >= VGA_HEIGHT){
+        terminal_scroll();
+    }
+
     if(c == '\n'){
         terminal_row += 1;
         terminal_col = 0;
@@ -90,10 +109,35 @@ void terminal_initialize(){
     }
 }
 
+// Post-book extension (extras/serial-mirror): mirror every print() char
+// to QEMU's COM1 (-serial file:...) so tests can grep a never-scrolling
+// log instead of racing the VGA snapshot against terminal_scroll(). Not
+// in McCarthy; tests get a deterministic source of truth.
+//   COM1 base   = 0x3F8
+//   line-status = base + 5; bit 5 (THR empty) = ready-to-transmit
+#define SERIAL_COM1 0x3F8
+
+void serial_init(){
+    outb(SERIAL_COM1 + 1, 0x00);   // disable serial IRQs
+    outb(SERIAL_COM1 + 3, 0x80);   // DLAB on
+    outb(SERIAL_COM1 + 0, 0x03);   // divisor low (38400 baud)
+    outb(SERIAL_COM1 + 1, 0x00);   // divisor high
+    outb(SERIAL_COM1 + 3, 0x03);   // 8N1, DLAB off
+    outb(SERIAL_COM1 + 2, 0xC7);   // FIFO enable + clear
+    outb(SERIAL_COM1 + 4, 0x0B);   // OUT2 + RTS + DTR
+}
+
+static void serial_putchar(char c){
+    while((insb(SERIAL_COM1 + 5) & 0x20) == 0){
+    }
+    outb(SERIAL_COM1, (unsigned char)c);
+}
+
 void print(const char* str){
     int len = strlen(str);
     for(int i = 0; i < len; i++){
         terminal_writechar(str[i], 15);
+        serial_putchar(str[i]);
     }
 }
 
@@ -121,6 +165,7 @@ static void print_hex32(unsigned int v){
 
 void kernel_main(){
     terminal_initialize();
+    serial_init();
     print("Hello world!\ntest");
 
     // Ch 89: reload the GDT from C so future user code/data + TSS
@@ -142,12 +187,20 @@ void kernel_main(){
     tss.esp0 = 0x600000;
     tss.ss0  = KERNEL_DATA_SELECTOR;
     tss_load(0x28);
+    // Post-book marker for tests/35: ltr loaded TR with 0x28; a later
+    // ring 3 trap will need TR to find esp0, so reaching this line is
+    // proof the TSS descriptor is wired correctly.
+    print("\nTSS_OK");
 
     // Set up identity-mapped paging for the entire 4 GiB virtual space.
     kernel_chunk = paging_new_4gb(
         PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
     paging_switch(kernel_chunk);
     enable_paging();
+    // Post-book marker for tests/14: if paging were broken every later
+    // print would page-fault, so seeing this string on serial is proof
+    // CR0.PG and CR3 are correct.
+    print("\nPAGING_ON");
 
     isr80h_register_commands();
     keyboard_init();

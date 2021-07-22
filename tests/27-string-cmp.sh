@@ -9,29 +9,16 @@
 
 set -e
 cd "$(dirname "$0")/.."
+source tests/_lib.sh
 
 ./build.sh > /dev/null
 
-dump=$(mktemp)
-cmd=$(mktemp)
-trap 'rm -f "$dump" "$cmd"' EXIT
+log=$(mktemp)
+trap 'rm -f "$log"' EXIT
 
-printf 'pmemsave 0xb8000 4096 "%s"\nquit\n' "$dump" > "$cmd"
+run_kernel_capture "$log"
 
-( sleep 10; cat "$cmd" ) | timeout 25 qemu-system-x86_64 \
-        -hda bin/os.bin \
-        -m 256 \
-        -accel tcg \
-        -display none \
-        -vga std \
-        -monitor stdio \
-        -no-reboot \
-        > /dev/null 2>&1
-
-chars=$(od -An -v -tx1 -w1 "$dump" \
-            | awk 'NR%2==1 {printf "%s\n", $1}' \
-            | xxd -r -p \
-            | tr '\0' ' ')
+chars=$(cat "$log")
 
 ok=1
 echo "$chars" | grep -q 'istr=00000001'  || { echo "FAIL: istrncmp"; ok=0; }

@@ -2,30 +2,24 @@
 # tests/35-tss-loaded.sh
 #
 # Ch 90 - the kernel installs the TSS as GDT offset 0x28 and runs ltr.
-# Verify via QEMU monitor's `info registers` that the TR (Task Register)
-# is loaded with selector 0x28.
+# Two checks:
+#   - the kernel printed "TSS_OK" to serial right after tss_load
+#   - QEMU monitor's `info registers` shows TR=0028 at steady state
 
 set -e
 cd "$(dirname "$0")/.."
+source tests/_lib.sh
 
 ./build.sh > /dev/null
 
 regs=$(mktemp)
-cmd=$(mktemp)
-trap 'rm -f "$regs" "$cmd"' EXIT
+log=$(mktemp)
+trap 'rm -f "$regs" "$log"' EXIT
 
-printf 'info registers\nquit\n' > "$cmd"
+run_kernel_inspect "$regs" "$log" 'info registers'
 
-( sleep 10; cat "$cmd" ) | timeout 25 qemu-system-x86_64 \
-        -hda bin/os.bin \
-        -m 256 \
-        -accel tcg \
-        -display none \
-        -monitor stdio \
-        -no-reboot \
-        > "$regs" 2>&1
+grep -q 'TSS_OK' "$log" || { echo "FAIL: kernel never printed TSS_OK (tss_load path broken?)"; exit 1; }
 
-# TR appears as "TR =0028 ..." in QEMU's info registers output.
 if grep -qE 'TR[[:space:]]*=[[:space:]]*0028' "$regs"; then
     exit 0
 fi
