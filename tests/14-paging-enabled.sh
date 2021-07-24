@@ -18,7 +18,7 @@ regs=$(mktemp)
 log=$(mktemp)
 trap 'rm -f "$regs" "$log"' EXIT
 
-run_kernel_inspect "$regs" "$log" 'info registers'
+run_kernel_inspect "$regs" "$log" 'entering userland' '' 'info registers'
 
 grep -q 'PAGING_ON' "$log" || { echo "FAIL: kernel never printed PAGING_ON (enable_paging path broken?)"; exit 1; }
 
