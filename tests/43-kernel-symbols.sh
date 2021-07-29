@@ -34,6 +34,9 @@ required=(
     process_free
     process_terminate
     process_inject_arguments
+    isr80h_command1_print
+    isr80h_command2_getkey
+    isr80h_command3_putchar
     isr80h_command4_malloc
     isr80h_command5_free
     isr80h_command6_process_load_start
@@ -45,7 +48,15 @@ required=(
     elf_load
     elf_validate_loaded
     task_next
+    task_run_first_ever_task
     paging_get_physical_address
+    terminal_backspace
+    terminal_scroll
+    serial_init
+    keyboard_set_capslock
+    keyboard_get_capslock
+    keyboard_push
+    keyboard_pop
 )
 
 nm_out=$(i686-elf-nm build/kernelfull.o 2>/dev/null)
