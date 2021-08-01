@@ -47,18 +47,40 @@ check_elf() {
 }
 
 blank_syms=(
+    # Ch 127 / 128 / 144 - bootstrap + entry
     _start
     c_start
     main
+    # Ch 128 / 129 / 134 / 130 / 131 / 148 / 116 - syscall wrappers
     print
     samos_exit
-    samos_process_get_arguments
     samos_malloc
     samos_free
     samos_putchar
     samos_getkey
     samos_getkeyblock
+    samos_process_get_arguments
+    samos_process_load_start
+    samos_system
+    samos_system_run
+    # Ch 133 / 135 - printf chain
+    itoa
     printf
+    # Ch 139 - stdlib memory + string helpers
+    memcpy
+    memcmp
+    memset
+    strlen
+    strnlen
+    strcpy
+    strncpy
+    strncmp
+    strtok
+    tolower
+    isdigit
+    tonumericdigit
+    # Ch 142 - command argument parser
+    samos_parse_command
 )
 
 shell_syms=(
@@ -71,6 +93,9 @@ shell_syms=(
     samos_process_load_start
     samos_parse_command
     strncpy
+    strtok
+    samos_getkey
+    samos_getkeyblock
 )
 
 check_elf programs/blank/blank.elf "${blank_syms[@]}"
