@@ -30,19 +30,21 @@ log=$(mktemp)
 trap 'rm -f "$log"' EXIT
 
 (
-    sleep 5
-    for i in $(seq 1 200); do printf 'sendkey a\n'; done
+    # Wait longer than the absolute worst case for kernel boot under
+    # suite load (15 process_load_switch calls + disk image init).
+    sleep 8
+    for i in $(seq 1 300); do printf 'sendkey a\n'; done
     sleep 1
     printf 'sendkey caps_lock\n'
     sleep 0.5
-    for i in $(seq 1 200); do printf 'sendkey a\n'; done
+    for i in $(seq 1 300); do printf 'sendkey a\n'; done
     sleep 1
     printf 'sendkey caps_lock\n'
     sleep 0.5
-    for i in $(seq 1 200); do printf 'sendkey a\n'; done
-    sleep 2
+    for i in $(seq 1 300); do printf 'sendkey a\n'; done
+    sleep 3
     printf 'quit\n'
-) | timeout 60 qemu-system-x86_64 \
+) | timeout 90 qemu-system-x86_64 \
         -hda bin/os.bin \
         -m 256 \
         -accel tcg \

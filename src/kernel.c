@@ -338,6 +338,17 @@ void kernel_main(){
     // G04 is investigated and patched, the three lines below get
     // un-commented and test 37 starts asserting CS=0x1b, EIP=0x400000.
     print("\nentering userland... (deferred, G04)");
+
+#ifdef KERNEL_TEST_PANIC
+    // Build-flag-gated panic sentinel for test 58. Setting
+    // EXTRA_CFLAGS=-DKERNEL_TEST_PANIC in build.sh produces a kernel
+    // image that hits this panic instead of starting userland; test
+    // 58 boots that image and asserts the panic message reaches
+    // serial AND the kernel stops printing afterwards. Normal builds
+    // skip this entirely.
+    panic("\nPANIC-TEST-OK\n");
+#endif
+
     struct process* process = 0;
 
     // Ch 150 grand finale demo: load TWO blank.elf instances with different
@@ -460,6 +471,14 @@ void kernel_main(){
         panic("Failed to load blank.elf\n");
     }
     strcpy(argument.argument, "RL");
+    argument.next = 0x00;
+    process_inject_arguments(process, &argument);
+
+    res = process_load_switch("0:/blank.elf", &process);
+    if(res != SAMOS_ALL_OK){
+        panic("Failed to load blank.elf\n");
+    }
+    strcpy(argument.argument, "BSS");
     argument.next = 0x00;
     process_inject_arguments(process, &argument);
 

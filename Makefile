@@ -34,7 +34,7 @@ user_programs_clean:
 	nasm -f elf -g ./src/kernel.asm -o ./build/kernel.asm.o
 
 ./build/kernel.o: ./src/kernel.c
-	i686-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c ./src/kernel.c -o ./build/kernel.o
+	i686-elf-gcc $(INCLUDES) $(FLAGS) $(EXTRA_CFLAGS) -std=gnu99 -c ./src/kernel.c -o ./build/kernel.o
 
 ./build/idt/idt.asm.o: ./src/idt/idt.asm
 	nasm -f elf -g ./src/idt/idt.asm -o ./build/idt/idt.asm.o

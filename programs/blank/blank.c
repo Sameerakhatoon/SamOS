@@ -27,6 +27,21 @@ int main(int argc, char** argv){
         print("EXIT-RAN\n");
         return 0;
     }
+    if(strncmp(argv[0], "BSS", 3) == 0){
+        // Ch 132 / G12: a static int parked by GCC in .bss starts at
+        // zero, increments cleanly, and reads back as 1. Before G12
+        // the .bss PHDR's mapping aliased the start of the ELF buffer
+        // so this would print BSS-FAIL.
+        static int bss_counter;
+        bss_counter++;
+        if(bss_counter == 1){
+            print("BSS-OK\n");
+        } else {
+            print("BSS-FAIL\n");
+        }
+        while(1){}
+        return 0;
+    }
     if(strncmp(argv[0], "BS", 2) == 0){
         print("BS-ABC\b\b\bXYZ\n");
         return 0;
