@@ -30,13 +30,13 @@ log=$(mktemp)
 trap 'rm -f "$log"' EXIT
 
 (
-    sleep 8
-    for i in $(seq 1 400); do printf 'sendkey x\n'; done
-    sleep 2
-    for i in $(seq 1 400); do printf 'sendkey ret\n'; done
-    sleep 4
+    sleep 10
+    for i in $(seq 1 600); do printf 'sendkey x\n'; done
+    sleep 3
+    for i in $(seq 1 600); do printf 'sendkey ret\n'; done
+    sleep 5
     printf 'quit\n'
-) | timeout 90 qemu-system-x86_64 \
+) | timeout 120 qemu-system-x86_64 \
         -hda bin/os.bin \
         -m 256 \
         -accel tcg \
