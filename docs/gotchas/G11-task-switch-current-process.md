@@ -1,4 +1,8 @@
-# G11: task_switch must update current_process too
+# G11 - task_switch must update current_process too
+
+**Surfaced during:** post-Ch 149, while writing test 50 (caps lock behavioural) which loads a "KEY" task that loops `samos_getkeyblock` + `samos_putchar("K:<c>")`.
+**Fix:** call `process_switch(task->process)` inside `task_switch` so `current_process` follows `current_task` (`src/task/task.c`).
+**Regression test:** `tests/11-keyboard-fires.sh`, `tests/12-keyboard-fires-repeatedly.sh`, and `tests/50-caps-lock.sh` all need keypresses to round-trip through the KEY task's buffer; without G11 every sendkey lands in whoever was last `process_load_switch`'d at boot.
 
 ## Symptom
 
