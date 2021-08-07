@@ -14,3 +14,19 @@ Adds the C-standard `putchar()` to our stdlib. No kernel changes - reuses the ex
 ## Test impact
 
 Suite stays 32/32. The visible difference is a `Z` on the VGA after `8763`.
+
+## Why this chapter exists
+
+stdlib putchar wraps cmd 3 (no kernel change).
+
+## How the change lands
+
+samos_putchar asm + stdio.{h,c} + blank.c demo.
+
+## Regression test
+
+tests/49-putchar asserts PC-Xyz from cmd 3 round-trip.
+
+## Commit
+
+Original landing: ch134 stdlib putchar (see `git log --oneline` for the actual hash on your branch).

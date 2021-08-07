@@ -13,3 +13,19 @@ Two tiny functions that point `current_process` at a loaded process. Together th
 ## Why it matters
 
 `process_current()` returned `NULL` until now because nothing ever set `current_process`. As soon as Ch 115's IRQ1 handler tries `keyboard_push(c)`, it calls `process_current()` and silently bails on the NULL. Wiring up `process_load_switch` in kernel_main is what makes the keyboard buffer actually receive keys in the next chapter.
+
+## Why this chapter exists
+
+Wires current_process so IRQ1 (and later G11) knows which buffer to use.
+
+## How the change lands
+
+process_switch + process_load_switch + kernel_main switch to load_switch variant.
+
+## Regression test
+
+tests/50 needs current_process == active task (post-G11).
+
+## Commit
+
+Original landing: ch114 process_switch + process_load_switch (see `git log --oneline` for the actual hash on your branch).

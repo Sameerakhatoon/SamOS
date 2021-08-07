@@ -1,5 +1,9 @@
 # G09 - PIT IRQ during the second `process_load_switch` hijacks the kernel before task 2 is created
 
+**Surfaced during:** Ch 150 (PIT-driven multitasking) once `kernel_main` started loading TWO `blank.elf` tasks. As soon as the first `process_load_switch` set `current_process`, the next PIT IRQ ran `idt_clock -> task_next`, which iretd into task 1 and never returned - so task 2 was never created.
+**Fix:** `disable_interrupts()` immediately before the dual-load section in `kernel_main`. `task_return` re-enables IF in the synthesized user EFLAGS image, so userland still gets PIT preemption - the kernel just stays single-threaded across the loads.
+**Regression test:** `tests/41-multitasking.sh` requires ≥5 `Testing!` AND ≥5 `Abc!` tokens, which only holds if BOTH tasks were created and scheduled.
+
 ## Where it lives
 
 `src/kernel.c::kernel_main`, around the dual blank.elf load Ch 150 introduces.

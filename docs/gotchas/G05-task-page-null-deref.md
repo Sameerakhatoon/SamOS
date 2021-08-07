@@ -1,5 +1,9 @@
 # G05 - task_page() null-derefs on every IRQ before the first user task
 
+**Surfaced during:** Ch 113 (generic interrupt_handler with callback table), specifically the first PIT IRQ that arrives after `enable_interrupts()` but BEFORE `task_run_first_ever_task()` has set `current_task`.
+**Fix:** wrap `task_page()` and `task_current_save_state(frame)` in `if (task_current())` inside `src/idt/idt.c::interrupt_handler`. Both reach for `current_task->page_directory` / `->registers`, which is the null deref.
+**Regression test:** `tests/40-irq-before-task.sh` - boots the kernel, runs IRQs for 0.4 s before any user task is loaded, asserts the kernel-init banner survives (i.e. the kernel didn't triple-fault).
+
 ## Where it lives
 
 `src/idt/idt.c`, inside the Ch 113 `interrupt_handler`.

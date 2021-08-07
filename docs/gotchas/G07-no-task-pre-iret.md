@@ -1,5 +1,9 @@
 # G07 - interrupt_handler panics on null current task between enable_interrupts and first task
 
+**Surfaced during:** Ch 150 (PIT-driven multitasking), in the window between `enable_interrupts()` early in `kernel_main` and the later `task_run_first_ever_task()`. The PIT fires, `idt_clock` callback wants to save the current task's state, `task_current_save_state()` panics with "No current task to save".
+**Fix:** in `src/idt/idt.c::interrupt_handler`, wrap callback dispatch in `if (task_current())` AND guard the post-callback `task_page()` the same way. The PIT IRQ becomes a no-op (just EOIs the PIC) when there's no user task to schedule yet.
+**Regression test:** `tests/40-irq-before-task.sh` (the same sentinel as G05; both bugs ride the same null-current_task code path) and `tests/41-multitasking.sh` (which needs the whole chain to work).
+
 ## Where it lives
 
 `src/idt/idt.c::interrupt_handler`.

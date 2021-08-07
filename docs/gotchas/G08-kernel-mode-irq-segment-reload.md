@@ -1,5 +1,9 @@
 # G08 - interrupt_handler reloads kernel segments / saves task state on every IRQ, even when the trap came from kernel mode
 
+**Surfaced during:** Ch 150 (PIT-driven multitasking), once IRQ traps started arriving from BOTH ring 0 (kernel-mode work between syscalls) and ring 3. Tests 05/10/34/39/40 began intermittently flaking with `#GP` at `mov fs, ax` inside `kernel_registers` - the kernel was reloading kernel-segment selectors over kernel-segment selectors and treating random stack bytes as a user-mode trap frame.
+**Fix:** gate the whole user-mode fix-up on `(frame->cs & 3) == 3` in `src/idt/idt.c::interrupt_handler`. If the trap came from ring 0, skip `kernel_page()`, `task_current_save_state(frame)`, and `task_page()` - they're meaningless and dangerous in that context.
+**Regression test:** `tests/41-multitasking.sh` and the full pre-userland banner suite (tests 05/10/13/.../40) which all became reliably green after the gate landed.
+
 ## Where it lives
 
 `src/idt/idt.c::interrupt_handler`.

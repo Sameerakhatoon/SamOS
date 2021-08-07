@@ -1,5 +1,9 @@
 # G03 - Stale .o files on header edits
 
+**Surfaced during:** Ch 73 (VFS fread), when a header edit in `fs/file.h` slipped a struct layout change past the linker without recompiling the dependent `.o` files.
+**Fix:** `build.sh` now runs `make clean` every time before `make all`. The kernel is small enough that a full recompile is cheap; the cost of debugging a struct-layout drift is not.
+**Regression test:** `tests/23-fat16-registers.sh` (the test that originally flipped from `fs=FAT16` to `fs=6` and triggered this investigation).
+
 ## Symptom
 
 Test 23 (FAT16 registers) flipped from `fs=FAT16` to `fs=6` after the
