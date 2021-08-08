@@ -5,10 +5,10 @@ set -e
 cd "$(dirname "$0")"
 
 export PREFIX="$HOME/opt/cross"
-export TARGET=i686-elf
+export TARGET=x86_64-elf
 export PATH="$PREFIX/bin:$PATH"
 
-mkdir -p bin build build/idt build/memory build/memory/heap build/memory/paging build/io build/disk build/string build/fs build/fs/fat build/gdt build/task build/isr80h build/keyboard build/loader build/loader/formats
+mkdir -p bin build
 
 # Force a full recompile every time. Our Makefile has no header
 # dependencies, so any header edit (struct layout, prototype change)
