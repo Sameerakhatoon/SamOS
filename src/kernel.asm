@@ -20,10 +20,12 @@
 
 [BITS 32]
 global _start
+extern kernel_main
 
 CODE_SEG equ 0x08
 DATA_SEG equ 0x10
 LONG_MODE_CODE_SEG equ 0x18
+LONG_MODE_DATA_SEG equ 0x20
 
 _start:
     mov ax, DATA_SEG
@@ -68,7 +70,30 @@ _start:
 
 [BITS 64]
 long_mode_entry:
-    ; Park - Lecture 8 will route us into a 64-bit kernel_main.
+    ; Reload DS/ES/FS/GS/SS with the 64-bit data segment selector.
+    ; In long mode the limit/base of data segments are ignored, but
+    ; the L bit / system-segment encoding matters - we need a real
+    ; long-mode data descriptor (selector 0x20 in our GDT) rather
+    ; than the 32-bit one we used during the transition.
+    mov ax, LONG_MODE_DATA_SEG
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    mov ss, ax
+
+    ; Set up a 64-bit stack pointer. The top 32 bits of RSP/RBP
+    ; were undefined while we were in 32-bit code; explicitly zero
+    ; them by writing the whole 64-bit register.
+    mov rsp, 0x00200000
+    mov rbp, rsp
+
+    ; Hand off to kernel_main. The System V AMD64 ABI says RDI/RSI/
+    ; RDX/RCX/R8/R9 are caller-saved arg registers; kernel_main()
+    ; takes no args so we don't need to pre-load anything.
+    jmp kernel_main
+
+    ; If kernel_main ever returns we park forever.
     jmp $
 
 
@@ -106,6 +131,16 @@ gdt:
     db 0x9A                         ; Access (P=1 DPL=00 S=1 E=1 RW=1)
     db 0x20                         ; L=1 (long mode segment), D=0 mandatory
     db 0x00
+
+    ; 64-bit data segment (selector 0x20) - reload target for the
+    ; data segregs once we're in long mode. Long-mode data segments
+    ; ignore base/limit; the flag byte stays 0 (no L for data).
+    dw 0x0000
+    dw 0x0000
+    db 0x00
+    db 0x92                         ; Access (P=1 DPL=00 S=1 E=0 RW=1)
+    db 0x00
+    db 0x00
 gdt_end:
 
 gdt_descriptor:
@@ -132,4 +167,5 @@ align 4096
 PD_Table:
     dq 0x0000000000000083           ; 0x00000000 .. 0x001FFFFF, PS=1 RW=1 P=1
     dq 0x0000000000200083           ; 0x00200000 .. 0x003FFFFF
-    times 510 dq 0
+    dq 0x0000000000400083           ; 0x00400000 .. 0x005FFFFF (kernel_main lives here once C link enters)
+    times 509 dq 0
