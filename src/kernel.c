@@ -1,31 +1,109 @@
-// Lecture 8 - kernel.c is back in the build, but only as a stub.
+// Lecture 9 - restore simple terminal so kernel_main can paint
+// progress to VGA without needing the QEMU monitor.
 //
-// The 32-bit body of kernel_main (VGA driver, GDT/TSS setup, kheap
-// init, paging, IDT, FAT16 init, process loading, scheduler) is
-// dropped here. Every line of that came back lecture by lecture in
-// the original SamOs work and will come back lecture by lecture
-// on this branch as we re-port subsystems:
+// What's live in this file right now:
+//   - VGA cell helpers       (terminal_make_char, terminal_putchar)
+//   - Cursor + backspace     (terminal_writechar, terminal_backspace)
+//   - Screen init            (terminal_initialize)
+//   - String print           (print)
+//   - kernel_main banner     (Hello 64-bit!)
 //
-//   Lecture 9   - simple terminal restored
-//   Lecture 10  - heap restored
-//   Lecture 11+ - paging restored (2 MiB -> 4 KiB pages, multi-heap)
-//   Lecture 33+ - IO, IDT in 64-bit
-//   Lecture 49+ - GDT + TSS C code
-//   Lecture 53+ - keyboard
-//   Lecture 54+ - isr80h
-//   Lecture 58+ - simple 64-bit user program
-//   Lecture 65+ - ELF64 loader
-//
-// The 32-bit history of every helper is in the main branch.
-//
-// For now we just need to prove the long-mode entry path (Lecture
-// 7) successfully transferred to a 64-bit C function. RIP being
-// in this file at runtime is the test (tests64/L08-kernel-c.sh).
+// Everything else from the 32-bit kernel_main (GDT/TSS, kheap, paging,
+// IDT, FAT16, processes, scheduler) is still out of the build and
+// comes back lecture by lecture.
 
 #include "kernel.h"
+#include <stddef.h>
+#include <stdint.h>
+#include "string/string.h"
+#include "config.h"
+#include "status.h"
+
+uint16_t* video_mem = 0;
+uint16_t terminal_row = 0;
+uint16_t terminal_col = 0;
+
+uint16_t terminal_make_char(char c, char colour)
+{
+    return (colour << 8) | c;
+}
+
+void terminal_putchar(int x, int y, char c, char colour)
+{
+    video_mem[(y * VGA_WIDTH) + x] = terminal_make_char(c, colour);
+}
+
+void terminal_backspace()
+{
+    if (terminal_row == 0 && terminal_col == 0)
+    {
+        return;
+    }
+
+    if (terminal_col == 0)
+    {
+        terminal_row -= 1;
+        terminal_col = VGA_WIDTH;
+    }
+
+    terminal_col -= 1;
+    terminal_writechar(' ', 15);
+    terminal_col -= 1;
+}
+
+void terminal_writechar(char c, char colour)
+{
+    if (c == '\n')
+    {
+        terminal_row += 1;
+        terminal_col = 0;
+        return;
+    }
+
+    if (c == 0x08)
+    {
+        terminal_backspace();
+        return;
+    }
+
+    terminal_putchar(terminal_col, terminal_row, c, colour);
+    terminal_col += 1;
+    if (terminal_col >= VGA_WIDTH)
+    {
+        terminal_col = 0;
+        terminal_row += 1;
+    }
+}
+
+void terminal_initialize()
+{
+    video_mem = (uint16_t*)(0xB8000);
+    terminal_row = 0;
+    terminal_col = 0;
+    for (int y = 0; y < VGA_HEIGHT; y++)
+    {
+        for (int x = 0; x < VGA_WIDTH; x++)
+        {
+            terminal_putchar(x, y, ' ', 0);
+        }
+    }
+}
+
+void print(const char* str)
+{
+    size_t len = strlen(str);
+    for (size_t i = 0; i < len; i++)
+    {
+        terminal_writechar(str[i], 15);
+    }
+}
 
 void kernel_main(void)
 {
-    while (1) {
+    terminal_initialize();
+    print("Hello 64-bit!\n");
+
+    while (1)
+    {
     }
 }
