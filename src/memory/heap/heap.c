@@ -28,7 +28,11 @@ out:
 }
 
 static bool heap_validate_alignment(void* ptr){
-    return ((unsigned int)ptr % SAMOS_HEAP_BLOCK_SIZE) == 0;
+    // L10 port fix: `unsigned int` is 4 bytes on x86_64; casting a
+    // void* through it truncates the high 32 bits and breaks the
+    // alignment check for any pointer above 4 GiB. Use uintptr_t
+    // which is exactly the platform pointer width (8 bytes here).
+    return ((uintptr_t)ptr % SAMOS_HEAP_BLOCK_SIZE) == 0;
 }
 
 int heap_create(struct heap* heap, void* ptr, void* end, struct heap_table* table){
