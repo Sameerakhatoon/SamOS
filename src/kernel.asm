@@ -163,18 +163,27 @@ PDPT_TABLE:
     dq PD_Table + 0x03              ; Present + RW. Points at PD.
     times 511 dq 0
 
-; Lecture 10: grow the PD to cover the kheap range. SAMOS_HEAP_ADDRESS
-; sits at 0x01000000 (16 MiB) and its 100 MiB body extends past 0x07000000.
-; We generate 65 entries with NASM's %rep macro to identity-map
-; 0..0x82FFFFF (130 MiB) - well past anything the kernel will touch.
-%define PS_FLAG 0x83                    ; Present | RW | PageSize (2 MiB leaf)
-%define PAGE_INCREMENT 0x200000         ; 2 MiB stride
+; Lecture 11: switch from 2-MiB leaf pages at the PD level to 4-KiB
+; pages at the PT level. This means PD_Table no longer has PS=1 on
+; its entries (instead its first entry POINTS at a PT_Table), and
+; PT_Table holds 512 entries each mapping 4 KiB.
+;
+; Coverage shrinks from 130 MiB to 2 MiB this lecture - that is
+; deliberate. Lectures 12 and 13 build a C-side page-mapping API
+; that extends the identity map dynamically.
+
+%define PS_FLAG 0x03                    ; Present | RW (NO PageSize)
+%define PAGE_INCREMENT 0x1000           ; 4 KiB stride
 
 align 4096
 PD_Table:
+    dq PT_Table + PS_FLAG               ; PD[0] -> PT_Table (4 KiB pages)
+    times 511 dq 0
+
+align 4096
+PT_Table:
     %assign addr 0x00000000
-    %rep 65
-        dq addr + PS_FLAG
+    %rep 512
+        dq addr + PS_FLAG               ; PT entry: 4 KiB page, Present | RW
         %assign addr addr + PAGE_INCREMENT
     %endrep
-    times 447 dq 0

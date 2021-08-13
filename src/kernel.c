@@ -105,16 +105,17 @@ void kernel_main(void)
     terminal_initialize();
     print("Hello 64-bit!\n");
 
-    // Lecture 10: bring the kheap online and prove it works by
-    // allocating a 50-byte buffer, writing "ABC" into it, and
-    // printing it back through the terminal.
-    kheap_init();
-    char* data = kmalloc(50);
-    data[0] = 'A';
-    data[1] = 'B';
-    data[2] = 'C';
-    data[3] = 0x00;
-    print(data);
+    // Lecture 11 disables the L10 kheap probe. Going from 2-MiB
+    // leaves to 4-KiB pages this lecture shrinks our identity map
+    // to just 0..0x1FFFFF (one PT_Table). The kheap body lives at
+    // 0x01000000 (16 MiB) - well outside that window - so the
+    // first kmalloc write would #PF. Lectures 12 + 13 restore
+    // coverage by building a C-side page-mapping API.
+    //
+    // kheap_init();
+    // char* data = kmalloc(50);
+    // data[0] = 'A'; data[1] = 'B'; data[2] = 'C'; data[3] = 0x00;
+    // print(data);
 
     while (1)
     {
