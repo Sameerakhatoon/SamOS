@@ -163,27 +163,39 @@ PDPT_TABLE:
     dq PD_Table + 0x03              ; Present + RW. Points at PD.
     times 511 dq 0
 
-; Lecture 11: switch from 2-MiB leaf pages at the PD level to 4-KiB
-; pages at the PT level. This means PD_Table no longer has PS=1 on
-; its entries (instead its first entry POINTS at a PT_Table), and
-; PT_Table holds 512 entries each mapping 4 KiB.
+; Lecture 12: grow the 4-KiB page tables. PD_Table has %rep 30
+; entries (60 MiB coverage), each pointing to a distinct 4-KiB
+; slice of a single PT_Table holding %rep 512*30 = 15360 entries.
 ;
-; Coverage shrinks from 130 MiB to 2 MiB this lecture - that is
-; deliberate. Lectures 12 and 13 build a C-side page-mapping API
-; that extends the identity map dynamically.
+; Why 30 and not 100 (PeachOS64's value)? Their L12 still fits in
+; 250 sectors because their kernel.bin is smaller at that point.
+; Our kernel.bin already has the kheap object files; trying to ship
+; %rep 100 (= ~400 KiB of statically-initialised PT entries) blows
+; past 250 sectors and the BIOS 8-bit LBA28 sector-count cap. 30
+; entries = ~120 KiB of PT_Table, fits in 250 sectors, still covers
+; the kheap body at 0x01000000.
+;
+; The kheap body at 0x01000000 (16 MiB) sits well inside this 60 MiB
+; window. L13 brings the C-side mapper online and the static %rep
+; goes away entirely.
 
-%define PS_FLAG 0x03                    ; Present | RW (NO PageSize)
+%define PS_FLAG 0x03                    ; Present | RW (no PageSize at PT level)
 %define PAGE_INCREMENT 0x1000           ; 4 KiB stride
+%define PD_ENTRY_COUNT 20               ; 20 * 2 MiB = 40 MiB total (covers heap @ 16 MiB)
 
 align 4096
 PD_Table:
-    dq PT_Table + PS_FLAG               ; PD[0] -> PT_Table (4 KiB pages)
-    times 511 dq 0
+    %assign addr 0x00000000
+    %rep PD_ENTRY_COUNT
+        dq PT_Table + addr + 0x03
+        %assign addr addr + 0x200000
+    %endrep
+    times 512 - PD_ENTRY_COUNT dq 0
 
 align 4096
 PT_Table:
     %assign addr 0x00000000
-    %rep 512
-        dq addr + PS_FLAG               ; PT entry: 4 KiB page, Present | RW
+    %rep 512 * PD_ENTRY_COUNT
+        dq addr + PS_FLAG
         %assign addr addr + PAGE_INCREMENT
     %endrep
