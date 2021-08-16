@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include "memory/heap/kheap.h"
 #include "memory/memory.h"
+#include "memory/paging/paging.h"
 #include "string/string.h"
 #include "config.h"
 #include "status.h"
@@ -105,17 +106,29 @@ void kernel_main(void)
     terminal_initialize();
     print("Hello 64-bit!\n");
 
-    // Lecture 11 disables the L10 kheap probe. Going from 2-MiB
-    // leaves to 4-KiB pages this lecture shrinks our identity map
-    // to just 0..0x1FFFFF (one PT_Table). The kheap body lives at
-    // 0x01000000 (16 MiB) - well outside that window - so the
-    // first kmalloc write would #PF. Lectures 12 + 13 restore
-    // coverage by building a C-side page-mapping API.
-    //
-    // kheap_init();
-    // char* data = kmalloc(50);
-    // data[0] = 'A'; data[1] = 'B'; data[2] = 'C'; data[3] = 0x00;
-    // print(data);
+    // L10 kheap probe is back: kernel.asm's PD is again 2-MiB PS=1
+    // leaves covering 1 GiB, well past the kheap at 16 MiB.
+    kheap_init();
+    char* data = kmalloc(50);
+    data[0] = 'A';
+    data[1] = 'B';
+    data[2] = 'C';
+    data[3] = 0x00;
+    print(data);
+
+    // Lecture 13 - C-side paging probe. Build a fresh PML4 from
+    // scratch, identity-map the first ~400 MiB into it (100 * 1024
+    // pages = 102400 pages), load it via paging_switch (which does
+    // mov cr3, ...). The data buffer at 0x01XXXXXX must still be
+    // reachable through the new map, otherwise data[0] = 'M' below
+    // would #PF and the second print never happens.
+    struct paging_desc* desc = paging_desc_new(PAGING_MAP_LEVEL_4);
+    paging_map_range(desc, (void*)0x00000000, (void*)0x00000000,
+                     1024 * 100,
+                     PAGING_IS_WRITEABLE | PAGING_IS_PRESENT);
+    paging_switch(desc);
+    data[0] = 'M';
+    print(data);
 
     while (1)
     {
