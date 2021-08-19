@@ -101,13 +101,42 @@ void print(const char* str)
     }
 }
 
+// Lecture 15 - tiny halt-with-message helper. Future fault handlers
+// and unrecoverable kernel asserts will call panic("...") instead
+// of silent while(1)s, so we get a visible reason on VGA.
+void panic(const char* msg)
+{
+    print(msg);
+    while (1)
+    {
+    }
+}
+
+// Lecture 15 - the kernel's own paging descriptor. Created once in
+// kernel_main; afterwards anyone (user task code, fault handlers,
+// scheduler) that wants the kernel address space loaded just calls
+// kernel_page() instead of re-deriving the descriptor.
+struct paging_desc* kernel_paging_desc = 0;
+
+// Lecture 15 - restore the kernel address space + reload segregs.
+// Symmetric counterpart to a (future) user_page() that loads a
+// task's PML4 + user data selectors. Order matters: switch CR3
+// first so subsequent loads hit kernel mappings; reload segregs
+// after so any latent user-mode selector is gone before we run
+// kernel code.
+void kernel_page()
+{
+    kernel_registers();
+    paging_switch(kernel_paging_desc);
+}
+
 void kernel_main(void)
 {
     terminal_initialize();
     print("Hello 64-bit!\n");
 
-    // L10 kheap probe is back: kernel.asm's PD is again 2-MiB PS=1
-    // leaves covering 1 GiB, well past the kheap at 16 MiB.
+    // L10 kheap probe: kernel.asm's PD is 2-MiB PS=1 leaves covering
+    // 1 GiB, well past the kheap at 16 MiB.
     kheap_init();
     char* data = kmalloc(50);
     data[0] = 'A';
@@ -116,18 +145,26 @@ void kernel_main(void)
     data[3] = 0x00;
     print(data);
 
-    // Lecture 13 - C-side paging probe. Build a fresh PML4 from
-    // scratch, identity-map the first ~400 MiB into it (100 * 1024
-    // pages = 102400 pages), load it via paging_switch (which does
-    // mov cr3, ...). The data buffer at 0x01XXXXXX must still be
-    // reachable through the new map, otherwise data[0] = 'M' below
-    // would #PF and the second print never happens.
-    struct paging_desc* desc = paging_desc_new(PAGING_MAP_LEVEL_4);
-    paging_map_range(desc, (void*)0x00000000, (void*)0x00000000,
+    // Lecture 15 - the kernel paging descriptor is now a global
+    // owned by the kernel. Build it here, identity-map enough to
+    // cover the heap + code, switch to it. The old local-pointer
+    // variant from L13 is gone.
+    kernel_paging_desc = paging_desc_new(PAGING_MAP_LEVEL_4);
+    paging_map_range(kernel_paging_desc,
+                     (void*)0x00000000, (void*)0x00000000,
                      1024 * 100,
                      PAGING_IS_WRITEABLE | PAGING_IS_PRESENT);
-    paging_switch(desc);
+    paging_switch(kernel_paging_desc);
     data[0] = 'M';
+    print(data);
+
+    // Sanity: kernel_page() should be a no-op here (we're already
+    // on kernel_paging_desc and on the kernel data selectors), but
+    // calling it exercises both halves of the abstraction. After
+    // this returns we'd expect to keep running normally; if the
+    // segreg reload were wrong we'd #GP immediately.
+    kernel_page();
+    data[0] = 'K';
     print(data);
 
     while (1)

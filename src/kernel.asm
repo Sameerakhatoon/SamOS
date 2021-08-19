@@ -20,6 +20,7 @@
 
 [BITS 32]
 global _start
+global kernel_registers
 extern kernel_main
 
 CODE_SEG equ 0x08
@@ -69,6 +70,24 @@ _start:
     jmp LONG_MODE_CODE_SEG:long_mode_entry
 
 [BITS 64]
+; Lecture 15: kernel_registers() - reload the segment registers with
+; the 64-bit data selector. Called as a normal C function (no args,
+; no return value). Typical usage: after a paging_switch into the
+; kernel's address space, follow up with kernel_registers() so
+; ds/es/fs/gs are guaranteed to be the kernel data selector even if
+; the caller had user-mode selectors loaded.
+;
+; ss intentionally untouched - the AMD64 SysV ABI requires SS to
+; match a valid stack segment at all times, and at this point the
+; kernel stack is already correctly described by the existing SS.
+kernel_registers:
+    mov ax, LONG_MODE_DATA_SEG
+    mov ds, ax
+    mov es, ax
+    mov fs, ax
+    mov gs, ax
+    ret
+
 long_mode_entry:
     ; Reload DS/ES/FS/GS/SS with the 64-bit data segment selector.
     ; In long mode the limit/base of data segments are ignored, but
