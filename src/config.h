@@ -14,6 +14,15 @@
 
 #define SAMOS_SECTOR_SIZE       512
 
+// Lecture 18 - BIOS E820 memory map. boot.asm dumps the entries at
+// 0x7E00 in real mode; the count goes at 0x7DFE (overwrites the
+// 0xAA55 boot signature once the BIOS has finished with it). NOTE:
+// 0x7E00 is also SAMOS_HEAP_TABLE_ADDRESS, so the E820 entries are
+// LIVE only until kheap_init runs. Read them first, then init the
+// heap. A future lecture will copy the entries somewhere safe.
+#define SAMOS_MEMORY_MAP_LOCATION                0x7E00
+#define SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION  0x7DFE
+
 #define SAMOS_MAX_FILESYSTEMS        12
 #define SAMOS_MAX_FILE_DESCRIPTORS  512
 

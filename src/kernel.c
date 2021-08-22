@@ -136,6 +136,15 @@ void kernel_main(void)
     terminal_initialize();
     print("Hello 64-bit!\n");
 
+    // Lecture 18 - read the E820 memory map BEFORE kheap_init.
+    // The E820 entries live at SAMOS_MEMORY_MAP_LOCATION which is
+    // the same physical address as SAMOS_HEAP_TABLE_ADDRESS - the
+    // heap init writes its block bitmap on top, so any E820 read
+    // after kheap_init returns garbage.
+    print("e820 total: ");
+    print(itoa((int)e820_total_accessible_memory()));
+    print("\n");
+
     // L10 kheap probe: kernel.asm's PD is 2-MiB PS=1 leaves covering
     // 1 GiB, well past the kheap at 16 MiB.
     // L16 - kheap_init now takes the heap size. Pass the legacy
