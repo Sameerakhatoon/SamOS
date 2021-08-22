@@ -39,7 +39,7 @@ ok=1
 echo "$chars" | grep -q 'e820 total:' \
     || { echo "FAIL: e820 line missing"; ok=0; }
 
-total=$(echo "$chars" | grep -oE 'e820 total: [0-9]+' | grep -oE '[0-9]+')
+total=$(echo "$chars" | grep -oE 'e820 total: [0-9]+' | sed 's/^e820 total: //')
 if [ -z "$total" ]; then
     echo "FAIL: could not parse e820 total"
     ok=0
