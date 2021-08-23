@@ -9,8 +9,19 @@
 // 100 MiB heap.
 #define SAMOS_HEAP_SIZE_BYTES   104857600
 #define SAMOS_HEAP_BLOCK_SIZE   4096
-#define SAMOS_HEAP_ADDRESS      0x01000000
-#define SAMOS_HEAP_TABLE_ADDRESS 0x00007E00
+
+// Lecture 20 - multi-heap layout. The minimal kernel heap is built
+// from the first E820-type-1 region whose length covers
+// SAMOS_HEAP_SIZE_BYTES. The bitmap goes at a fixed kernel address
+// (MINIMAL_HEAP_TABLE_ADDRESS, 16 MiB - well above the kernel
+// image at 1 MiB and outside the 0x7E00 E820 dump area, so kheap
+// init no longer clobbers the E820 entries). The heap data pool
+// starts MINIMAL_HEAP_TABLE_SIZE bytes later. After the minimal
+// heap is live, any other E820 type-1 regions get added as
+// additional sub-heaps via multiheap_add.
+#define SAMOS_MINIMAL_HEAP_TABLE_ADDRESS        0x01000000
+#define SAMOS_MINIMAL_HEAP_ADDRESS              0x01100000
+#define SAMOS_MINIMAL_HEAP_TABLE_SIZE           (SAMOS_MINIMAL_HEAP_ADDRESS - SAMOS_MINIMAL_HEAP_TABLE_ADDRESS)
 
 #define SAMOS_SECTOR_SIZE       512
 

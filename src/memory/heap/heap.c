@@ -45,6 +45,9 @@ int heap_create(struct heap* heap, void* ptr, void* end, struct heap_table* tabl
 
     memset(heap, 0, sizeof(struct heap));
     heap->saddr = ptr;
+    // L20 - remember the end of the data pool so multiheap can
+    // route heap_free by address range.
+    heap->eaddr = end;
     heap->table = table;
 
     res = heap_validate_table(ptr, end, table);
@@ -181,4 +184,17 @@ size_t heap_total_used(struct heap* heap){
 
 size_t heap_total_available(struct heap* heap){
     return heap_total_size(heap) - heap_total_used(heap);
+}
+
+// Lecture 20 - per-heap zalloc. The kheap-level kzalloc currently
+// (L20) does not work because multiheap_zalloc is not in yet;
+// internal callers go through this until the kheap path catches
+// up in a later lecture.
+void* heap_zalloc(struct heap* heap, size_t size){
+    void* ptr = heap_malloc(heap, size);
+    if(!ptr){
+        return 0;
+    }
+    memset(ptr, 0x00, size);
+    return ptr;
 }
