@@ -8,6 +8,7 @@
 
 #include "paging.h"
 #include "memory/heap/kheap.h"
+#include "memory/heap/heap.h"
 #include "memory/memory.h"
 #include "status.h"
 
@@ -140,6 +141,44 @@ int paging_map(struct paging_desc* desc, void* virt, void* phys, int flags)
     pt_entry->read_write = (flags & PAGING_IS_WRITEABLE) ? 1 : 0;
 
     return res;
+}
+
+// Lecture 21 - walk the BIOS E820 dump and identity-map every
+// type-1 (usable) region into `desc`. The E820 buffer at 0x7E00
+// survives kheap_init since L20 moved the bitmap to 16 MiB, so
+// this can be called any time after kheap_init.
+//
+// Misaligned bases get aligned UP (round to next page); misaligned
+// ends get aligned DOWN (round to current page). This intentionally
+// excludes any sub-page leftover on either side - those would have
+// been usable RAM but we can only map whole pages anyway.
+int paging_map_e820_memory_regions(struct paging_desc* desc)
+{
+    size_t total_entries = e820_total_entries();
+    for (size_t i = 0; i < total_entries; i++)
+    {
+        struct e820_entry* entry = e820_entry(i);
+        if (entry->type != 1)
+        {
+            continue;
+        }
+
+        void* base_addr = (void*)(uintptr_t)entry->base_addr;
+        void* end_addr  = (void*)(uintptr_t)(entry->base_addr + entry->length);
+
+        if (!paging_is_aligned(base_addr))
+        {
+            base_addr = paging_align_address(base_addr);
+        }
+        if (!paging_is_aligned(end_addr))
+        {
+            end_addr = paging_align_to_lower_page(end_addr);
+        }
+
+        paging_map_to(desc, base_addr, base_addr, end_addr,
+                      PAGING_IS_WRITEABLE | PAGING_IS_PRESENT);
+    }
+    return 0;
 }
 
 int paging_map_range(struct paging_desc* desc, void* virt, void* phys, size_t count, int flags)
