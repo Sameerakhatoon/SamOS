@@ -23,6 +23,7 @@
 #include "config.h"
 #include "kernel.h"
 #include "memory/memory.h"
+#include "memory/paging/paging.h"
 
 struct heap       kernel_minimal_heap;
 struct heap_table kernel_minimal_heap_table;
@@ -56,6 +57,17 @@ void kheap_init(void){
 
     void* heap_address     = (char*)heap_table_address + SAMOS_MINIMAL_HEAP_TABLE_SIZE;
     void* heap_end_address = (char*)heap_address + SAMOS_HEAP_SIZE_BYTES;
+
+    // L22 - the heap region has to be page-aligned at both ends so
+    // a future paging-defragment second pass can map/remap whole
+    // pages without slicing a block. Round base UP, end DOWN.
+    if(!paging_is_aligned(heap_address)){
+        heap_address = paging_align_address(heap_address);
+    }
+    if(!paging_is_aligned(heap_end_address)){
+        heap_end_address = paging_align_to_lower_page(heap_end_address);
+    }
+
     size_t size = (size_t)((char*)heap_end_address - (char*)heap_address);
     size_t total_table_entries = size / SAMOS_HEAP_BLOCK_SIZE;
 
@@ -82,9 +94,18 @@ void kheap_init(void){
         if(cur == entry || cur->type != 1){
             continue;
         }
-        multiheap_add(kernel_multiheap,
-                      (void*)(uintptr_t)cur->base_addr,
-                      (void*)(uintptr_t)(cur->base_addr + cur->length),
+
+        // L22 - page-align both ends. Round base UP, end DOWN.
+        void* base_addr = (void*)(uintptr_t)cur->base_addr;
+        void* end_addr  = (void*)(uintptr_t)(cur->base_addr + cur->length);
+        if(!paging_is_aligned(base_addr)){
+            base_addr = paging_align_address(base_addr);
+        }
+        if(!paging_is_aligned(end_addr)){
+            end_addr = paging_align_to_lower_page(end_addr);
+        }
+
+        multiheap_add(kernel_multiheap, base_addr, end_addr,
                       MULTIHEAP_HEAP_FLAG_DEFRAGMENT_WITH_PAGING);
     }
 }
@@ -97,13 +118,40 @@ void* kmalloc(size_t size){
     return ptr;
 }
 
-// L20 - stubbed pending later-lecture multiheap_zalloc.
+// Lecture 22 - kzalloc unstubbed. Goes through the same
+// first-pass alloc as kmalloc and memsets to zero. (No fancy
+// "find a heap that already has a pre-zeroed block" yet.)
 void* kzalloc(size_t size){
-    (void)size;
-    return NULL;
+    void* ptr = kmalloc(size);
+    if(!ptr){
+        return 0;
+    }
+    memset(ptr, 0x00, size);
+    return ptr;
 }
 
-// L20 - stubbed pending later-lecture multiheap_free.
+// Lecture 22 - "paging-allowed" allocators. Use the multiheap
+// palloc path (first-pass, then second-pass paging-defragment).
+// The second pass is still a NULL stub at L22; these will start
+// returning more aggressive results once the defragmenter lands.
+void* kpalloc(size_t size){
+    void* ptr = multiheap_palloc(kernel_multiheap, size);
+    if(!ptr){
+        panic("Failed to allocate memory\n");
+    }
+    return ptr;
+}
+
+void* kpzalloc(size_t size){
+    void* ptr = kpalloc(size);
+    if(!ptr){
+        return 0;
+    }
+    memset(ptr, 0x00, size);
+    return ptr;
+}
+
+// L20 - still stubbed pending later-lecture multiheap_free.
 void kfree(void* ptr){
     (void)ptr;
 }

@@ -12,7 +12,9 @@ struct heap;
 // the E820 entry itself.
 void          kheap_init(void);
 void*         kmalloc(size_t size);
-void*         kzalloc(size_t size);  // L20 stubbed: returns NULL until multiheap_zalloc lands
-void          kfree(void* ptr);      // L20 stubbed: no-op until multiheap_free lands
+void*         kzalloc(size_t size);
+void*         kpalloc(size_t size);   // L22 - palloc = first-pass, then paging-defragment second pass
+void*         kpzalloc(size_t size);  // L22 - kpalloc + memset 0
+void          kfree(void* ptr);       // still stubbed: no-op until multiheap_free lands
 
 #endif
