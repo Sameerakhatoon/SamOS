@@ -154,6 +154,15 @@ int paging_map(struct paging_desc* desc, void* virt, void* phys, int flags)
 // been usable RAM but we can only map whole pages anyway.
 int paging_map_e820_memory_regions(struct paging_desc* desc)
 {
+    // Lecture 23 - unconditionally identity-map the first 1 MiB.
+    // Real-mode BIOS data, IVT remnants, VGA (0xB8000), boot
+    // sector at 0x7C00, E820 dump at 0x7E00, kernel image at
+    // 0x100000 - they all live here. Marking them present in
+    // the new descriptor lets us paging_switch without
+    // immediately faulting on a banner write.
+    paging_map_to(desc, (void*)0x00, (void*)0x00, (void*)0x100000,
+                  PAGING_IS_WRITEABLE | PAGING_IS_PRESENT);
+
     size_t total_entries = e820_total_entries();
     for (size_t i = 0; i < total_entries; i++)
     {
