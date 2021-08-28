@@ -6,9 +6,12 @@
 
 #define SAMOS_TOTAL_INTERRUPTS  512
 
-// 100 MiB heap.
-#define SAMOS_HEAP_SIZE_BYTES   104857600
-#define SAMOS_HEAP_BLOCK_SIZE   4096
+// Lecture 24 - this is the MINIMUM heap size: we refuse to bring
+// up the kernel if no E820 type-1 region is at least this big.
+// The actual minimal-heap data pool size is computed at runtime
+// from the chosen region's length (see kheap_init).
+#define SAMOS_HEAP_MINIMUM_SIZE_BYTES   104857600
+#define SAMOS_HEAP_BLOCK_SIZE           4096
 
 // Lecture 20 - multi-heap layout. The minimal kernel heap is built
 // from the first E820-type-1 region whose length covers

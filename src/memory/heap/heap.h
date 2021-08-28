@@ -36,4 +36,9 @@ size_t heap_total_size(struct heap* heap);
 size_t heap_total_used(struct heap* heap);
 size_t heap_total_available(struct heap* heap);
 
+// Lecture 24 - block-size alignment helpers, exposed for the
+// multiheap defragmenter and any future region sizing code.
+uintptr_t heap_align_value_to_upper(uintptr_t val);
+uintptr_t heap_align_value_to_lower(uintptr_t val);
+
 #endif
