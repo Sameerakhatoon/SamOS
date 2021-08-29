@@ -35,6 +35,14 @@ struct multiheap {
     // nodes and any dynamic sub-heap headers/tables.
     struct heap*                   starting_heap;
     struct multiheap_single_heap*  first_multiheap;
+
+    // Lecture 25 - end of the highest physical sub-heap. Pointers
+    // above this address are interpreted as "virtual" - they map
+    // to a defragment-by-paging arena that lives in the unused
+    // virtual address space above the last sub-heap. Populated
+    // by a later lecture when the second-pass allocator lands.
+    void*                          max_end_data_addr;
+
     size_t                         total_heaps;
 };
 
