@@ -97,6 +97,15 @@ bool heap_is_address_within_heap(struct heap* heap, void* ptr){
     return ptr >= heap->saddr && ptr <= heap->eaddr;
 }
 
+// Lecture 26 - install per-block callbacks on a heap. Either
+// argument may be NULL to keep that side unhooked.
+void heap_callbacks_set(struct heap* heap,
+                        HEAP_BLOCK_ALLOCATED_CALLBACK_FUNCTION allocated_func,
+                        HEAP_BLOCK_FREE_CALLBACK_FUNCTION free_func){
+    heap->block_allocated_callback = allocated_func;
+    heap->block_free_callback      = free_func;
+}
+
 // Lecture 23 - promote heap-block-index types from int (32-bit)
 // to int64_t so heaps larger than ~8 TiB at 4-KiB blocks don't
 // overflow the index space. Also fix two latent bugs:
@@ -158,6 +167,14 @@ static void heap_mark_blocks_taken(struct heap* heap, int64_t start_block, int64
         if(i != end_block){
             entry |= HEAP_BLOCK_HAS_NEXT;
         }
+
+        // Lecture 26 - fire the per-block alloc callback if any.
+        // Callbacks see one block at a time, even for multi-block
+        // allocations. The "size" arg is always SAMOS_HEAP_BLOCK_SIZE.
+        if(heap->block_allocated_callback){
+            void* address = heap_block_to_address(heap, i);
+            heap->block_allocated_callback(address, SAMOS_HEAP_BLOCK_SIZE);
+        }
     }
 }
 
@@ -182,6 +199,16 @@ static void heap_mark_blocks_free(struct heap* heap, int64_t starting_block){
     for(int64_t i = starting_block; i < (int64_t)table->total; i++){
         HEAP_BLOCK_TABLE_ENTRY entry = table->entries[i];
         table->entries[i] = HEAP_BLOCK_TABLE_ENTRY_FREE;
+
+        // Lecture 26 - fire the per-block free callback if any.
+        // Fires AFTER marking the entry free, so a callback that
+        // wants to verify the table state sees the post-free
+        // truth.
+        if(heap->block_free_callback){
+            void* address = heap_block_to_address(heap, i);
+            heap->block_free_callback(address);
+        }
+
         if(!(entry & HEAP_BLOCK_HAS_NEXT)){
             break;
         }
