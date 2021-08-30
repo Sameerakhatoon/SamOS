@@ -40,6 +40,13 @@ void* paging_align_to_lower_page(void* addr)
     return (void*)a;
 }
 
+// Lecture 27 - expose the active descriptor so multiheap can
+// queue page-table edits against the live PML4 without each
+// caller having to thread a desc pointer through.
+struct paging_desc* paging_current_descriptor(void){
+    return current_paging_desc;
+}
+
 void paging_switch(struct paging_desc* desc)
 {
     current_paging_desc = desc;

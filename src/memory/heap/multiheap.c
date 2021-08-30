@@ -2,6 +2,7 @@
 
 #include "multiheap.h"
 #include "kernel.h"
+#include "memory/paging/paging.h"
 #include "status.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -156,6 +157,78 @@ static void* multiheap_alloc_second_pass(struct multiheap* mh, size_t size){
     (void)mh;
     (void)size;
     return NULL;
+}
+
+// Lecture 27 - free-callback installed on each shadow heap's
+// block_free_callback by multiheap_ready. Tears the live page-
+// table entry for the freed virtual page down (flags=0, present=
+// 0) so a subsequent access faults. Reuses paging_map with a
+// NULL phys + flags=0 as the unmap idiom.
+void multiheap_paging_heap_free_block(void* ptr){
+    paging_map(paging_current_descriptor(), ptr, NULL, 0);
+}
+
+// Lecture 27 - one-shot setup. For every DEFRAGMENT_WITH_PAGING
+// sub-heap, build a shadow heap that lives in the virtual arena
+// at (max_end + physical_addr_of_sub_heap), identity-map the
+// shadow's range into the live PML4 (as not-present so first
+// access faults), and hook the free callback.
+//
+// Caller MUST have a paging_desc loaded - we panic otherwise.
+// Idempotent only in the sense that calling twice clobbers the
+// existing shadow heaps (callers should not).
+//
+// At L27 nothing actually calls this; "Lecture 32 - calling
+// multiheap_ready" is when the wiring goes live.
+int multiheap_ready(struct multiheap* mh){
+    int res = 0;
+    mh->flags |= MULTIHEAP_FLAG_IS_READY;
+
+    struct paging_desc* paging_desc = paging_current_descriptor();
+    if(!paging_desc){
+        panic("multiheap_ready: paging not set up\n");
+    }
+
+    void* max_end_addr = multiheap_get_max_memory_end_address(mh);
+    mh->max_end_data_addr = max_end_addr;
+
+    struct multiheap_single_heap* cur = mh->first_multiheap;
+    while(cur){
+        if(multiheap_heap_allows_paging(cur)){
+            // Shadow range in the virtual arena. Lays the
+            // physical sub-heap's address space directly atop
+            // max_end_addr so virtual_to_physical is a simple
+            // subtraction (matches L25's helper).
+            void* vstart = (char*)max_end_addr + (uintptr_t)cur->heap->saddr;
+            void* vend   = (char*)max_end_addr + (uintptr_t)cur->heap->eaddr;
+
+            // Shadow bitmap + heap header come out of the
+            // starting heap (the multiheap bootstrap arena).
+            struct heap_table* sht = heap_zalloc(mh->starting_heap, sizeof(struct heap_table));
+            sht->entries = heap_zalloc(mh->starting_heap,
+                                       cur->heap->table->total * sizeof(HEAP_BLOCK_TABLE_ENTRY));
+            sht->total   = cur->heap->table->total;
+
+            // SamOs deviation: upstream calls a nonexistent
+            // heap_kalloc here. Use heap_zalloc - same effect
+            // (we want a zeroed struct heap anyway).
+            struct heap* shadow = heap_zalloc(mh->starting_heap, sizeof(struct heap));
+            heap_create(shadow, vstart, vend, sht);
+
+            // Reserve the virtual range in the page tables but
+            // mark not-present (flags=0). First access to a
+            // shadow page faults; the alloc callback (later
+            // lecture) will turn it on.
+            paging_map_to(paging_desc, vstart, vstart, vend, 0);
+
+            // Only the free side is hooked at L27 - it unmaps
+            // the page on free.
+            heap_callbacks_set(shadow, NULL, multiheap_paging_heap_free_block);
+            cur->paging_heap = shadow;
+        }
+        cur = cur->next;
+    }
+    return res;
 }
 
 void* multiheap_alloc(struct multiheap* mh, size_t size){
