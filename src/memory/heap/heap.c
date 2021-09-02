@@ -219,6 +219,31 @@ static int64_t heap_address_to_block(struct heap* heap, void* address){
     return ((int64_t)(address - heap->saddr)) / SAMOS_HEAP_BLOCK_SIZE;
 }
 
+// Lecture 28 - count the TAKEN blocks starting at `starting_address`.
+// Stops at the first block without HAS_NEXT (the terminator of
+// the run). Returns 0 if `starting_address` is outside the heap
+// or hits a free block immediately.
+size_t heap_allocation_block_count(struct heap* heap, void* starting_address){
+    size_t count = 0;
+    struct heap_table* table = heap->table;
+    int64_t starting_block = heap_address_to_block(heap, starting_address);
+    if(starting_block < 0){
+        goto out;
+    }
+
+    for(int64_t i = starting_block; i < (int64_t)table->total; i++){
+        HEAP_BLOCK_TABLE_ENTRY entry = table->entries[i];
+        if(entry & HEAP_BLOCK_TABLE_ENTRY_TAKEN){
+            count++;
+        }
+        if(!(entry & HEAP_BLOCK_HAS_NEXT)){
+            break;
+        }
+    }
+out:
+    return count;
+}
+
 void* heap_malloc(struct heap* heap, size_t size){
     size_t  aligned_size = heap_align_value_to_upper(size);
     int64_t total_blocks = aligned_size / SAMOS_HEAP_BLOCK_SIZE;

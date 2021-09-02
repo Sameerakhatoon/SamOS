@@ -74,4 +74,9 @@ uintptr_t heap_align_value_to_lower(uintptr_t val);
 // to figure out which sub-heap owns a given pointer.
 bool heap_is_address_within_heap(struct heap* heap, void* ptr);
 
+// Lecture 28 - given a pointer to the start of an allocation,
+// return the number of blocks the allocation spans. Used by
+// the defragmenter to know how much virtual range to remap.
+size_t heap_allocation_block_count(struct heap* heap, void* starting_address);
+
 #endif
