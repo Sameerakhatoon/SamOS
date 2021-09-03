@@ -16,7 +16,7 @@ static int64_t   heap_get_start_block(struct heap* heap, uintptr_t total_blocks)
 static void*     heap_block_to_address(struct heap* heap, int64_t block);
 static void      heap_mark_blocks_taken(struct heap* heap, int64_t start_block, int64_t total_blocks);
 static void      heap_mark_blocks_free(struct heap* heap, int64_t starting_block);
-static int64_t   heap_address_to_block(struct heap* heap, void* address);
+// L29 - un-staticed; declared in heap.h.
 static void*     heap_malloc_blocks(struct heap* heap, uintptr_t total_blocks);
 
 static int heap_validate_table(void* ptr, void* end, struct heap_table* table){
@@ -215,7 +215,9 @@ static void heap_mark_blocks_free(struct heap* heap, int64_t starting_block){
     }
 }
 
-static int64_t heap_address_to_block(struct heap* heap, void* address){
+// L29 - exposed (was static). multiheap_free walks per-block
+// addresses of virtual-arena allocations using this.
+int64_t heap_address_to_block(struct heap* heap, void* address){
     return ((int64_t)(address - heap->saddr)) / SAMOS_HEAP_BLOCK_SIZE;
 }
 

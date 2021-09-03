@@ -64,7 +64,12 @@ int   multiheap_add_existing_heap(struct multiheap* mh, struct heap* heap, int f
 int   multiheap_add(struct multiheap* mh, void* saddr, void* eaddr, int flags);
 void* multiheap_alloc(struct multiheap* mh, size_t size);
 void* multiheap_palloc(struct multiheap* mh, size_t size);
-void  multiheap_free(struct multiheap* mh);
+
+// Lecture 29 - the OLD multiheap_free (tear down all sub-heaps)
+// is now multiheap_free_heap; per-allocation free takes the
+// short name to match kfree's expected wiring shape.
+void  multiheap_free_heap(struct multiheap* mh);
+void  multiheap_free(struct multiheap* mh, void* ptr);
 
 // Lecture 27 - one-shot setup. Builds the virtual arena above
 // max_end_data_addr; for every DEFRAGMENT_WITH_PAGING sub-heap,

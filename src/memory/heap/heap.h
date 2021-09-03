@@ -79,4 +79,8 @@ bool heap_is_address_within_heap(struct heap* heap, void* ptr);
 // the defragmenter to know how much virtual range to remap.
 size_t heap_allocation_block_count(struct heap* heap, void* starting_address);
 
+// Lecture 29 - exposed for multiheap_free which needs to walk
+// the per-block addresses of a virtual-arena allocation.
+int64_t heap_address_to_block(struct heap* heap, void* address);
+
 #endif
