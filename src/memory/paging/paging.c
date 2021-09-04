@@ -14,6 +14,11 @@
 
 static struct paging_desc* current_paging_desc = 0;
 
+// L31 - paging_null_entry is defined further down; forward-
+// declare it so paging_get (which we hoisted to the top with
+// the other L27..L29 helpers) can call it.
+static bool paging_null_entry(struct paging_desc_entry* entry);
+
 struct paging_pml_entries* paging_pml4_entries_new(void)
 {
     return kzalloc(sizeof(struct paging_pml_entries));
@@ -47,16 +52,49 @@ struct paging_desc* paging_current_descriptor(void){
     return current_paging_desc;
 }
 
-// Lecture 29 - STUB. paging_get returns the PT leaf entry for a
-// given virtual address by walking PML4 -> PDPT -> PD -> PT.
-// Real implementation lands in L31. Until then we return NULL,
-// which propagates up through paging_get_physical_address and
-// out of multiheap_free's virtual-arena branch. multiheap_free
-// is dormant at L29 so this stub never actually fires.
-struct paging_desc_entry* paging_get(struct paging_desc* desc, void* virtual_address){
-    (void)desc;
-    (void)virtual_address;
-    return NULL;
+// Lecture 31 - real implementation. Walks PML4 -> PDPT -> PD ->
+// PT for `virt` and returns a pointer to the PT leaf entry, or
+// NULL if any intermediate entry is missing. The returned PT
+// entry may itself be null (not-present mapping); the caller
+// (paging_get_physical_address) does that check.
+//
+// SamOs deviation: upstream has cut-paste bugs in the
+// intermediate null checks (testing the entries-array pointer
+// against a zero struct instead of the relevant entry). The
+// upstream version still works in practice because if pml4_entry
+// is non-null then the PDPT it points at is a real allocated
+// table and its first entry being zero just means PDPT[0] is
+// unmapped - which is fine since we index with pdpt_index, not
+// 0. We write the clean walk anyway.
+struct paging_desc_entry* paging_get(struct paging_desc* desc, void* virt){
+    uint64_t va = (uint64_t)virt;
+    size_t pml4_idx = (va >> 39) & 0x1FF;
+    size_t pdpt_idx = (va >> 30) & 0x1FF;
+    size_t pd_idx   = (va >> 21) & 0x1FF;
+    size_t pt_idx   = (va >> 12) & 0x1FF;
+
+    struct paging_desc_entry* pml4_entry = &desc->pml->entries[pml4_idx];
+    if(paging_null_entry(pml4_entry)){
+        return NULL;
+    }
+
+    struct paging_desc_entry* pdpt =
+        (struct paging_desc_entry*)(((uint64_t)pml4_entry->address) << 12);
+    struct paging_desc_entry* pdpt_entry = &pdpt[pdpt_idx];
+    if(paging_null_entry(pdpt_entry)){
+        return NULL;
+    }
+
+    struct paging_desc_entry* pd =
+        (struct paging_desc_entry*)(((uint64_t)pdpt_entry->address) << 12);
+    struct paging_desc_entry* pd_entry = &pd[pd_idx];
+    if(paging_null_entry(pd_entry)){
+        return NULL;
+    }
+
+    struct paging_desc_entry* pt =
+        (struct paging_desc_entry*)(((uint64_t)pd_entry->address) << 12);
+    return &pt[pt_idx];
 }
 
 // Lecture 29 - virtual-to-physical helper. Uses paging_get to
