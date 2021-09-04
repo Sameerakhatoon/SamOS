@@ -73,6 +73,18 @@ bool multiheap_is_address_virtual(struct multiheap* mh, void* ptr){
     return ptr >= mh->max_end_data_addr;
 }
 
+// Lecture 30 - ready / can_add_heap predicates. Once
+// multiheap_ready has fired, no more sub-heaps can be added
+// (the shadow heaps + virtual arena are sized at ready time;
+// inserting after would invalidate them).
+bool multiheap_is_ready(struct multiheap* mh){
+    return mh->flags & MULTIHEAP_FLAG_IS_READY;
+}
+
+bool multiheap_can_add_heap(struct multiheap* mh){
+    return !multiheap_is_ready(mh);
+}
+
 // Lecture 25 - translate a virtual-arena pointer back to its
 // physical owner by subtracting the virtual-arena base. The
 // inverse mapping (phys -> virt) is built into the page tables
@@ -154,6 +166,12 @@ size_t multiheap_allocation_byte_count(struct multiheap* mh, void* ptr){
 // warn even when uncalled.)
 
 static int multiheap_add_heap(struct multiheap* mh, struct heap* heap, int flags){
+    // Lecture 30 - refuse late additions. Ready time fixes the
+    // sub-heap set; adding after would create a sub-heap without
+    // a shadow and break the virtual-arena dispatch.
+    if(!multiheap_can_add_heap(mh)){
+        return -EINVARG;
+    }
     struct multiheap_single_heap* node = heap_zalloc(mh->starting_heap, sizeof(struct multiheap_single_heap));
     if(!node){
         return -ENOMEM;
@@ -270,12 +288,78 @@ static void* multiheap_alloc_first_pass(struct multiheap* mh, size_t size){
     return ptr;
 }
 
-// L21+ stub. Will defragment by re-paging when fragmentation
-// fails first-pass.
-static void* multiheap_alloc_second_pass(struct multiheap* mh, size_t size){
-    (void)mh;
-    (void)size;
+// Lecture 30 - first-pass paging alloc. Walk the sub-heaps that
+// allow paging defragment; find one whose UNDERLYING PHYSICAL
+// heap has enough free blocks; allocate a contiguous virtual
+// range from its SHADOW heap. Returns the virtual address.
+// `eligible_heap_out` is set to the chosen multiheap_single_heap
+// so the second-pass loop can pull individual physical blocks
+// from the SAME sub-heap.
+static void* multiheap_alloc_paging(struct multiheap* mh, size_t size,
+                                    struct multiheap_single_heap** eligible_heap_out){
+    size_t total_required_blocks = size / SAMOS_HEAP_BLOCK_SIZE;
+    struct multiheap_single_heap* cur = mh->first_multiheap;
+    while(cur){
+        if(!multiheap_heap_allows_paging(cur)){
+            cur = cur->next;
+            continue;
+        }
+        if(cur->heap->free_blocks < total_required_blocks){
+            cur = cur->next;
+            continue;
+        }
+        void* ptr = heap_malloc(cur->paging_heap, size);
+        if(ptr){
+            if(eligible_heap_out){
+                *eligible_heap_out = cur;
+            }
+            return ptr;
+        }
+        cur = cur->next;
+    }
     return NULL;
+}
+
+// Lecture 30 - second-pass defragment-by-paging allocator.
+//
+//   1. Round size up to a block boundary.
+//   2. Ask multiheap_alloc_paging for a contiguous virtual range
+//      from a sub-heap with enough free blocks.
+//   3. For each block in the range, heap_zalloc one physical
+//      block from the chosen physical sub-heap, and paging_map
+//      the virtual address to it (present + writeable).
+//
+// Net effect: an allocation that asked for N contiguous blocks
+// gets N possibly-scattered physical pages exposed as one
+// contiguous virtual range.
+static void* multiheap_alloc_second_pass(struct multiheap* mh, size_t size){
+    struct paging_desc* desc = paging_current_descriptor();
+    if(!desc){
+        panic("multiheap second pass: paging not set up\n");
+    }
+
+    size = heap_align_value_to_upper(size);
+    size_t total_blocks = size / SAMOS_HEAP_BLOCK_SIZE;
+    struct multiheap_single_heap* chosen = NULL;
+
+    void* vstart = multiheap_alloc_paging(mh, size, &chosen);
+    if(!vstart){
+        return NULL;
+    }
+
+    void* vcur = vstart;
+    for(size_t i = 0; i < total_blocks; i++){
+        void* phys = heap_zalloc(chosen->heap, SAMOS_HEAP_BLOCK_SIZE);
+        if(!phys){
+            // Paging heap said yes, physical said no - the two
+            // bookkeeping pictures got out of sync. Hard bug.
+            panic("multiheap second pass: paging heap promised more blocks than physical has\n");
+        }
+        paging_map(desc, vcur, phys,
+                   PAGING_IS_WRITEABLE | PAGING_IS_PRESENT);
+        vcur = (char*)vcur + SAMOS_HEAP_BLOCK_SIZE;
+    }
+    return vstart;
 }
 
 // Lecture 27 - free-callback installed on each shadow heap's

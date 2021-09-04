@@ -54,6 +54,11 @@ int heap_create(struct heap* heap, void* ptr, void* end, struct heap_table* tabl
     heap->eaddr = end;
     heap->table = table;
 
+    // Lecture 30 - block accounting. Fresh heap is fully free.
+    heap->total_blocks = table->total;
+    heap->free_blocks  = table->total;
+    heap->used_blocks  = 0;
+
     res = heap_validate_table(ptr, end, table);
     if(res < 0){
         goto out;
@@ -190,29 +195,38 @@ static void* heap_malloc_blocks(struct heap* heap, uintptr_t total_blocks){
 
     heap_mark_blocks_taken(heap, start_block, total_blocks);
 
+    // Lecture 30 - bump the running counts.
+    heap->used_blocks += total_blocks;
+    heap->free_blocks -= total_blocks;
+
 out:
     return address;
 }
 
 static void heap_mark_blocks_free(struct heap* heap, int64_t starting_block){
     struct heap_table* table = heap->table;
+    size_t total_blocks_freed = 0;
     for(int64_t i = starting_block; i < (int64_t)table->total; i++){
         HEAP_BLOCK_TABLE_ENTRY entry = table->entries[i];
         table->entries[i] = HEAP_BLOCK_TABLE_ENTRY_FREE;
 
-        // Lecture 26 - fire the per-block free callback if any.
-        // Fires AFTER marking the entry free, so a callback that
-        // wants to verify the table state sees the post-free
-        // truth.
+        // L30 - fire the free callback BEFORE the HAS_NEXT
+        // terminator check so the last block in the chain gets
+        // a callback too. (L26 placed the check first and
+        // missed the terminator.)
         if(heap->block_free_callback){
             void* address = heap_block_to_address(heap, i);
             heap->block_free_callback(address);
         }
 
+        total_blocks_freed++;
         if(!(entry & HEAP_BLOCK_HAS_NEXT)){
             break;
         }
     }
+    // Lecture 30 - decrement used count by what we actually freed.
+    heap->used_blocks -= total_blocks_freed;
+    heap->free_blocks += total_blocks_freed;
 }
 
 // L29 - exposed (was static). multiheap_free walks per-block
