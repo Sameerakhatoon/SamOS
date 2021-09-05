@@ -184,27 +184,19 @@ void kernel_main(void)
     // here without faulting, paging_switch worked.
     paging_switch(kernel_paging_desc);
 
-    // Lecture 23 - drain the multiheap as a smoke test. kmalloc
-    // no longer panics on NULL (L23 change), so this loop ends
-    // when the last allocation fails.
+    // Lecture 32 - hand the live kernel multiheap off to
+    // multiheap_ready. Builds shadow heaps for every paging-
+    // defragment sub-heap, reserves their virtual ranges in
+    // the live PML4, locks the sub-heap set against further
+    // adds. Must run AFTER paging_switch (multiheap_ready
+    // panics if no descriptor is loaded).
     //
-    // SamOs deviation: upstream uses kmalloc(4096) and exits
-    // when the very last 4-KiB block is gone. That walk takes
-    // 60k+ allocations under QEMU, each doing a linear scan over
-    // an ever-fuller table - tens of seconds wall-clock in TCG,
-    // which makes the automated test painful. We allocate 1 MiB
-    // at a time so the loop terminates in ~240 iterations on
-    // the same heap, demonstrating the same property (kmalloc
-    // returns NULL when no contiguous run exists) in well under
-    // a second.
-    for (;;)
-    {
-        if (!kmalloc(1024 * 1024))
-        {
-            break;
-        }
-    }
-    print("Memory wasted\n");
+    // The L23-style drain + "Memory wasted" print are gone -
+    // upstream removed them here and SamOs follows. The new
+    // smoke token is "multiheap ready" so the regression test
+    // can prove kheap_post_paging returned without faulting.
+    kheap_post_paging();
+    print("multiheap ready\n");
 
     while (1)
     {

@@ -17,4 +17,11 @@ void*         kpalloc(size_t size);   // L22 - palloc = first-pass, then paging-
 void*         kpzalloc(size_t size);  // L22 - kpalloc + memset 0
 void          kfree(void* ptr);       // still stubbed: no-op until multiheap_free lands
 
+// Lecture 32 - call once paging is set up. Hands the live
+// kernel multiheap off to multiheap_ready: stand up the
+// virtual arena, build shadow heaps for every paging-
+// defragment sub-heap, lock the sub-heap set against further
+// adds.
+void          kheap_post_paging(void);
+
 #endif

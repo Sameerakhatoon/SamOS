@@ -150,6 +150,12 @@ void* kmalloc(size_t size){
     return multiheap_alloc(kernel_multiheap, size);
 }
 
+// Lecture 32 - exported so kernel_main can call it after
+// paging_switch. Internally just multiheap_ready.
+void kheap_post_paging(void){
+    multiheap_ready(kernel_multiheap);
+}
+
 // Lecture 22 - kzalloc unstubbed. Goes through the same
 // first-pass alloc as kmalloc and memsets to zero. (No fancy
 // "find a heap that already has a pre-zeroed block" yet.)
