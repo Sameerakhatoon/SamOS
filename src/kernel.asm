@@ -21,6 +21,7 @@
 [BITS 32]
 global _start
 global kernel_registers
+global div_test
 extern kernel_main
 
 CODE_SEG equ 0x08
@@ -114,6 +115,17 @@ long_mode_entry:
 
     ; If kernel_main ever returns we park forever.
     jmp $
+
+
+; Lecture 38 - deliberately trigger #DE so we can test the IDT.
+; idiv rax with rax=0 raises #DE (divide error). The IDT's
+; vector-0 entry routes us into idt_zero which prints "Divide
+; by zero error" and spins. We will never return to whatever
+; called this.
+div_test:
+    mov rax, 0
+    idiv rax
+    ret
 
 
 ; ------------------------------------------------------------------
