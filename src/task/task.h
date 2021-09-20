@@ -7,28 +7,30 @@
 struct process;
 struct interrupt_frame;
 
+// Lecture 40 - 64-bit register file.
 struct registers {
-    uint32_t edi;
-    uint32_t esi;
-    uint32_t ebp;
-    uint32_t ebx;
-    uint32_t edx;
-    uint32_t ecx;
-    uint32_t eax;
+    uint64_t rdi;
+    uint64_t rsi;
+    uint64_t rbp;
+    uint64_t rbx;
+    uint64_t rdx;
+    uint64_t rcx;
+    uint64_t rax;
 
-    uint32_t ip;
-    uint32_t cs;
-    uint32_t flags;
-    uint32_t esp;
-    uint32_t ss;
+    uint64_t ip;
+    uint64_t cs;
+    uint64_t flags;
+    uint64_t rsp;
+    uint64_t ss;
 };
 
 struct task {
-    struct paging_4gb_chunk* page_directory;  // Task's own page directory.
-    struct registers         registers;       // Saved CPU state when not running.
-    struct process*          process;         // Owning process.
-    struct task*             next;
-    struct task*             prev;
+    // Lecture 40 - paging_desc replaces the old paging_4gb_chunk.
+    struct paging_desc*  paging_desc;
+    struct registers     registers;
+    struct process*      process;
+    struct task*         next;
+    struct task*         prev;
 };
 
 struct task* task_new(struct process* process);
@@ -45,6 +47,10 @@ void* task_get_stack_item(struct task* task, int index);
 int   copy_string_from_task(struct task* task, void* virtual, void* phys, int max);
 void* task_virtual_address_to_physical(struct task* task, void* virtual_address);
 void  task_next();
+
+// Lecture 40 - paging_desc accessors.
+struct paging_desc* task_paging_desc(struct task* task);
+struct paging_desc* task_current_paging_desc();
 
 // Defined in task.asm.
 void task_return(struct registers* regs);

@@ -51,8 +51,12 @@
 #define SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START           0x3FF000
 #define SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_END             (SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START - SAMOS_USER_PROGRAM_STACK_SIZE)
 
-#define USER_DATA_SEGMENT       0x23
-#define USER_CODE_SEGMENT       0x1B
+// Lecture 40 - user segment selectors now point at the 64-bit
+// user GDT entries added in L39, with RPL=3 OR'd in.
+//   0x28 | 3 = 0x2B (user code, L=1)
+//   0x30 | 3 = 0x33 (user data)
+#define USER_DATA_SEGMENT       0x2B
+#define USER_CODE_SEGMENT       0x33
 
 #define SAMOS_MAX_PROGRAM_ALLOCATIONS    1024
 #define SAMOS_MAX_PROCESSES              16
