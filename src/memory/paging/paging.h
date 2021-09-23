@@ -69,6 +69,11 @@ void* paging_align_to_lower_page(void* addr);
 void* paging_align_address(void* ptr);
 struct paging_desc* paging_desc_new(paging_map_level_t root_map_level);
 void  paging_switch(struct paging_desc* desc);
+// Lecture 43 - recursive teardown of a 4-level paging tree.
+// Frees intermediate tables (PML4 entries' PDPTs, PDs, PTs) but
+// NOT the 4-KiB pages mapped by the PT leaves - those are user
+// data, owned by whoever allocated them.
+void  paging_desc_free(struct paging_desc* desc);
 bool  paging_is_aligned(void* addr);
 struct paging_desc* paging_current_descriptor(void);
 int   paging_map_e820_memory_regions(struct paging_desc* desc);
