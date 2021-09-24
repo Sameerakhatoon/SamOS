@@ -11,7 +11,11 @@
 // 64-bit pointer width without sign-extending nonsense.
 #define ERROR(value)    (void*)((intptr_t)(value))
 #define ERROR_I(value)  (int)((intptr_t)(value))
-#define ISERR(value)    ((int)value < 0)
+// L46 - cast through int64_t before truncating to int so that
+// a 64-bit error code with the high bit set survives the
+// negativity check intact. Necessary for ERROR(value) round
+// trips when the kernel grows >2 GiB heap pointers.
+#define ISERR(value)    ((int)((int64_t)(value)) < 0)
 
 void kernel_main();
 void print(const char* str);
