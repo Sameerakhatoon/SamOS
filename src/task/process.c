@@ -6,10 +6,10 @@
 #include "memory/heap/kheap.h"
 #include "memory/paging/paging.h"
 #include "string/string.h"
-// L45 - FAT16 / VFS / elfloader not ported yet; every reference
-// stubbed out in this file. Includes commented out so we do not
-// drag in undefined identifiers.
-// #include "fs/file.h"
+// L48 - FAT16 / VFS came back in L46-L47. fs/file.h is back.
+// loader/formats/elfloader.h stays out (ELF loader is not ported
+// yet; process_load_elf still stub-returns -EINFORMAT).
+#include "fs/file.h"
 // #include "loader/formats/elfloader.h"
 #include "kernel.h"
 #include <stdbool.h>
@@ -34,16 +34,49 @@ struct process* process_get(int process_id){
     return processes[process_id];
 }
 
-// Lecture 45 - file-reading path stubbed.
-// fopen / fstat / fread / fclose come from the FAT16 / VFS layer
-// which has not been ported to 64-bit yet. Without them
-// process_load_binary cannot read the program file. Return -1
-// so process_load_data sees a hard failure and the caller
-// reports "no executable".
+// Lecture 48 - un-stubbed. FAT16 / VFS came back in L46-L47;
+// fopen / fstat / fread / fclose work now. Restoration mirrors
+// the original 32-bit body verbatim except for the SAMOS_ALL_OK
+// constant name (vs PEACHOS_ALL_OK).
 static int process_load_binary(const char* filename, struct process* process){
-    (void)filename;
-    (void)process;
-    return -1;
+    int   res = 0;
+    void* program_data_ptr = 0x00;
+
+    int fd = fopen(filename, "r");
+    if(!fd){
+        res = -EIO;
+        goto out;
+    }
+
+    struct file_stat stat;
+    res = fstat(fd, &stat);
+    if(res != SAMOS_ALL_OK){
+        goto out;
+    }
+
+    program_data_ptr = kzalloc(stat.filesize);
+    if(!program_data_ptr){
+        res = -ENOMEM;
+        goto out;
+    }
+
+    if(fread(program_data_ptr, stat.filesize, 1, fd) != 1){
+        res = -EIO;
+        goto out;
+    }
+
+    process->filetype = PROCESS_FILETYPE_BINARY;
+    process->ptr      = program_data_ptr;
+    process->size     = stat.filesize;
+
+out:
+    if(res < 0){
+        if(program_data_ptr){
+            kfree(program_data_ptr);
+        }
+    }
+    fclose(fd);
+    return res;
 }
 
 // Lecture 42 - ELF loading disabled until the 64-bit elfloader
