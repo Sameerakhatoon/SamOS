@@ -8,6 +8,14 @@
 // offset 0x18 (kernel.asm's GDT entry with L=1).
 #define KERNEL_LONG_MODE_CODE_SELECTOR  0x18
 
+// Lecture 49 - TSS descriptor access byte.
+//   bit 7 (P)     = 1  present
+//   bits 5..6 (DPL) = 00  ring 0
+//   bit 4 (S)     = 0  system descriptor (TSS lives in system class)
+//   bits 0..3 (type) = 1001 = available 64-bit TSS
+//   = 1000 1001 = 0x89
+#define TSS_DESCRIPTOR_TYPE  0x89
+
 #define SAMOS_TOTAL_INTERRUPTS  512
 
 // Lecture 24 - this is the MINIMUM heap size: we refuse to bring
