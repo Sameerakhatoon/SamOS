@@ -3,32 +3,38 @@
 
 #include <stdint.h>
 
+// Lecture 50 - long-mode TSS.
+//
+// In 64-bit mode the TSS no longer holds a full CPU state -
+// just a set of stack pointers for ring transitions plus a
+// small reserved tail. rsp0 is what we actually care about:
+// the kernel stack the CPU loads on a ring-3 -> ring-0
+// transition (interrupts from user mode, int 0x80 syscalls).
+//
+// iopb_offset = sizeof(tss) disables the I/O permission bitmap
+// (the offset points past the end of the TSS, so the CPU
+// concludes "no IOPB present").
 struct tss {
-    uint32_t link;
-    uint32_t esp0;    // Kernel stack pointer (used on ring-3 -> ring-0 trap)
-    uint32_t ss0;     // Kernel stack segment
-    uint32_t esp1;
-    uint32_t esp2;
-    uint32_t ss2;
-    uint32_t sr3;
-    uint32_t eip;
-    uint32_t eflags;
-    uint32_t eax;
-    uint32_t ecx;
-    uint32_t edx;
-    uint32_t ebx;
-    uint32_t esp;
-    uint32_t ebp;
-    uint32_t esi;
-    uint32_t edi;
-    uint32_t es;
-    uint32_t cs;
-    uint32_t ss;
-    uint32_t ds;
-    uint32_t fs;
-    uint32_t gs;
-    uint32_t ldtr;
-    uint32_t iopb;
+    uint16_t link;
+    uint16_t reserved0;
+
+    uint64_t rsp0;        // kernel stack for CPL=0 entries
+    uint64_t rsp1;        // CPL=1 (unused on amd64)
+    uint64_t rsp2;        // CPL=2 (unused on amd64)
+
+    uint64_t reserved1;
+
+    uint64_t ist1;
+    uint64_t ist2;
+    uint64_t ist3;
+    uint64_t ist4;
+    uint64_t ist5;
+    uint64_t ist6;
+    uint64_t ist7;
+
+    uint64_t reserved2;
+    uint16_t reserved3;
+    uint16_t iopb_offset;
 } __attribute__((packed));
 
 void tss_load(int tss_segment);

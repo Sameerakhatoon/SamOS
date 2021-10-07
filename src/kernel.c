@@ -21,6 +21,8 @@
 #include "memory/memory.h"
 #include "memory/paging/paging.h"
 #include "string/string.h"
+#include "task/tss.h"
+#include "gdt/gdt.h"
 #include "config.h"
 #include "status.h"
 
@@ -132,8 +134,14 @@ void kernel_page()
     paging_switch(kernel_paging_desc);
 }
 
-// Lecture 38 - asm-side #DE trigger.
+// Lecture 38 - asm-side #DE trigger (kept around for ad-hoc
+// debugging; not currently called).
 extern void div_test(void);
+
+// Lecture 50 - the static GDT lives in kernel.asm. C side
+// installs the TSS descriptor into slot 7 + 8.
+extern struct gdt_entry gdt[];
+struct tss tss;
 
 // Lecture 44 - public getter for the kernel's paging_desc.
 // Anyone needing to walk the kernel address space (e.g.
@@ -205,17 +213,39 @@ void kernel_main(void)
     kheap_post_paging();
     print("multiheap ready\n");
 
-    // Lecture 38 - bring the IDT up and prove it works by
-    // deliberately triggering #DE. div_test does idiv rax
-    // with rax = 0 -> CPU raises divide-by-zero -> IDT
-    // vector 0 = idt_zero -> prints "Divide by zero error"
-    // and spins. The "oi" line below must NEVER appear; if
-    // it does, either the IDT install was wrong or the
-    // handler returned instead of halting.
+    // Lecture 50 - bring up IDT, then build a TSS so future
+    // ring-3 traps have a kernel-side stack to land on. The
+    // L38 div_test smoke is gone; from L50 onward the test
+    // token is "tss ready".
     idt_init();
-    print("hello\n");
-    div_test();
-    print("oi\n");
+
+    // Allocate a 1 MiB kernel stack for ring transitions.
+    // kzalloc lays it out low-to-high; rsp0 needs the TOP of
+    // the region (stack grows down), so we add stack_size to
+    // the base.
+    size_t stack_size = 1024 * 1024;
+    void* tss_stack_low  = kzalloc(stack_size);
+    void* tss_stack_high = (void*)((uintptr_t)tss_stack_low + stack_size);
+
+    // Mark the lowest page of the stack as not-present so any
+    // overflow #PFs visibly instead of silently corrupting
+    // whatever sits below. paging_map with flags=0 unmaps the
+    // page (the "unmap idiom" introduced in L27).
+    paging_map(kernel_desc(), tss_stack_low, tss_stack_low, 0);
+
+    // Initialise the TSS.
+    memset(&tss, 0x00, sizeof(tss));
+    tss.rsp0        = (uint64_t)tss_stack_high;
+    tss.iopb_offset = sizeof(tss);   // no IO bitmap
+
+    // Install the TSS descriptor into GDT slot 7 (+ slot 8 for
+    // the high half of the base). The reserved slots were added
+    // to kernel.asm in L50.
+    struct tss_desc_64* tssdesc =
+        (struct tss_desc_64*)&gdt[KERNEL_LONG_MODE_TSS_GDT_INDEX];
+    gdt_set_tss(tssdesc, &tss, sizeof(tss) - 1, TSS_DESCRIPTOR_TYPE, 0x00);
+
+    print("tss ready\n");
 
     while (1)
     {
