@@ -22,6 +22,9 @@
 #include "memory/paging/paging.h"
 #include "string/string.h"
 #include "task/tss.h"
+#include "task/task.h"
+#include "task/process.h"
+#include "isr80h/isr80h.h"
 #include "gdt/gdt.h"
 #include "config.h"
 #include "status.h"
@@ -244,6 +247,12 @@ void kernel_main(void)
     struct tss_desc_64* tssdesc =
         (struct tss_desc_64*)&gdt[KERNEL_LONG_MODE_TSS_GDT_INDEX];
     gdt_set_tss(tssdesc, &tss, sizeof(tss) - 1, TSS_DESCRIPTOR_TYPE, 0x00);
+
+    // Lecture 54 - register every syscall handler the user can
+    // ask for via int 0x80. isr80h_register_commands fills the
+    // isr80h_commands[] table; isr80h_handler dispatches a
+    // user-supplied command id into that table on each int 0x80.
+    isr80h_register_commands();
 
     print("tss ready\n");
 

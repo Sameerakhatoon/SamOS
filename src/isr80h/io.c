@@ -18,11 +18,18 @@ void* isr80h_command1_print(struct interrupt_frame* frame){
 
 void* isr80h_command2_getkey(struct interrupt_frame* frame){
     char c = keyboard_pop();
-    return (void*)((int)c);
+    // Lecture 54 - cast widened to intptr_t so 'c' (a char with
+    // its sign extended through int) doesn't trigger the int-to-
+    // pointer-of-different-size diagnostic on x86_64.
+    return (void*)((intptr_t)c);
 }
 
 void* isr80h_command3_putchar(struct interrupt_frame* frame){
-    char c = (char)(int)task_get_stack_item(task_current(), 0);
+    // L54 - widen the intermediate cast to intptr_t too. The
+    // stack item is a void*; truncating through int and then
+    // back to a pointer was fine on 32-bit but loses the high
+    // half on 64-bit.
+    char c = (char)(intptr_t)task_get_stack_item(task_current(), 0);
     terminal_writechar(c, 15);
     return 0;
 }
