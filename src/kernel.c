@@ -25,6 +25,11 @@
 #include "task/task.h"
 #include "task/process.h"
 #include "isr80h/isr80h.h"
+#include "keyboard/keyboard.h"
+#include "fs/file.h"
+#include "fs/pparser.h"
+#include "disk/disk.h"
+#include "disk/streamer.h"
 #include "gdt/gdt.h"
 #include "config.h"
 #include "status.h"
@@ -221,6 +226,14 @@ void kernel_main(void)
     // L38 div_test smoke is gone; from L50 onward the test
     // token is "tss ready".
     idt_init();
+
+    // Lecture 57 - subsystem initializers. fs_init wires the
+    // generic VFS layer (registers the FAT16 driver). disk_
+    // search_and_init walks the ATA channels for primary disks
+    // and binds the filesystem driver to each. After this we
+    // can fopen("0:/foo") from kernel context.
+    fs_init();
+    disk_search_and_init();
 
     // Allocate a 1 MiB kernel stack for ring transitions.
     // kzalloc lays it out low-to-high; rsp0 needs the TOP of
