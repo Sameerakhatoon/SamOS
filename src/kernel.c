@@ -275,6 +275,11 @@ void kernel_main(void)
     isr80h_register_commands();
     print("register isr80h\n");
 
+    // Lecture 58 - initialise the PS/2 keyboard driver. Won't
+    // actually receive scancodes until IRQ1 is unmasked at the
+    // PIC AND interrupts are sti'd, both still pending.
+    keyboard_init();
+
     print("tss ready\n");
 
     while (1)
