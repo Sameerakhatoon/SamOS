@@ -282,6 +282,36 @@ void kernel_main(void)
 
     print("tss ready\n");
 
+    // Lecture 59 - load + run a user program. process_load_switch
+    // opens the file, kzallocs a copy of its bytes, builds a
+    // task + process around it, and marks it current. Then
+    // task_run_first_ever_task iretq's into ring 3 at the user
+    // entry point. The simple.bin user program is just
+    //   [BITS 64]
+    //   jmp $
+    // so the user task spins forever; we never come back.
+    print("Loading program...\n");
+    struct process* p = 0;
+    int res = process_load_switch("0:/SIMPLE.BIN", &p);
+    if(res != SAMOS_ALL_OK){
+        panic("Failed to load user program\n");
+    }
+    print("user enter\n");
+    // task_run_first_ever_task never returns. After this:
+    //   - CR3 = task's PML4
+    //   - iretq into ring 3 at SAMOS_PROGRAM_VIRTUAL_ADDRESS
+    //   - user code (jmp $) spins forever
+    //
+    // L52 enabled the timer IRQ callback. With the PIC not yet
+    // remapped (L61), IRQ0 lands at vector 0x08 - the same
+    // vector the CPU uses for #DF. Our IDT vector 8 is
+    // registered as idt_handle_exception which panics "Panic
+    // Exception" so we observe both "user enter" AND "Panic
+    // Exception" on screen, with the user code running between
+    // them. L61 remaps the PIC to vectors 0x20+ to clear the
+    // collision.
+    task_run_first_ever_task();
+
     while (1)
     {
     }
