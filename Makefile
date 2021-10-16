@@ -70,6 +70,9 @@ all: ./bin/boot.bin ./bin/kernel.bin user_programs
 
 user_programs:
 	cd ./programs/simple && $(MAKE) all
+	cd ./programs/stdlib && $(MAKE) all
+	cd ./programs/blank  && $(MAKE) all
+	cd ./programs/shell  && $(MAKE) all
 
 ./bin/kernel.bin: $(FILES)
 	x86_64-elf-ld -g -relocatable $(FILES) -o ./build/kernelfull.o
