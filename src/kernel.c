@@ -292,6 +292,13 @@ void kernel_main(void)
     // so the user task spins forever; we never come back.
     print("Loading program...\n");
     struct process* p = 0;
+    // L63 - upstream switches to "0:/blank.elf" here. SamOs
+    // sticks with SIMPLE.BIN until L66 (the L62 ELF64 build +
+    // the L65 elfloader refactor are both prerequisites for
+    // actually running the ELF). The 2 MiB blank.elf is also
+    // glacially slow to PIO-read in QEMU TCG. The ELF loader
+    // code is now wired into the build (L63 milestone); we'll
+    // call it once the prerequisites land.
     int res = process_load_switch("0:/SIMPLE.BIN", &p);
     if(res != SAMOS_ALL_OK){
         panic("Failed to load user program\n");

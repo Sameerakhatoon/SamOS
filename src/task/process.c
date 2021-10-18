@@ -6,11 +6,10 @@
 #include "memory/heap/kheap.h"
 #include "memory/paging/paging.h"
 #include "string/string.h"
-// L48 - FAT16 / VFS came back in L46-L47. fs/file.h is back.
-// loader/formats/elfloader.h stays out (ELF loader is not ported
-// yet; process_load_elf still stub-returns -EINFORMAT).
+// L48 - FAT16 / VFS came back. L63 - elfloader.h back too now
+// that process_load_elf / process_map_elf are un-stubbed.
 #include "fs/file.h"
-// #include "loader/formats/elfloader.h"
+#include "loader/formats/elfloader.h"
 #include "kernel.h"
 #include <stdbool.h>
 
@@ -79,13 +78,26 @@ out:
     return res;
 }
 
-// Lecture 42 - ELF loading disabled until the 64-bit elfloader
-// is back. Force a non-ELF outcome so process_load_data falls
-// through to process_load_binary.
+// Lecture 63 - ELF loading re-enabled. The body is the original
+// 32-bit logic; elfloader.c was widened to uintptr_t in L63 so
+// the elf32_phdr casts no longer warn under x86_64-elf-gcc.
+//
+// Note the file is still parsed as ELF32 - our blank.elf / etc
+// are actually ELF64 (L62 toolchain change), so this load will
+// fail on the EI_CLASS check until L65 refactors elfloader to
+// ELF64. Until then process_load_data falls through to
+// process_load_binary if process_load_elf returns -EINFORMAT.
 static int process_load_elf(const char* filename, struct process* process){
-    (void)filename;
-    (void)process;
-    return -EINFORMAT;
+    int res = 0;
+    struct elf_file* elf_file = 0;
+    res = elf_load(filename, &elf_file);
+    if(ISERR(res)){
+        goto out;
+    }
+    process->filetype = PROCESS_FILETYPE_ELF;
+    process->elf_file = elf_file;
+out:
+    return res;
 }
 
 static int process_load_data(const char* filename, struct process* process){
@@ -107,13 +119,32 @@ int process_map_binary(struct process* process){
     return res;
 }
 
-// Lecture 42 - ELF mapping disabled until the 64-bit elfloader
-// is back. Returning -EINVARG here is harmless because
-// process_load_elf already returns -EINFORMAT so this is
-// unreachable.
+// Lecture 63 - ELF mapping re-enabled. p_vaddr now goes through
+// uintptr_t to silence the int-to-pointer-of-different-size
+// diagnostic on x86_64.
 static int process_map_elf(struct process* process){
-    (void)process;
-    return -EINVARG;
+    int res = 0;
+    struct elf_file*   elf_file = process->elf_file;
+    struct elf_header* header   = elf_header(elf_file);
+    struct elf32_phdr* phdrs    = elf_pheader(header);
+
+    for(int i = 0; i < header->e_phnum; i++){
+        struct elf32_phdr* phdr = &phdrs[i];
+        void* phdr_phys_address = elf_phdr_phys_address(elf_file, phdr);
+        int flags = PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL;
+        if(phdr->p_flags & PF_W){
+            flags |= PAGING_IS_WRITEABLE;
+        }
+        res = paging_map_to(process->task->paging_desc,
+                            paging_align_to_lower_page((void*)(uintptr_t)phdr->p_vaddr),
+                            paging_align_to_lower_page(phdr_phys_address),
+                            paging_align_address(phdr_phys_address + phdr->p_memsz),
+                            flags);
+        if(ISERR(res)){
+            break;
+        }
+    }
+    return res;
 }
 
 int process_map_memory(struct process* process){
