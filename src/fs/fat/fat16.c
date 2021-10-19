@@ -342,78 +342,107 @@ out:
     return res;
 }
 
-// Walk the FAT chain "starting_cluster" follows, "offset" bytes ahead, and
-// return the cluster id whose byte range covers `offset`.
-static int fat16_get_cluster_for_offset(struct disk* disk, int starting_cluster, int offset){
+// Lecture 64 - walk the FAT chain "starting_cluster" follows
+// "offset" bytes ahead and return the cluster id whose byte
+// range covers `offset`.
+//
+// Three correctness fixes vs the 32-bit version:
+//   1. starting_cluster widened from int to uint16_t (FAT16
+//      entries are 16-bit; keeping a signed int was sloppy).
+//   2. End-of-chain check was `entry == 0xFF8 || entry ==
+//      0xFFF`. The FAT16 spec says ANY value 0xFFF8..0xFFFF is
+//      end of chain (the bottom 3 bits encode reserved end-of-
+//      chain variants). Single `entry >= 0xFFF8` catches all.
+//   3. End-of-chain now returns -EOUTOFRANGE, not -EIO, so
+//      callers can distinguish "honest EOF" from "actual disk
+//      problem".
+int fat16_get_cluster_for_offset(struct disk* disk, uint16_t starting_cluster, int offset){
     int res = 0;
     struct fat_private* private = disk->fs_private;
     int size_of_cluster_bytes = private->header.primary_header.sectors_per_cluster * disk->sector_size;
-    int cluster_to_use = starting_cluster;
+    uint16_t cluster_to_use = starting_cluster;
     int clusters_ahead = offset / size_of_cluster_bytes;
+
     for(int i = 0; i < clusters_ahead; i++){
-        int entry = fat16_get_fat_entry(disk, cluster_to_use);
-        if(entry == 0xFF8 || entry == 0xFFF){
-            res = -EIO;
+        uint16_t entry = fat16_get_fat_entry(disk, cluster_to_use);
+        // End of chain: any value 0xFFF8..0xFFFF.
+        if(entry >= 0xFFF8){
+            res = -EOUTOFRANGE;
             goto out;
         }
-        if(entry == SAMOS_FAT16_BAD_SECTOR){
-            res = -EIO;
-            goto out;
-        }
-        if(entry == 0xFF0 || entry == 0xFF6){
-            res = -EIO;
-            goto out;
-        }
-        if(entry == 0x00){
+        // Bad sector / reserved entries / unallocated.
+        if(entry == SAMOS_FAT16_BAD_SECTOR ||
+           (entry >= 0xFFF0 && entry <= 0xFFF6) ||
+           entry == 0x0000){
             res = -EIO;
             goto out;
         }
         cluster_to_use = entry;
     }
     res = cluster_to_use;
-
 out:
     return res;
 }
 
-static int fat16_read_internal_from_stream(struct disk* disk, struct disk_stream* stream, int cluster, int offset, int total, void* out){
-    int res = 0;
+// Lecture 64 - iterative read.
+//
+// The old recursive form re-derived the cluster-for-offset
+// every iteration, which is correct but stack-hungry on large
+// files (one C frame per cluster). The new loop walks
+// cluster-by-cluster, accumulates bytes_read, and returns
+// total bytes read on success (matching the diskstreamer_read
+// signature change in spirit).
+static int fat16_read_internal_from_stream(struct disk* disk,
+                                           struct disk_stream* stream,
+                                           uint16_t cluster, int offset,
+                                           int total, void* out){
+    int res = SAMOS_ALL_OK;
     struct fat_private* private = disk->fs_private;
     int size_of_cluster_bytes = private->header.primary_header.sectors_per_cluster * disk->sector_size;
-    int cluster_to_use = fat16_get_cluster_for_offset(disk, cluster, offset);
-    if(cluster_to_use < 0){
-        res = cluster_to_use;
-        goto out;
+    uint16_t cluster_to_use = cluster;
+    int bytes_read = 0;
+    int starting_offset = offset;
+
+    while(total > 0){
+        res = fat16_get_cluster_for_offset(disk, cluster, starting_offset);
+        if(res < 0){
+            break;
+        }
+        cluster_to_use = (uint16_t)res;
+
+        int offset_from_cluster = starting_offset % size_of_cluster_bytes;
+        int starting_sector     = fat16_cluster_to_sector(private, cluster_to_use);
+        int starting_pos        = (starting_sector * disk->sector_size) + offset_from_cluster;
+        int total_to_read       = size_of_cluster_bytes - offset_from_cluster;
+        if(total_to_read > total){
+            total_to_read = total;
+        }
+
+        res = diskstreamer_seek(stream, starting_pos);
+        if(res != SAMOS_ALL_OK){
+            break;
+        }
+        res = diskstreamer_read(stream, out, total_to_read);
+        if(res != SAMOS_ALL_OK){
+            break;
+        }
+
+        out             = (char*)out + total_to_read;
+        starting_offset += total_to_read;
+        bytes_read      += total_to_read;
+        total           -= total_to_read;
     }
 
-    int offset_from_cluster = offset % size_of_cluster_bytes;
-    int starting_sector     = fat16_cluster_to_sector(private, cluster_to_use);
-    int starting_pos        = (starting_sector * disk->sector_size) + offset_from_cluster;
-    int total_to_read       = total > size_of_cluster_bytes ? size_of_cluster_bytes : total;
-
-    res = diskstreamer_seek(stream, starting_pos);
-    if(res != SAMOS_ALL_OK){
-        goto out;
+    if(res < 0){
+        return res;
     }
-
-    res = diskstreamer_read(stream, out, total_to_read);
-    if(res != SAMOS_ALL_OK){
-        goto out;
-    }
-
-    total -= total_to_read;
-    if(total > 0){
-        res = fat16_read_internal_from_stream(disk, stream, cluster, offset + total_to_read, total, out + total_to_read);
-    }
-
-out:
-    return res;
+    return bytes_read;
 }
 
 static int fat16_read_internal(struct disk* disk, int starting_cluster, int offset, int total, void* out){
     struct fat_private* fs_private = disk->fs_private;
     struct disk_stream* stream     = fs_private->cluster_read_stream;
-    return fat16_read_internal_from_stream(disk, stream, starting_cluster, offset, total, out);
+    return fat16_read_internal_from_stream(disk, stream, (uint16_t)starting_cluster, offset, total, out);
 }
 
 static void fat16_free_directory(struct fat_directory* directory){

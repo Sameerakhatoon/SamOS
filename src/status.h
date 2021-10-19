@@ -11,5 +11,6 @@
 #define EUNIMP          7
 #define EISTKN          8
 #define EINFORMAT       9
+#define EOUTOFRANGE    10  // L64 - FAT cluster chain reached end
 
 #endif

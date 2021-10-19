@@ -1,5 +1,6 @@
 #include "streamer.h"
 #include "memory/heap/kheap.h"
+#include "memory/memory.h"   // L64 - memcpy
 #include "config.h"
 #include <stdbool.h>
 
@@ -20,33 +21,48 @@ int diskstreamer_seek(struct disk_stream* stream, int pos){
     return 0;
 }
 
+// Lecture 64 - rewritten iteratively.
+//
+// The original recursive form had two problems:
+//   1. It split the read at the FIRST sector boundary, then
+//      recursed for the remainder. Cross-sector reads stacked
+//      one C call per sector - 4 KB of read = 8 stack frames
+//      and could easily blow the kernel stack for large files.
+//   2. The `total_to_read = (offset + total) - SAMOS_SECTOR_SIZE`
+//      calculation for the overflow case was correct but easy
+//      to get wrong on review.
+//
+// The new loop computes a chunk that fits in the current
+// sector, reads it, advances out/pos/remaining, and repeats
+// until remaining hits 0. No recursion, no stack risk.
 int diskstreamer_read(struct disk_stream* stream, void* out, int total){
-    int  sector = stream->pos / SAMOS_SECTOR_SIZE;
-    int  offset = stream->pos % SAMOS_SECTOR_SIZE;
-    int  total_to_read = total;
-    bool overflow = (offset + total_to_read) >= SAMOS_SECTOR_SIZE;
-    char buf[SAMOS_SECTOR_SIZE];
-
-    if(overflow){
-        total_to_read -= (offset + total_to_read) - SAMOS_SECTOR_SIZE;
+    if(total <= 0){
+        return -1;
     }
 
-    int res = disk_read_block(stream->disk, sector, 1, buf);
-    if(res < 0){
-        goto out;
-    }
+    char* outc = out;
+    int   remaining = total;
 
-    for(int i = 0; i < total_to_read; i++){
-        *(char*)out++ = buf[offset + i];
-    }
+    while(remaining > 0){
+        int  sector = stream->pos / SAMOS_SECTOR_SIZE;
+        int  offset = stream->pos % SAMOS_SECTOR_SIZE;
+        int  chunk  = SAMOS_SECTOR_SIZE - offset;
+        if(chunk > remaining){
+            chunk = remaining;
+        }
 
-    stream->pos += total_to_read;
-    if(overflow){
-        res = diskstreamer_read(stream, out, total - total_to_read);
-    }
+        char buf[SAMOS_SECTOR_SIZE];
+        int res = disk_read_block(stream->disk, sector, 1, buf);
+        if(res < 0){
+            return res;
+        }
 
-out:
-    return res;
+        memcpy(outc, buf + offset, chunk);
+        outc         += chunk;
+        stream->pos  += chunk;
+        remaining    -= chunk;
+    }
+    return 0;
 }
 
 void diskstreamer_close(struct disk_stream* stream){
