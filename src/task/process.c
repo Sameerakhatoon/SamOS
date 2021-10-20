@@ -80,7 +80,7 @@ out:
 
 // Lecture 63 - ELF loading re-enabled. The body is the original
 // 32-bit logic; elfloader.c was widened to uintptr_t in L63 so
-// the elf32_phdr casts no longer warn under x86_64-elf-gcc.
+// the elf64_phdr casts no longer warn under x86_64-elf-gcc.
 //
 // Note the file is still parsed as ELF32 - our blank.elf / etc
 // are actually ELF64 (L62 toolchain change), so this load will
@@ -126,10 +126,10 @@ static int process_map_elf(struct process* process){
     int res = 0;
     struct elf_file*   elf_file = process->elf_file;
     struct elf_header* header   = elf_header(elf_file);
-    struct elf32_phdr* phdrs    = elf_pheader(header);
+    struct elf64_phdr* phdrs    = elf_pheader(header);
 
     for(int i = 0; i < header->e_phnum; i++){
-        struct elf32_phdr* phdr = &phdrs[i];
+        struct elf64_phdr* phdr = &phdrs[i];
         void* phdr_phys_address = elf_phdr_phys_address(elf_file, phdr);
         int flags = PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL;
         if(phdr->p_flags & PF_W){
@@ -324,10 +324,13 @@ int process_free_binary_data(struct process* process){
     return 0;
 }
 
-// Lecture 45 - elf_close stubbed (no elfloader yet).
+// Lecture 65 - elf_close un-stubbed now that the L65 ELF64
+// loader is real.
 int process_free_elf_data(struct process* process){
-    (void)process;
-    return -1;
+    if(process->elf_file){
+        elf_close(process->elf_file);
+    }
+    return 0;
 }
 
 int process_free_program_data(struct process* process){

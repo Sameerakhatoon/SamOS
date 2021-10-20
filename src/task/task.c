@@ -30,7 +30,7 @@
 #include "memory/paging/paging.h"
 #include "string/string.h"
 #include "idt/idt.h"
-// #include "loader/formats/elfloader.h"  // L40 - elf loader not ported yet
+#include "loader/formats/elfloader.h"  // L65 - elf loader back
 
 static int  task_init(struct task* task, struct process* process);
 static void task_list_remove(struct task* task);
@@ -279,9 +279,9 @@ static int task_init(struct task* task, struct process* process){
 
     task->registers.ip = SAMOS_PROGRAM_VIRTUAL_ADDRESS;
     if(process->filetype == PROCESS_FILETYPE_ELF){
-        // L40 deviation: elfloader not yet rebuilt; panic instead
-        // of dereferencing a non-existent header.
-        panic("ELF files not supported yet\n");
+        // L65 - the ELF64 loader is in. Pull the entry point
+        // out of the ELF header.
+        task->registers.ip = elf_header(process->elf_file)->e_entry;
     }
 
     task->registers.ss  = USER_DATA_SEGMENT;
