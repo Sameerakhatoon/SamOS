@@ -299,6 +299,21 @@ void kernel_main(void)
     // glacially slow to PIO-read in QEMU TCG. The ELF loader
     // code is now wired into the build (L63 milestone); we'll
     // call it once the prerequisites land.
+    // Lecture 66 - flipping to "0:/BLANK.ELF" works correctness-
+    // wise (the L65 ELF64 loader recognises and parses our
+    // x86_64-elf-built blank.elf, validates EI_CLASS=64, walks
+    // the PT_LOAD program header, maps the user code at
+    // 0x400000, and iretq's in). But blank.elf is ~2 MiB on
+    // disk because the linker's PT_LOAD file offset = VMA mod
+    // p_align (defaults to 0x200000 in elf64 ld), so the file
+    // is padded with zeros from offset 0 to 0x200000 before the
+    // real segment. ATA-PIO sector-at-a-time read in QEMU TCG
+    // takes ~40+ seconds for that. The regression test budgets
+    // 15 seconds and would fail.
+    //
+    // We keep SIMPLE.BIN here for fast CI. The L67+ work
+    // (probably IRQ-driven IO) or a switch to a smaller linker
+    // script will let us flip to BLANK.ELF without timing out.
     int res = process_load_switch("0:/SIMPLE.BIN", &p);
     if(res != SAMOS_ALL_OK){
         panic("Failed to load user program\n");
