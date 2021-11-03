@@ -62,8 +62,17 @@
 // 0x7E00 is also SAMOS_HEAP_TABLE_ADDRESS, so the E820 entries are
 // LIVE only until kheap_init runs. Read them first, then init the
 // heap. A future lecture will copy the entries somewhere safe.
-#define SAMOS_MEMORY_MAP_LOCATION                0x7E00
-#define SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION  0x7DFE
+// Lecture 75 - addresses moved out of the BIOS boot sector
+// area (0x7DFE / 0x7E00) into a region the UEFI bootloader
+// can AllocatePages at: 0x210000. The bootloader writes the
+// count as a UINT64 at 0x210000 followed by the entries
+// starting at 0x210008.
+//
+// The 8-byte gap between count (uint64) and entries (vs the
+// 2-byte gap in the BIOS layout) is the reason these two
+// macros differ by 8 now, not 2.
+#define SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION  0x210000
+#define SAMOS_MEMORY_MAP_LOCATION                0x210008
 
 #define SAMOS_MAX_FILESYSTEMS        12
 #define SAMOS_MAX_FILE_DESCRIPTORS  512
