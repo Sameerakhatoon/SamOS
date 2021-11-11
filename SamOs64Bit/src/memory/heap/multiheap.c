@@ -131,6 +131,30 @@ void multiheap_get_heap_and_paging_heap_for_address(struct multiheap* mh,
     *real_phys_addr = real_addr;
 }
 
+// Lecture 80 - realloc via the multi-heap routing.
+//
+// Finds the heap that owns `old_ptr` and forwards to
+// heap_realloc. The virtual-arena case panics for now -
+// reallocating a defragment-by-paging allocation would need
+// to remap the virtual range AND keep underlying physical
+// blocks in sync, which has not been implemented.
+void* multiheap_realloc(struct multiheap* mh, void* old_ptr, size_t new_size){
+    struct multiheap_single_heap* paging_heap = NULL;
+    struct multiheap_single_heap* phys_heap   = NULL;
+    void* real_phys_addr = NULL;
+    multiheap_get_heap_and_paging_heap_for_address(mh, old_ptr, &phys_heap, &paging_heap, &real_phys_addr);
+
+    if(paging_heap){
+        panic("multiheap_realloc: virtual-arena realloc not implemented\n");
+    }
+
+    struct multiheap_single_heap* heap_to_use = phys_heap;
+    if(!heap_to_use){
+        return multiheap_alloc(mh, new_size);
+    }
+    return heap_realloc(heap_to_use->heap, old_ptr, new_size);
+}
+
 // Lecture 28 - block count of the allocation that `ptr` heads.
 // If `ptr` is in the virtual arena we walk the SHADOW heap (the
 // run-length lives there, not in the physical sub-heap).
