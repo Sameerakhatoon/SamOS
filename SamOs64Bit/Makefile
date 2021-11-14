@@ -14,7 +14,7 @@
 # we substitute the mformat/mcopy pipeline used by SamOs since it
 # does not need sudo or a real mount point.
 
-FILES = ./build/kernel.asm.o ./build/kernel.o ./build/string/string.o ./build/memory/memory.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/heap/multiheap.o ./build/memory/paging/paging.o ./build/memory/paging/paging.asm.o ./build/io/io.asm.o ./build/idt/idt.o ./build/idt/idt.asm.o ./build/idt/irq.o ./build/task/task.o ./build/task/task.asm.o ./build/task/process.o ./build/task/tss.asm.o ./build/fs/file.o ./build/fs/pparser.o ./build/fs/fat/fat16.o ./build/disk/disk.o ./build/disk/streamer.o ./build/gdt/gdt.o ./build/keyboard/keyboard.o ./build/keyboard/classic.o ./build/isr80h/isr80h.o ./build/isr80h/io.o ./build/isr80h/heap.o ./build/isr80h/misc.o ./build/isr80h/process.o ./build/loader/formats/elf.o ./build/loader/formats/elfloader.o ./build/lib/vector/vector.o
+FILES = ./build/kernel.asm.o ./build/kernel.o ./build/string/string.o ./build/memory/memory.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/heap/multiheap.o ./build/memory/paging/paging.o ./build/memory/paging/paging.asm.o ./build/io/io.asm.o ./build/idt/idt.o ./build/idt/idt.asm.o ./build/idt/irq.o ./build/task/task.o ./build/task/task.asm.o ./build/task/process.o ./build/task/tss.asm.o ./build/fs/file.o ./build/fs/pparser.o ./build/fs/fat/fat16.o ./build/disk/disk.o ./build/disk/streamer.o ./build/disk/gpt.o ./build/gdt/gdt.o ./build/keyboard/keyboard.o ./build/keyboard/classic.o ./build/isr80h/isr80h.o ./build/isr80h/io.o ./build/isr80h/heap.o ./build/isr80h/misc.o ./build/isr80h/process.o ./build/loader/formats/elf.o ./build/loader/formats/elfloader.o ./build/lib/vector/vector.o
 INCLUDES = -I./src
 FLAGS = -g -ffreestanding -falign-jumps -falign-functions -falign-labels -falign-loops -fstrength-reduce -fomit-frame-pointer -finline-functions -Wno-unused-function -fno-builtin -Werror -Wno-unused-label -Wno-cpp -Wno-unused-parameter -nostdlib -nostartfiles -nodefaultlibs -Wall -O0 -Iinc
 
@@ -143,6 +143,9 @@ user_programs:
 
 ./build/disk/streamer.o: ./src/disk/streamer.c
 	x86_64-elf-gcc $(INCLUDES) -I./src/disk $(FLAGS) -std=gnu99 -c ./src/disk/streamer.c -o ./build/disk/streamer.o
+
+./build/disk/gpt.o: ./src/disk/gpt.c
+	x86_64-elf-gcc $(INCLUDES) -I./src/disk $(FLAGS) -std=gnu99 -c ./src/disk/gpt.c -o ./build/disk/gpt.o
 
 ./build/gdt/gdt.o: ./src/gdt/gdt.c
 	x86_64-elf-gcc $(INCLUDES) -I./src/gdt $(FLAGS) -std=gnu99 -c ./src/gdt/gdt.c -o ./build/gdt/gdt.o
