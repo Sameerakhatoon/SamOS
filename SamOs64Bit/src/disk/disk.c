@@ -86,27 +86,19 @@ int disk_create_new(int type, int starting_lba, int ending_lba,
         char primary_drive_fs_name[11] = {0};
         strncpy(primary_drive_fs_name, SAMOS_KERNEL_FILESYSTEM_NAME,
                 strlen(SAMOS_KERNEL_FILESYSTEM_NAME));
-        // L78 NOTE: upstream calls
-        //   disk->filesystem->volume_name(disk->fs_private,
-        //                                 fs_name, sizeof(fs_name));
-        // here, but the volume_name vtable slot is added in L84.
-        // Compiling against L78 with this call active fails -
-        // SamOs guards it with `#if 0` until L84 lands. The
-        // primary_fs_disk selection therefore degenerates to
-        // "first disk wins" until then.
-        // L84-stub TODO: re-enable the volume_name comparison.
-#if 0
-        disk->filesystem->volume_name(disk->fs_private, fs_name, sizeof(fs_name));
-        if(strncmp(fs_name, primary_drive_fs_name, sizeof(fs_name)) == 0){
-            primary_fs_disk = disk;
+        // Lecture 84 - the volume_name vtable slot is live;
+        // ask the filesystem for its label and match it against
+        // the kernel-expected name. Falls back to "first disk
+        // wins" only when no disk matches.
+        if(disk->filesystem->volume_name){
+            disk->filesystem->volume_name(disk->fs_private, fs_name, sizeof(fs_name));
+            if(strncmp(fs_name, primary_drive_fs_name, sizeof(fs_name)) == 0){
+                primary_fs_disk = disk;
+            }
         }
-#else
         if(primary_fs_disk == NULL){
             primary_fs_disk = disk;
         }
-        (void)primary_drive_fs_name;
-        (void)fs_name;
-#endif
     }
 
     if(disk_out){

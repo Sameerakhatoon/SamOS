@@ -103,6 +103,11 @@ struct fat_private {
     struct disk_stream*   cluster_read_stream;
     struct disk_stream*   fat_read_stream;
     struct disk_stream*   directory_stream;
+
+    // Lecture 84 - the FAT16 volume label, copied out of the
+    // extended BPB at resolve time. Used by disk_search_and_init
+    // to pick the primary filesystem disk.
+    char                  name[11];
 };
 
 int   fat16_resolve(struct disk* disk);
@@ -111,6 +116,7 @@ int   fat16_read(struct disk* disk, void* descriptor, uint32_t size, uint32_t nm
 int   fat16_seek(void* private, uint32_t offset, FILE_SEEK_MODE seek_mode);
 int   fat16_stat(struct disk* disk, void* private, struct file_stat* stat);
 int   fat16_close(void* private);
+int   fat16_volume_name(void* private, char* name_out, size_t max);
 
 static void  fat16_init_private(struct disk* disk, struct fat_private* private);
 static int   fat16_sector_to_absolute(struct disk* disk, int sector);
@@ -118,12 +124,13 @@ static int   fat16_get_total_items_for_directory(struct disk* disk, uint32_t dir
 static int   fat16_get_root_directory(struct disk* disk, struct fat_private* fat_private, struct fat_directory* directory);
 
 struct filesystem fat16_fs = {
-    .resolve = fat16_resolve,
-    .open    = fat16_open,
-    .read    = fat16_read,
-    .seek    = fat16_seek,
-    .stat    = fat16_stat,
-    .close   = fat16_close
+    .resolve     = fat16_resolve,
+    .open        = fat16_open,
+    .read        = fat16_read,
+    .seek        = fat16_seek,
+    .stat        = fat16_stat,
+    .close       = fat16_close,
+    .volume_name = fat16_volume_name // L84
 };
 
 struct filesystem* fat16_init(){
@@ -239,7 +246,9 @@ int fat16_resolve(struct disk* disk){
     disk->fs_private = fat_private;
     disk->filesystem = &fat16_fs;
 
-    struct disk_stream* stream = diskstreamer_new(disk->id);
+    // Lecture 84 - same disk-pointer construction the streams in
+    // init_private now use.
+    struct disk_stream* stream = diskstreamer_new_from_disk(disk);
     if(!stream){
         res = -ENOMEM;
         goto out;
@@ -259,6 +268,12 @@ int fat16_resolve(struct disk* disk){
         res = -EIO;
         goto out;
     }
+
+    // Lecture 84 - cache the volume label so fat16_volume_name
+    // can answer disk_search_and_init's primary-fs query.
+    strncpy(fat_private->name,
+            (const char*)fat_private->header.shared.extended_header.volume_id_string,
+            sizeof(fat_private->name));
 
 out:
     if(stream){
@@ -590,6 +605,15 @@ static void fat16_free_file_descriptor(struct fat_file_descriptor* desc){
 
 int fat16_close(void* private){
     fat16_free_file_descriptor((struct fat_file_descriptor*)private);
+    return 0;
+}
+
+// Lecture 84 - hand back the cached FAT16 volume label so the
+// disk layer can pattern-match it against the kernel's expected
+// filesystem name.
+int fat16_volume_name(void* private, char* name_out, size_t max){
+    struct fat_private* fs_private = (struct fat_private*)private;
+    strncpy(name_out, fs_private->name, max);
     return 0;
 }
 
