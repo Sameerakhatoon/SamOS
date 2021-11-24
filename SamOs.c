@@ -18,6 +18,7 @@
 #include <Guid/FileInfo.h>
 #include <Protocol/LoadedImage.h>
 #include <Protocol/SimpleFileSystem.h>
+#include <Protocol/GraphicsOutput.h>
 #include "./SamOs64Bit/src/config.h"
 
 // Lecture 75 - E820-format entries the kernel's existing
@@ -239,6 +240,36 @@ EFI_STATUS ReadFileFromCurrentFilesystem(CHAR16* FileName,
     return EFI_SUCCESS;
 }
 
+// Lecture 86 - locate the EFI Graphics Output Protocol, query its
+// current mode, and report the framebuffer base / size / resolution
+// / pitch. Caller keeps the protocol pointer so it can paint and
+// hand the addresses to the kernel.
+EFI_STATUS GetFrameBufferInfo(EFI_GRAPHICS_OUTPUT_PROTOCOL** GraphicsOutput){
+    EFI_STATUS Status;
+    Status = gBS->LocateProtocol(&gEfiGraphicsOutputProtocolGuid, NULL,
+                                 (VOID**)GraphicsOutput);
+    if (EFI_ERROR(Status)) {
+        Print(L"Error: unable to locate GOP: %r", Status);
+        return Status;
+    }
+
+    EFI_GRAPHICS_OUTPUT_MODE_INFORMATION* Info;
+    UINTN SizeOfInfo;
+    Status = (*GraphicsOutput)->QueryMode(*GraphicsOutput,
+                                          (*GraphicsOutput)->Mode->Mode,
+                                          &SizeOfInfo, &Info);
+    if (EFI_ERROR(Status)) {
+        Print(L"Unable to query mode %r\n", Status);
+        return Status;
+    }
+
+    Print(L"Framebuffer base address: %p", (*GraphicsOutput)->Mode->FrameBufferBase);
+    Print(L"Framebuffer size: %lu bytes\n", (*GraphicsOutput)->Mode->FrameBufferSize);
+    Print(L"Screen resolution: %u x %u\n", Info->HorizontalResolution, Info->VerticalResolution);
+    Print(L"Pixels per scan line: %u\n", Info->PixelsPerScanLine);
+    return EFI_SUCCESS;
+}
+
 /*
   UEFI entry point.
 
@@ -294,11 +325,54 @@ UefiMain(IN EFI_HANDLE       ImageHandle,
     CopyMem((VOID*)KernelBase, KernelBuffer, KernelBufferSize);
     Print(L"Kernel copied to: %p\n", KernelBase);
 
+    // Lecture 86 - look up GOP, paint the screen green as a
+    // visible sanity check, then capture the framebuffer
+    // parameters so we can hand them to the kernel through the
+    // SysV regs.
+    EFI_GRAPHICS_OUTPUT_PROTOCOL* GraphicsOutput = NULL;
+    Status = GetFrameBufferInfo(&GraphicsOutput);
+    if (EFI_ERROR(Status)) {
+        Print(L"Error getting frame buffer info: %r\n", Status);
+        return Status;
+    }
+
+    EFI_GRAPHICS_OUTPUT_BLT_PIXEL* FrameBuffer =
+        (EFI_GRAPHICS_OUTPUT_BLT_PIXEL*)GraphicsOutput->Mode->FrameBufferBase;
+    UINTN PixelsPerScanLine    = GraphicsOutput->Mode->Info->PixelsPerScanLine;
+    UINTN HorizontalResolution = GraphicsOutput->Mode->Info->HorizontalResolution;
+    UINTN VerticalResolution   = GraphicsOutput->Mode->Info->VerticalResolution;
+
+    for (UINTN y = 0; y < VerticalResolution; y++) {
+        for (UINTN x = 0; x < HorizontalResolution; x++) {
+            FrameBuffer[y * PixelsPerScanLine + x].Red      = 0x00;
+            FrameBuffer[y * PixelsPerScanLine + x].Green    = 0xff;
+            FrameBuffer[y * PixelsPerScanLine + x].Blue     = 0x00;
+            FrameBuffer[y * PixelsPerScanLine + x].Reserved = 0x00;
+        }
+    }
+
     // After this gBS is invalid.
     gBS->ExitBootServices(ImageHandle, 0);
 
-    // Hand off to the kernel. AT&T jmp *%0 expands to an indirect
-    // jump through whichever register the compiler picked.
+    // Hand off to the kernel. The kernel's _start (kernel.asm)
+    // saves rdi/rsi/rdx/rcx into bss-resident slots so the C
+    // code can read them post-paging-switch.
+    //   rdi = framebuffer base
+    //   rsi = pixels per scan line
+    //   rdx = horizontal resolution
+    //   rcx = vertical resolution
+    __asm__ __volatile__(
+        "movq %0, %%rdi\n\t"
+        "movq %1, %%rsi\n\t"
+        "movq %2, %%rdx\n\t"
+        "movq %3, %%rcx\n\t"
+        :
+        : "r"((UINT64)FrameBuffer),
+          "r"((UINT64)PixelsPerScanLine),
+          "r"((UINT64)HorizontalResolution),
+          "r"((UINT64)VerticalResolution)
+        : "rdi", "rsi", "rdx", "rcx");
+
     __asm__("jmp *%0" : : "r"(KernelBase));
 
     return EFI_SUCCESS;
