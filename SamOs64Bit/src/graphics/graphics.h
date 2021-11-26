@@ -1,0 +1,88 @@
+#ifndef KERNEL_GRAPHICS_H
+#define KERNEL_GRAPHICS_H
+// Lecture 87 - graphics foundations. A graphics_info is a
+// rectangular surface that owns a back buffer (`pixels`) and is
+// composited onto a parent surface via redraw. The root
+// graphics_info wraps the physical framebuffer that UEFI handed
+// us in default_graphics_info (kernel.asm).
+//
+// Flags, transparency keying, child surfaces, and mouse hooks
+// are stubbed at this commit; children are pushed but redraw
+// does not yet walk them.
+
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
+#include "lib/vector/vector.h"
+
+enum {
+    GRAPHICS_FLAG_ALLOW_OUT_OF_BOUNDS                = 0b00000001,
+    GRAPHICS_FLAG_CLONED_FRAMEBUFFER                 = 0b00000010,
+    GRAPHICS_FLAG_CLONED_CHILDREN                    = 0b00000100,
+    GRAPHICS_FLAG_DO_NOT_COPY_PIXELS                 = 0b00001000,
+    GRAPHICS_FLAG_DO_NOT_OVERWRITE_TRASPARENT_PIXELS = 0b00010000
+};
+
+struct graphics_info;
+
+// NOTE: the int `type` slot is a placeholder for the upcoming
+// MOUSE_CLICK_TYPE enum.
+typedef void (*GRAPHICS_MOUSE_CLICK_FUNCTION)(struct graphics_info* graphics,
+                                              size_t rel_x, size_t rel_y, int type);
+typedef void (*GRAPHICS_MOUSE_MOVE_FUNCTION) (struct graphics_info* graphics,
+                                              size_t rel_x, size_t rel_y,
+                                              size_t abs_x, size_t abs_y);
+
+struct framebuffer_pixel {
+    uint8_t blue;
+    uint8_t green;
+    uint8_t red;
+    uint8_t reserved;
+};
+
+struct graphics_info {
+    struct framebuffer_pixel* framebuffer;
+    uint32_t                  horizontal_resolution;
+    uint32_t                  vertical_resolution;
+    uint32_t                  pixels_per_scanline;
+
+    // Back buffer. `width*height*sizeof(framebuffer_pixel)`.
+    // Writes go here; redraw composites into framebuffer.
+    struct framebuffer_pixel* pixels;
+
+    uint32_t                  width;
+    uint32_t                  height;
+
+    // Absolute position on the screen.
+    uint32_t                  starting_x;
+    uint32_t                  starting_y;
+
+    // Position relative to parent.
+    uint32_t                  relative_x;
+    uint32_t                  relative_y;
+
+    struct graphics_info*     parent;
+    struct vector*            children;  // vector<struct graphics_info*>
+
+    uint32_t                  flags;
+    uint32_t                  z_index;   // higher = drawn later
+
+    struct framebuffer_pixel  ignore_color;
+    // Transparency key applies during redraw - any pixel matching
+    // it shows what is behind. Black is the "no key" sentinel.
+    struct framebuffer_pixel  transparency_key;
+
+    struct {
+        GRAPHICS_MOUSE_CLICK_FUNCTION mouse_click;
+        GRAPHICS_MOUSE_MOVE_FUNCTION  mouse_move;
+    } event_handlers;
+};
+
+void                  graphics_setup(struct graphics_info* main_graphics_info);
+struct graphics_info* graphics_screen_info(void);
+void                  graphics_draw_pixel(struct graphics_info* g, uint32_t x, uint32_t y,
+                                          struct framebuffer_pixel pixel);
+void                  graphics_redraw(struct graphics_info* g);
+void                  graphics_redraw_all(void);
+
+#endif
