@@ -13,6 +13,7 @@
 //     an alias; the canonical spelling forwards to it.
 
 #include "graphics/image/image.h"
+#include "graphics/image/bmp.h"
 #include "graphics/graphics.h"
 #include "memory/memory.h"
 #include "fs/file.h"
@@ -162,7 +163,8 @@ out:
 }
 
 int graphics_image_formats_load(void){
-    // L88 part 2 will register BMP here.
+    // L88 part 2 - BMP is the only built-in decoder.
+    graphics_image_format_register(graphics_image_format_bmp_setup());
     return 0;
 }
 
