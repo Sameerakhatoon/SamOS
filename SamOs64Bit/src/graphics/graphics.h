@@ -14,6 +14,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include "lib/vector/vector.h"
+#include "graphics/image/image.h"   // L90 - struct image for draw_image
 
 enum {
     GRAPHICS_FLAG_ALLOW_OUT_OF_BOUNDS                = 0b00000001,
@@ -82,6 +83,10 @@ void                  graphics_setup(struct graphics_info* main_graphics_info);
 struct graphics_info* graphics_screen_info(void);
 void                  graphics_draw_pixel(struct graphics_info* g, uint32_t x, uint32_t y,
                                           struct framebuffer_pixel pixel);
+// Lecture 90 - paint a decoded image onto a surface, top-left
+// corner at (x, y). NULL surface means the screen.
+void                  graphics_draw_image(struct graphics_info* g,
+                                          struct image* image, int x, int y);
 void                  graphics_redraw(struct graphics_info* g);
 void                  graphics_redraw_all(void);
 

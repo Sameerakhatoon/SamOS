@@ -116,6 +116,37 @@ void graphics_draw_pixel(struct graphics_info* graphics_info, uint32_t x, uint32
     }
 }
 
+// Lecture 90 - composite a decoded image into a surface's back
+// buffer at (x, y). NULL surface means the screen root.
+// Iterates pixels through graphics_draw_pixel so the surface's
+// ignore_color logic and bounds check apply uniformly.
+void graphics_draw_image(struct graphics_info* graphics_info,
+                         struct image* image, int x, int y){
+    if(!image){
+        return;
+    }
+    if(!graphics_info){
+        graphics_info = loaded_graphics_info;
+    }
+
+    for(size_t lx = 0; lx < (size_t)image->width; lx++){
+        for(size_t ly = 0; ly < (size_t)image->height; ly++){
+            size_t sx = x + lx;
+            size_t sy = y + ly;
+
+            image_pixel_data* pixel_data =
+                &((image_pixel_data*)image->data)[ly * image->width + lx];
+
+            struct framebuffer_pixel fb_pixel = {0};
+            fb_pixel.red   = pixel_data->R;
+            fb_pixel.green = pixel_data->G;
+            fb_pixel.blue  = pixel_data->B;
+
+            graphics_draw_pixel(graphics_info, sx, sy, fb_pixel);
+        }
+    }
+}
+
 static void graphics_redraw_only(struct graphics_info* g){
     if(!g){
         return;
