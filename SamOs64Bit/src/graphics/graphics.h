@@ -87,6 +87,14 @@ void                  graphics_draw_pixel(struct graphics_info* g, uint32_t x, u
 // corner at (x, y). NULL surface means the screen.
 void                  graphics_draw_image(struct graphics_info* g,
                                           struct image* image, int x, int y);
+// Lecture 93 - regional redraw + screen-space wrapper.
+void                  graphics_redraw_region(struct graphics_info* g,
+                                             uint32_t local_x, uint32_t local_y,
+                                             uint32_t width,   uint32_t height);
+void                  graphics_redraw_graphics_to_screen(struct graphics_info* relative,
+                                                         uint32_t rel_x, uint32_t rel_y,
+                                                         uint32_t width, uint32_t height);
+void                  graphics_redraw_children(struct graphics_info* g);
 void                  graphics_redraw(struct graphics_info* g);
 void                  graphics_redraw_all(void);
 

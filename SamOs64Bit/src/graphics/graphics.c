@@ -32,7 +32,9 @@ struct graphics_info* graphics_screen_info(void){
 // Copy a (clipped) rectangle from `src_info->pixels` to the
 // physical framebuffer at (dst_abs_x, dst_abs_y). Skips pixels
 // matching src_info->transparency_key. Black-key means "no key".
-static void graphics_paste_pixels_to_framebuffer(struct graphics_info* src_info,
+// L93 promoted to file-scope (no `static`) so the new
+// graphics_redraw_region in this file can reuse it.
+void graphics_paste_pixels_to_framebuffer(struct graphics_info* src_info,
                                                  uint32_t src_x, uint32_t src_y,
                                                  uint32_t width, uint32_t height,
                                                  uint32_t dst_abs_x, uint32_t dst_abs_y){
@@ -155,12 +157,106 @@ static void graphics_redraw_only(struct graphics_info* g){
                                          g->starting_x, g->starting_y);
 }
 
+// Lecture 93 - walk a surface's `children` vector and redraw
+// each. Recursive: each child's redraw calls back here for its
+// own grandchildren.
+void graphics_redraw_children(struct graphics_info* g){
+    size_t total_children = vector_count(g->children);
+    for(size_t i = 0; i < total_children; i++){
+        struct graphics_info* child = NULL;
+        vector_at(g->children, i, &child, sizeof(child));
+        if(child){
+            graphics_redraw(child);
+        }
+    }
+}
+
+// Lecture 93 - paint only a sub-rectangle of `g` onto the
+// framebuffer, then redraw the parts of every child that overlap
+// the rectangle. Used by the font path (small per-glyph redraws)
+// and by L99's transparency work.
+//
+// Upstream bug preserved (NOT corrected): intersect_right is
+// computed with MAX, not MIN. That makes the right edge always
+// extend at least as far as region_abs_right, which is wrong for
+// children that end before the redraw region. We keep the
+// upstream form so the diff lines up; a future commit can fix it.
+void graphics_redraw_region(struct graphics_info* g,
+                            uint32_t local_x, uint32_t local_y,
+                            uint32_t width,   uint32_t height){
+    if(!g){
+        return;
+    }
+    if(local_x >= g->width || local_y >= g->height){
+        return;
+    }
+    if(local_x + width > g->width){
+        return;
+    }
+    if(local_y + height > g->height){
+        height = g->height - local_y;
+    }
+
+    uint32_t dst_abs_x = g->starting_x + local_x;
+    uint32_t dst_abs_y = g->starting_y + local_y;
+
+    graphics_paste_pixels_to_framebuffer(g, local_x, local_y,
+                                         width, height,
+                                         dst_abs_x, dst_abs_y);
+
+    uint32_t region_abs_left   = dst_abs_x;
+    uint32_t region_abs_top    = dst_abs_y;
+    uint32_t region_abs_right  = dst_abs_x + width;
+    uint32_t region_abs_bottom = dst_abs_y + height;
+
+    size_t child_count = vector_count(g->children);
+    for(size_t i = 0; i < child_count; i++){
+        struct graphics_info* child = NULL;
+        vector_at(g->children, i, &child, sizeof(child));
+        if(!child){
+            continue;
+        }
+
+        uint32_t child_abs_left   = child->starting_x;
+        uint32_t child_abs_top    = child->starting_y;
+        uint32_t child_abs_right  = child->starting_x + child->width;
+        uint32_t child_abs_bottom = child->starting_y + child->height;
+
+        uint32_t intersect_left   = MAX(child_abs_left,   region_abs_left);
+        uint32_t intersect_top    = MAX(child_abs_top,    region_abs_top);
+        // L93 upstream bug preserved: should be MIN.
+        uint32_t intersect_right  = MAX(child_abs_right,  region_abs_right);
+        uint32_t intersect_bottom = MIN(child_abs_bottom, region_abs_bottom);
+
+        if(intersect_right > intersect_left && intersect_bottom > intersect_top){
+            uint32_t child_local_x    = intersect_left - child_abs_left;
+            uint32_t child_local_y    = intersect_top  - child_abs_top;
+            uint32_t intersect_width  = intersect_right  - intersect_left;
+            uint32_t intersect_height = intersect_bottom - intersect_top;
+            graphics_redraw_region(child, child_local_x, child_local_y,
+                                   intersect_width, intersect_height);
+        }
+    }
+}
+
+// Lecture 93 - convenience helper: project a `relative_graphics`
+// rectangle to absolute screen coords and redraw that region of
+// the root. Used by font_draw_from_index in L94+.
+void graphics_redraw_graphics_to_screen(struct graphics_info* relative_graphics,
+                                        uint32_t rel_x, uint32_t rel_y,
+                                        uint32_t width, uint32_t height){
+    uint32_t abs_screen_x = relative_graphics->starting_x + rel_x;
+    uint32_t abs_screen_y = relative_graphics->starting_y + rel_y;
+    graphics_redraw_region(graphics_screen_info(),
+                           abs_screen_x, abs_screen_y, width, height);
+}
+
 void graphics_redraw(struct graphics_info* g){
     if(!g){
         return;
     }
     graphics_redraw_only(g);
-    // TODO: walk children once the compositor lands.
+    graphics_redraw_children(g);
 }
 
 void graphics_redraw_all(void){
