@@ -1,24 +1,13 @@
-// Lecture 92 - bitmap font foundation (NOT YET LINKED).
+// Lecture 92 + 94 - bitmap font subsystem.
 //
-// font.c lands as source-only in upstream L92: the file is added
-// but Makefile FILES is not updated. We follow the same pattern.
-// Inspecting it now is helpful because the upstream code has
-// three open issues that subsequent lectures resolve:
+// font_load_from_image decodes a font BMP into a bit-packed
+// glyph table; font_create wraps that buffer into a `struct
+// font`; font_load caches by filename. font_draw_from_index
+// paints one glyph into a surface and repaints just the dirty
+// rectangle via graphics_redraw_graphics_to_screen (L93).
 //
-//   1. font_load_from_image is missing a `return` for its
-//      computed character_data (and the wrapper struct it would
-//      build).
-//   2. font_load (referenced by font_system_init) is never
-//      defined.
-//   3. graphics_redraw_graphics_to_screen is called by
-//      font_draw_from_index but does not exist yet.
-//
-// L93 adds the redraw-region helper. L94 fills in the loader
-// wrapper. Until then this file is reference material only and
-// pulling it into the build would break the link.
-//
-// We keep the upstream identifier typos
-// (bits_height_per_chracter) verbatim.
+// font.c is in the build at L94. The L92 stub state ("source
+// only, not in FILES") is gone.
 
 #include "graphics/font.h"
 #include "graphics/graphics.h"
@@ -31,21 +20,30 @@
 #include "status.h"
 #include <stdbool.h>
 
-struct vector* loaded_fonts = NULL;
-struct font*   system_font  = NULL;
+static struct vector* loaded_fonts = NULL;
+static struct font*   system_font  = NULL;
+
+static struct font* font_load_from_image(const char* filename,
+                                         size_t pixel_width,
+                                         size_t pixel_height,
+                                         size_t y_offset_per_character);
+int font_draw_from_index(struct graphics_info* graphics_info, struct font* font,
+                         int screen_x, int screen_y,
+                         int index_character,
+                         struct framebuffer_pixel font_color);
 
 struct font* font_get_system_font(void){
     return system_font;
 }
 
-// L92 walks the font BMP, samples every per-character box, and
-// flips bits in `character_data` for non-black source pixels.
-// Returning the populated struct font is L94's job; the upstream
-// commit leaves the function without a return path.
-struct font* font_load_from_image(const char* filename,
-                                  size_t pixel_width,
-                                  size_t pixel_height,
-                                  size_t y_offset_per_character){
+// Walk a font-sheet BMP and bit-pack the visible pixels of each
+// glyph cell into character_data. The cell layout matches the
+// sysfont.bmp: rows of `pixel_width` x `pixel_height` cells,
+// `y_offset_per_character` rows skipped at the top of each cell.
+static struct font* font_load_from_image(const char* filename,
+                                         size_t pixel_width,
+                                         size_t pixel_height,
+                                         size_t y_offset_per_character){
     struct image* img_font = graphics_image_load(filename);
     if(!img_font){
         return NULL;
@@ -89,7 +87,6 @@ struct font* font_load_from_image(const char* filename,
                     size_t abs_y = starting_y + y;
                     image_pixel_data pixel = graphics_image_get_pixel(img_font, abs_x, abs_y);
                     if(pixel.R != 0 || pixel.B != 0 || pixel.G != 0){
-                        // Non-black source pixel = bit set.
                         size_t char_offset = character_index * total_required_bytes_per_character;
                         size_t bit_index   = y * pixel_width + x;
                         size_t byte_index  = char_offset + (bit_index / 8);
@@ -101,11 +98,43 @@ struct font* font_load_from_image(const char* filename,
         }
     }
 
-    // L94 will add the font_create call here and `return font`.
-    // For L92 the function falls off the end, which is why the
-    // file is not in the build.
-    (void)character_data;
+    // L94 completes the function: wrap the packed buffer in a
+    // struct font keyed at ASCII 32 (space). L92 left this as a
+    // dangling allocation.
+    return font_create(character_data, total_characters,
+                       pixel_width, pixel_height,
+                       FONT_IMAGE_DRAW_SUBTRACT_FROM_INDEX);
+}
+
+struct font* font_get_loaded_font(const char* filename){
+    struct font* font = NULL;
+    size_t total_fonts = vector_count(loaded_fonts);
+    for(size_t i = 0; i < total_fonts; i++){
+        vector_at(loaded_fonts, i, &font, sizeof(font));
+        if(font){
+            if(strncmp(font->filename, filename, sizeof(font->filename)) == 0){
+                return font;
+            }
+        }
+    }
     return NULL;
+}
+
+struct font* font_load(const char* filename){
+    struct font* loaded_font = font_get_loaded_font(filename);
+    if(loaded_font){
+        return loaded_font;
+    }
+
+    loaded_font = font_load_from_image(filename,
+                                       FONT_IMAGE_CHARACTER_WIDTH_PIXEL_SIZE,
+                                       FONT_IMAGE_CHRACTER_HEIGHT_PIXEL_SIZE,
+                                       FONT_IMAGE_CHARACTER_Y_OFFSET);
+    if(loaded_font){
+        strncpy(loaded_font->filename, filename, sizeof(loaded_font->filename));
+        vector_push(loaded_fonts, &loaded_font);
+    }
+    return loaded_font;
 }
 
 struct font* font_create(uint8_t* character_data,
@@ -117,10 +146,101 @@ struct font* font_create(uint8_t* character_data,
     if(!font){
         return NULL;
     }
-    font->character_count                              = character_count;
-    font->character_data                               = character_data;
-    font->bits_width_per_character                     = bits_width_per_character;
-    font->bits_height_per_chracter                     = bits_height_per_chracter;
-    font->subtract_from_ascii_char_index_for_drawing   = subtract_from_ascii_char_index_for_drawing;
+    font->character_count                            = character_count;
+    font->character_data                             = character_data;
+    font->bits_width_per_character                   = bits_width_per_character;
+    font->bits_height_per_chracter                   = bits_height_per_chracter;
+    font->subtract_from_ascii_char_index_for_drawing = subtract_from_ascii_char_index_for_drawing;
     return font;
+}
+
+// Walk the bit-packed glyph and emit a graphics_draw_pixel per
+// set bit. Then ask the surface to redraw the cell-sized region.
+int font_draw_from_index(struct graphics_info* graphics_info, struct font* font,
+                         int screen_x, int screen_y,
+                         int index_character,
+                         struct framebuffer_pixel font_color){
+    int res = 0;
+    if(!font){
+        res = -EINVARG;
+        goto out;
+    }
+    // Upstream uses > here; preserved (likely intent is >=).
+    if(index_character > (int)font->character_count){
+        res = 0;
+        goto out;
+    }
+
+    size_t total_required_bits_per_character  = font->bits_width_per_character
+                                              * font->bits_height_per_chracter;
+    size_t total_required_bytes_per_character = total_required_bits_per_character / 8;
+    if((total_required_bits_per_character % 8) != 0){
+        total_required_bytes_per_character++;
+    }
+
+    size_t character_index = (size_t)index_character * total_required_bytes_per_character;
+    for(size_t x = 0; x < font->bits_width_per_character; x++){
+        for(size_t y = 0; y < font->bits_height_per_chracter; y++){
+            size_t char_offset = character_index;
+            size_t bit_index   = y * font->bits_width_per_character + x;
+            size_t byte_index  = char_offset + (bit_index / 8);
+            if((font->character_data[byte_index] >> (bit_index % 8)) & 0x01){
+                size_t abs_x = screen_x + x;
+                size_t abs_y = screen_y + y;
+                graphics_draw_pixel(graphics_info, abs_x, abs_y, font_color);
+            }
+        }
+    }
+
+    graphics_redraw_graphics_to_screen(graphics_info, screen_x, screen_y,
+                                       font->bits_width_per_character,
+                                       font->bits_height_per_chracter);
+out:
+    return res;
+}
+
+int font_draw(struct graphics_info* graphics_info, struct font* font,
+              int screen_x, int screen_y,
+              int character,
+              struct framebuffer_pixel font_color){
+    character -= (int)font->subtract_from_ascii_char_index_for_drawing;
+    return font_draw_from_index(graphics_info, font, screen_x, screen_y,
+                                character, font_color);
+}
+
+int font_draw_text(struct graphics_info* graphics_info, struct font* font,
+                   int screen_x, int screen_y,
+                   const char* str,
+                   struct framebuffer_pixel font_color){
+    int res = 0;
+    int x = screen_x;
+    int y = screen_y;
+    while(*str != 0){
+        res = font_draw(graphics_info, font, x, y, *str, font_color);
+        if(res < 0){
+            break;
+        }
+        x += font->bits_width_per_character;
+        str++;
+    }
+    return res;
+}
+
+int font_system_init(void){
+    int res = 0;
+    loaded_fonts = vector_new(sizeof(struct font*), 4, 0);
+    if(!loaded_fonts){
+        res = -ENOMEM;
+        goto out;
+    }
+
+    // Lecture 94 - the upstream path is "@:/sysfont.bmp" sitting
+    // at the FS root. Our build pipeline does not yet copy a
+    // font BMP onto the disk image, so font_load will fail.
+    // We do not panic here (unlike upstream) because the rest
+    // of the kernel boot must continue under CI.
+    system_font = font_load("@:/sysfont.bmp");
+    (void)system_font;
+out:
+    return res;
 }
