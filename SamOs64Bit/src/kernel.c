@@ -33,6 +33,7 @@
 #include "disk/gpt.h"
 #include "graphics/graphics.h"   // L87 - root surface struct + API
 #include "graphics/image/image.h" // L90 - graphics_image_load
+#include "graphics/font.h"        // L95 - font_system_init / font_draw_text
 
 // L87 - bss-resident default_graphics_info lives in kernel.asm;
 // the long-mode entry stashes the UEFI framebuffer params into it
@@ -253,6 +254,12 @@ void kernel_main(void)
     // headers and spin up a virtual disk per partition.
     gpt_init();
 
+    // Lecture 95 - load the system font now that disks exist.
+    // The load is best-effort: a missing sysfont.bmp leaves
+    // system_font NULL and font_draw_text picks up the absence
+    // by returning early when the lookup fails.
+    font_system_init();
+
     // Allocate a 1 MiB kernel stack for ring transitions.
     // kzalloc lays it out low-to-high; rsp0 needs the TOP of
     // the region (stack grows down), so we add stack_size to
@@ -334,16 +341,17 @@ void kernel_main(void)
     // script will let us flip to BLANK.ELF without timing out.
     // Lecture 81 - "@" resolves to the primary filesystem disk
     // through pparser_get_drive_by_path. Drops the literal "0:".
-    // Lecture 90 - drop the background BMP onto the screen
-    // surface before the user task takes over. The image lives
-    // on the primary FS; @ resolves to the L81 primary disk.
-    // Errors are intentionally swallowed: a missing/bad
-    // bkground.bmp must not block boot.
-    struct image* bg = graphics_image_load("@:/bkground.bmp");
-    if(bg){
-        graphics_draw_image(NULL, bg, 0, 0);
-        graphics_redraw_all();
-    }
+    // Lecture 95 - upstream swaps the bkground.bmp draw for a
+    // white "Hello world" rendered via the L94 font system.
+    // We keep the same behaviour: a one-line text smoke test
+    // proves the font loaded and the draw -> redraw_all path
+    // composites without blowing up.
+    struct framebuffer_pixel white = {0};
+    white.red   = 0xff;
+    white.blue  = 0xff;
+    white.green = 0xff;
+    font_draw_text(graphics_screen_info(), NULL, 0, 0, "Hello world", white);
+    graphics_redraw_all();
 
     int res = process_load_switch("@:/SIMPLE.BIN", &p);
     if(res != SAMOS_ALL_OK){
