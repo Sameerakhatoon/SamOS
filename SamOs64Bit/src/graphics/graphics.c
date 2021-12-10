@@ -118,6 +118,18 @@ void graphics_draw_pixel(struct graphics_info* graphics_info, uint32_t x, uint32
     }
 }
 
+// Lecture 98 stub - graphics_draw_rect is referenced by
+// terminal_draw_rect. The full implementation lands in L99 along
+// with the transparency / ignore-color setters. Until then the
+// stub satisfies the link and is a no-op.
+void graphics_draw_rect(struct graphics_info* g,
+                        uint32_t abs_x, uint32_t abs_y,
+                        size_t width, size_t height,
+                        struct framebuffer_pixel color){
+    (void)g; (void)abs_x; (void)abs_y;
+    (void)width; (void)height; (void)color;
+}
+
 // Lecture 90 - composite a decoded image into a surface's back
 // buffer at (x, y). NULL surface means the screen root.
 // Iterates pixels through graphics_draw_pixel so the surface's

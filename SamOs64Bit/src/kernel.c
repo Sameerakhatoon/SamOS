@@ -57,7 +57,15 @@ void terminal_putchar(int x, int y, char c, char colour)
     video_mem[(y * VGA_WIDTH) + x] = terminal_make_char(c, colour);
 }
 
-void terminal_backspace()
+// Lecture 98 rename - the legacy VGA-text terminal backspace
+// was just called `terminal_backspace`. L98 introduces a
+// `terminal_backspace(struct terminal*)` in the graphics
+// terminal module; the names collide at link time. The legacy
+// path is no longer reachable post-L74 (UEFI pivot dropped
+// the BIOS VGA text mode), so rename to vga_terminal_backspace
+// to keep the symbol around for diff-ability but out of the
+// graphics terminal's namespace.
+void vga_terminal_backspace(void)
 {
     if (terminal_row == 0 && terminal_col == 0)
     {
@@ -86,7 +94,7 @@ void terminal_writechar(char c, char colour)
 
     if (c == 0x08)
     {
-        terminal_backspace();
+        vga_terminal_backspace();
         return;
     }
 
