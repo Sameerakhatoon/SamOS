@@ -335,31 +335,24 @@ out:
     return res;
 }
 
-// Lecture 98 - stubs. L99 introduces the surface-level
-// transparency/ignore-color setters; these forwarders will route
-// to them once they land.
+// Lecture 99 - the L98 stubs become thin forwarders now that
+// the surface-level setters exist.
 void terminal_transparency_key_set(struct terminal* terminal,
                                    struct framebuffer_pixel pixel_color){
-    (void)terminal;
-    (void)pixel_color;
-    // graphics_transparency_key_set(terminal->graphics_info, pixel_color);
+    graphics_transparency_key_set(terminal->graphics_info, pixel_color);
 }
 
 void terminal_transparency_key_remove(struct terminal* terminal){
-    (void)terminal;
-    // graphics_transparency_key_remove(terminal->graphics_info);
+    graphics_transparency_key_remove(terminal->graphics_info);
 }
 
 void terminal_ignore_color(struct terminal* terminal,
                            struct framebuffer_pixel pixel_color){
-    (void)terminal;
-    (void)pixel_color;
-    // graphics_ignore_color(terminal->graphics_info, pixel_color);
+    graphics_ignore_color(terminal->graphics_info, pixel_color);
 }
 
 void terminal_ignore_color_finish(struct terminal* terminal){
-    (void)terminal;
-    // graphics_ignore_color_finish(terminal->graphics_info);
+    graphics_ignore_color_finish(terminal->graphics_info);
 }
 
 int terminal_draw_image(struct terminal* terminal, uint32_t x, uint32_t y,

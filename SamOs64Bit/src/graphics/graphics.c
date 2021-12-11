@@ -118,16 +118,56 @@ void graphics_draw_pixel(struct graphics_info* graphics_info, uint32_t x, uint32
     }
 }
 
-// Lecture 98 stub - graphics_draw_rect is referenced by
-// terminal_draw_rect. The full implementation lands in L99 along
-// with the transparency / ignore-color setters. Until then the
-// stub satisfies the link and is a no-op.
-void graphics_draw_rect(struct graphics_info* g,
-                        uint32_t abs_x, uint32_t abs_y,
+// Lecture 99 - replace the L98 stub with the real rect filler.
+// Walks the rectangle column-major and calls graphics_draw_pixel
+// per cell so ignore_color and bounds checks still apply.
+void graphics_draw_rect(struct graphics_info* graphics_info,
+                        uint32_t x, uint32_t y,
                         size_t width, size_t height,
-                        struct framebuffer_pixel color){
-    (void)g; (void)abs_x; (void)abs_y;
-    (void)width; (void)height; (void)color;
+                        struct framebuffer_pixel pixel_color){
+    uint32_t x_end = x + (uint32_t)width;
+    uint32_t y_end = y + (uint32_t)height;
+    for(uint32_t lx = x; lx < x_end; lx++){
+        for(uint32_t ly = y; ly < y_end; ly++){
+            graphics_draw_pixel(graphics_info, lx, ly, pixel_color);
+        }
+    }
+}
+
+// Lecture 99 - paint-time pixel-skip filter. Stash a colour the
+// renderer should treat as "do not write this pixel". Black is
+// the "no filter" sentinel; black sources still draw because
+// the equality check matches the field, not the pixel.
+void graphics_ignore_color(struct graphics_info* graphics_info,
+                           struct framebuffer_pixel pixel_color){
+    graphics_info->ignore_color = pixel_color;
+}
+
+// Lecture 99 - composite-time transparency key.
+//
+// Upstream bug preserved: this function ALSO writes
+// `ignore_color` rather than `transparency_key`. They are
+// different semantic slots (ignore_color is paint-time;
+// transparency_key is composite-time). Mirroring upstream
+// keeps the diff readable; a follow-up patch can split them.
+void graphics_transparency_key_set(struct graphics_info* graphics_info,
+                                   struct framebuffer_pixel pixel_color){
+    graphics_info->ignore_color = pixel_color;
+}
+
+// Lecture 99 - clear the composite-time transparency key. The
+// upstream form resets `transparency_key` (not `ignore_color`)
+// to black, so a paired set/remove leaves ignore_color polluted.
+// The bug is preserved.
+void graphics_transparency_key_remove(struct graphics_info* graphics_info){
+    struct framebuffer_pixel pixel_black = {0};
+    graphics_info->transparency_key = pixel_black;
+}
+
+// Lecture 99 - clear the paint-time ignore filter.
+void graphics_ignore_color_finish(struct graphics_info* graphics_info){
+    struct framebuffer_pixel black_color = {0};
+    graphics_info->ignore_color = black_color;
 }
 
 // Lecture 90 - composite a decoded image into a surface's back
