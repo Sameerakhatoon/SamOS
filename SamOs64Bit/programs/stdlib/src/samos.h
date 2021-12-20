@@ -29,4 +29,7 @@ int  samos_system_run(const char* command);
 void samos_exit();
 void print(const char* msg);
 
+// Lecture 105 - userland fopen syscall trampoline.
+int  samos_fopen(const char* filename, const char* mode);
+
 #endif

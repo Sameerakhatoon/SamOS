@@ -14,7 +14,7 @@
 # we substitute the mformat/mcopy pipeline used by SamOs since it
 # does not need sudo or a real mount point.
 
-FILES = ./build/kernel.asm.o ./build/kernel.o ./build/string/string.o ./build/memory/memory.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/heap/multiheap.o ./build/memory/paging/paging.o ./build/memory/paging/paging.asm.o ./build/io/io.asm.o ./build/idt/idt.o ./build/idt/idt.asm.o ./build/idt/irq.o ./build/task/task.o ./build/task/task.asm.o ./build/task/process.o ./build/task/tss.asm.o ./build/fs/file.o ./build/fs/pparser.o ./build/fs/fat/fat16.o ./build/disk/disk.o ./build/disk/streamer.o ./build/disk/gpt.o ./build/graphics/graphics.o ./build/graphics/font.o ./build/graphics/terminal.o ./build/graphics/image/image.o ./build/graphics/image/bmp.o ./build/gdt/gdt.o ./build/keyboard/keyboard.o ./build/keyboard/classic.o ./build/isr80h/isr80h.o ./build/isr80h/io.o ./build/isr80h/heap.o ./build/isr80h/misc.o ./build/isr80h/process.o ./build/loader/formats/elf.o ./build/loader/formats/elfloader.o ./build/lib/vector/vector.o
+FILES = ./build/kernel.asm.o ./build/kernel.o ./build/string/string.o ./build/memory/memory.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/heap/multiheap.o ./build/memory/paging/paging.o ./build/memory/paging/paging.asm.o ./build/io/io.asm.o ./build/idt/idt.o ./build/idt/idt.asm.o ./build/idt/irq.o ./build/task/task.o ./build/task/task.asm.o ./build/task/process.o ./build/task/tss.asm.o ./build/fs/file.o ./build/fs/pparser.o ./build/fs/fat/fat16.o ./build/disk/disk.o ./build/disk/streamer.o ./build/disk/gpt.o ./build/graphics/graphics.o ./build/graphics/font.o ./build/graphics/terminal.o ./build/graphics/image/image.o ./build/graphics/image/bmp.o ./build/gdt/gdt.o ./build/keyboard/keyboard.o ./build/keyboard/classic.o ./build/isr80h/isr80h.o ./build/isr80h/io.o ./build/isr80h/heap.o ./build/isr80h/misc.o ./build/isr80h/file.o ./build/isr80h/process.o ./build/loader/formats/elf.o ./build/loader/formats/elfloader.o ./build/lib/vector/vector.o
 INCLUDES = -I./src
 FLAGS = -g -ffreestanding -falign-jumps -falign-functions -falign-labels -falign-loops -fstrength-reduce -fomit-frame-pointer -finline-functions -Wno-unused-function -fno-builtin -Werror -Wno-unused-label -Wno-cpp -Wno-unused-parameter -nostdlib -nostartfiles -nodefaultlibs -Wall -O0 -Iinc
 
@@ -190,6 +190,9 @@ user_programs:
 
 ./build/isr80h/process.o: ./src/isr80h/process.c
 	x86_64-elf-gcc $(INCLUDES) -I./src/isr80h $(FLAGS) -std=gnu99 -c ./src/isr80h/process.c -o ./build/isr80h/process.o
+
+./build/isr80h/file.o: ./src/isr80h/file.c
+	x86_64-elf-gcc $(INCLUDES) -I./src/isr80h $(FLAGS) -std=gnu99 -c ./src/isr80h/file.c -o ./build/isr80h/file.o
 
 ./build/loader/formats/elf.o: ./src/loader/formats/elf.c
 	mkdir -p ./build/loader/formats

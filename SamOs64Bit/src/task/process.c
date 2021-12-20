@@ -9,6 +9,7 @@
 // L48 - FAT16 / VFS came back. L63 - elfloader.h back too now
 // that process_load_elf / process_map_elf are un-stubbed.
 #include "fs/file.h"
+#include "lib/vector/vector.h"   // L105 - process->file_handles
 #include "loader/formats/elfloader.h"
 #include "kernel.h"
 #include <stdbool.h>
@@ -18,8 +19,13 @@ struct process* current_process = 0;
 
 static struct process* processes[SAMOS_MAX_PROCESSES] = { 0 };
 
+static int process_close_file_handles(struct process* process);
+
 static void process_init(struct process* process){
     memset(process, 0, sizeof(struct process));
+    // L105 - process_fopen pushes onto this; process_free_process
+    // walks it and fclose's each fd.
+    process->file_handles = vector_new(sizeof(struct process_file_handle*), 4, 0);
 }
 
 struct process* process_current(){
@@ -377,12 +383,86 @@ int process_terminate(struct process* process){
         goto out;
     }
 
+    // Lecture 105 - close every file the process opened. Safe
+    // before the rest of the teardown because process_close_file_handles
+    // does not touch task/stack memory.
+    process_close_file_handles(process);
+
     kfree(process->stack);
     task_free(process->task);
     process_unlink(process);
 
 out:
     return res;
+}
+
+// Lecture 105 - per-process fopen wrapper. Calls the kernel
+// fopen and records the descriptor on the process's file_handles
+// vector so process exit can fclose it.
+//
+// Upstream bug preserved verbatim:
+//   kzalloc(sizeof(struct process_file_handler*))
+// allocates the size of a POINTER, not the struct, AND uses the
+// typo `_handler` instead of `_handle`. Reading or writing any
+// field beyond the first 8 bytes (fd) lands in the next heap
+// block. The typo and the size mistake are documented inline;
+// callers must not depend on the file_path/mode being readable
+// until upstream fixes both.
+int process_fopen(struct process* process, const char* path, const char* mode){
+    int res = 0;
+    int fd  = fopen(path, mode);
+    if(fd <= 0){
+        res = -EIO;
+        goto out;
+    }
+    res = fd;
+
+    // sic - "_handler" and pointer-sized allocation per upstream.
+    struct process_file_handle* handle = kzalloc(sizeof(struct process_file_handler*));
+    if(!handle){
+        res = -ENOMEM;
+        goto out;
+    }
+    handle->fd = fd;
+    strncpy(handle->file_path, path, sizeof(handle->file_path));
+    strncpy(handle->mode,      mode, sizeof(handle->mode));
+
+    vector_push(process->file_handles, &handle);
+out:
+    if(res < 0){
+        fclose(fd);
+    }
+    return res;
+}
+
+struct process_file_handle* process_file_handle_get(struct process* process, int fd){
+    size_t total_handles = vector_count(process->file_handles);
+    for(size_t i = 0; i < total_handles; i++){
+        struct process_file_handle* handle = NULL;
+        vector_at(process->file_handles, i, &handle, sizeof(handle));
+        if(handle && handle->fd == fd){
+            return handle;
+        }
+    }
+    return NULL;
+}
+
+static int process_close_file_handles(struct process* process){
+    if(!process->file_handles){
+        return 0;
+    }
+    size_t total_handles = vector_count(process->file_handles);
+    for(size_t i = 0; i < total_handles; i++){
+        struct process_file_handle* handle = NULL;
+        vector_at(process->file_handles, i, &handle, sizeof(handle));
+        if(handle){
+            fclose(handle->fd);
+            kfree(handle);
+        }
+    }
+    vector_free(process->file_handles);
+    process->file_handles = NULL;
+    return 0;
 }
 
 void process_get_arguments(struct process* process, int* argc, char*** argv){
