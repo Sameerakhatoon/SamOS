@@ -85,5 +85,6 @@ struct process*  process_get(int process_id);
 int                            process_fopen(struct process* process,
                                              const char* path, const char* mode);
 struct process_file_handle*    process_file_handle_get(struct process* process, int fd);
+int                            process_fclose(struct process* process, int fd);
 
 #endif

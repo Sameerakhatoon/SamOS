@@ -26,6 +26,7 @@ global samos_process_get_arguments:function
 global samos_system:function
 global samos_exit:function
 global samos_fopen:function   ; L105
+global samos_fclose:function  ; L106
 
 ; void print(const char* msg)
 print:
@@ -103,4 +104,23 @@ samos_fopen:
     push qword rdi
     int  0x80
     add  rsp, 16
+    ret
+
+; Lecture 106 - void samos_fclose(size_t fd)
+;   rdi = fd
+;
+; Upstream bug preserved verbatim: the upstream peachos_fclose
+; pushes rdi, then has add rsp, 8 and ret WITHOUT issuing the
+; int 0x80, so the syscall is never actually invoked. The
+; kernel-side handler never runs and the per-process file
+; record stays around.
+;
+; We follow the upstream form for diff hygiene. A linear
+; one-instruction fix is to insert `int 0x80` between the push
+; and the rsp restore; deferred so the L106 commit mirrors
+; upstream exactly.
+samos_fclose:
+    mov  rax, 11           ; SYSTEM_COMMAND11_FCLOSE
+    push qword rdi
+    add  rsp, 8
     ret

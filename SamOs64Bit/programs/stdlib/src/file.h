@@ -3,6 +3,8 @@
 // Lecture 105 - userland fopen. Thin wrapper over the
 // samos_fopen syscall trampoline.
 
-int fopen(const char* filename, const char* mode);
+int  fopen(const char* filename, const char* mode);
+// Lecture 106 - userland fclose.
+void fclose(int fd);
 
 #endif

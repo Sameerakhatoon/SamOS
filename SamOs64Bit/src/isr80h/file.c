@@ -12,6 +12,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// Lecture 106 - userland fclose. Reads the fd off the syscall
+// stack and forwards to process_fclose, which finds the matching
+// process_file_handle, calls the kernel fclose, and pops the
+// record off the per-process vector.
+void* isr80h_command11_fclose(struct interrupt_frame* frame){
+    (void)frame;
+    int64_t fd = (int64_t)task_get_stack_item(task_current(), 0);
+    process_fclose(task_current()->process, fd);
+    return NULL;
+}
+
 void* isr80h_command10_fopen(struct interrupt_frame* frame){
     (void)frame;
     int   fd                  = 0;
