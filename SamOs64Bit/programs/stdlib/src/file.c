@@ -12,3 +12,7 @@ int fopen(const char* filename, const char* mode){
 void fclose(int fd){
     samos_fclose((size_t)fd);
 }
+
+int fread(void* buffer, size_t size, size_t count, long fd){
+    return samos_read(buffer, size, count, fd);
+}

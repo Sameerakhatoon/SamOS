@@ -447,6 +447,56 @@ struct process_file_handle* process_file_handle_get(struct process* process, int
     return NULL;
 }
 
+// Lecture 107-stub: process_validate_memory_or_terminate.
+//
+// The full body (walk the per-process allocation table to verify
+// virt_addr + space_needed lands inside one allocation, otherwise
+// terminate the process) requires process_get_allocation_by_addr
+// and process_allocation_request, both of which L108/L109
+// introduce. Until then this stub returns success so the L107
+// fread path can compile and link.
+//
+// L109 will replace the body with the real validation; the
+// stub stays in place for one lecture only.
+int process_validate_memory_or_terminate(struct process* process,
+                                         void* virt_addr,
+                                         size_t space_needed){
+    (void)process; (void)virt_addr; (void)space_needed;
+    return 0;
+}
+
+// Lecture 107 - userland fread. Validate the buffer, translate
+// it to a kernel-physical pointer, then forward to the kernel
+// fread for the cached fd.
+int process_fread(struct process* process, void* virt_ptr,
+                  uint64_t size, uint64_t nmemb, int fd){
+    int res = 0;
+
+    struct process_file_handle* handle = process_file_handle_get(process, fd);
+    if(!handle){
+        res = -EIO;
+        goto out;
+    }
+
+    size_t true_size = size * nmemb;
+    res = process_validate_memory_or_terminate(process, virt_ptr, true_size);
+    if(res < 0){
+        goto out;
+    }
+
+    void* phys_ptr = task_virtual_address_to_physical(process->task, virt_ptr);
+    if(!phys_ptr){
+        goto out;
+    }
+
+    res = fread(phys_ptr, size, nmemb, handle->fd);
+    if(res < 0){
+        goto out;
+    }
+out:
+    return res;
+}
+
 // Lecture 106 - userland fclose path. Drop the matching
 // process_file_handle from the per-process vector and call the
 // kernel fclose.
