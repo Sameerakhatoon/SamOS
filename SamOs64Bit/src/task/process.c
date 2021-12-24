@@ -21,10 +21,13 @@ static struct process* processes[SAMOS_MAX_PROCESSES] = { 0 };
 
 static int process_close_file_handles(struct process* process);
 
+static int process_close_file_handles(struct process* process);
+
+// Lecture 108 - allocations are now vector-backed. Initial
+// capacity of 10 matches upstream.
 static void process_init(struct process* process){
     memset(process, 0, sizeof(struct process));
-    // L105 - process_fopen pushes onto this; process_free_process
-    // walks it and fclose's each fd.
+    process->allocations  = vector_new(sizeof(struct process_allocation), 10, 0);
     process->file_handles = vector_new(sizeof(struct process_file_handle*), 4, 0);
 }
 
@@ -251,46 +254,98 @@ out:
     return res;
 }
 
-static int process_find_free_allocation_index(struct process* process){
-    int res = -ENOMEM;
-    for(int i = 0; i < SAMOS_MAX_PROGRAM_ALLOCATIONS; i++){
-        if(process->allocations[i].ptr == 0){
-            res = i;
+// Lecture 108 - vector-walk variants of the allocation
+// bookkeeping. process_find_free_allocation_index now appends a
+// zeroed slot when no free entry exists; the new
+// process_allocation_set_map factors out the paging + slot
+// update.
+int process_find_free_allocation_index(struct process* process){
+    int    res             = 0;
+    bool   found           = false;
+    size_t allocation_size = vector_count(process->allocations);
+    for(size_t i = 0; i < allocation_size; i++){
+        struct process_allocation allocation;
+        res = vector_at(process->allocations, i, &allocation, sizeof(allocation));
+        if(res < 0){
             break;
         }
+        if(allocation.ptr == NULL){
+            res   = i;
+            found = true;
+            break;
+        }
+    }
+    if(!found){
+        struct process_allocation allocation = {0};
+        res = vector_push(process->allocations, &allocation);
     }
     return res;
 }
 
-static struct process_allocation* process_get_allocation_by_addr(struct process* process, void* addr){
-    for(int i = 0; i < SAMOS_MAX_PROGRAM_ALLOCATIONS; i++){
-        if(process->allocations[i].ptr == addr){
-            return &process->allocations[i];
+int process_allocation_set_map(struct process* process, int allocation_entry_index,
+                               void* ptr, size_t size){
+    int res = paging_map_to(process->task->paging_desc, ptr, ptr,
+                            paging_align_address(ptr + size),
+                            PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
+    if(res < 0){
+        goto out;
+    }
+
+    struct process_allocation allocation;
+    res = vector_at(process->allocations, allocation_entry_index,
+                    &allocation, sizeof(allocation));
+    if(res < 0){
+        goto out;
+    }
+    allocation.ptr  = ptr;
+    allocation.end  = ptr + size;
+    allocation.size = size;
+    vector_overwrite(process->allocations, allocation_entry_index,
+                     &allocation, sizeof(allocation));
+out:
+    return res;
+}
+
+// Lecture 108 - by-start-addr lookup. Fills `allocation_out`
+// with a COPY of the matched record and returns 0; returns
+// -EIO when the address is not the start of any allocation.
+// L109 will add process_get_allocation_by_addr for range
+// queries; for L108 only the strict-start matcher exists.
+int process_get_allocation_by_start_addr(struct process* process, void* addr,
+                                         struct process_allocation* allocation_out){
+    size_t total_allocations = vector_count(process->allocations);
+    for(size_t i = 0; i < total_allocations; i++){
+        struct process_allocation allocation;
+        int res = vector_at(process->allocations, i, &allocation, sizeof(allocation));
+        if(res < 0){
+            break;
+        }
+        if(allocation.ptr == addr){
+            *allocation_out = allocation;
+            return 0;
         }
     }
-    return 0;
+    return -EIO;
 }
 
 void* process_malloc(struct process* process, size_t size){
+    int   res = 0;
     void* ptr = kzalloc(size);
     if(!ptr){
+        res = -ENOMEM;
         goto out_err;
     }
 
     int index = process_find_free_allocation_index(process);
     if(index < 0){
+        res = -ENOMEM;
         goto out_err;
     }
 
-    int res = paging_map_to(process->task->paging_desc, ptr, ptr,
-                            paging_align_address(ptr + size),
-                            PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
+    res = process_allocation_set_map(process, index, ptr, size);
     if(res < 0){
         goto out_err;
     }
-
-    process->allocations[index].ptr  = ptr;
-    process->allocations[index].size = size;
     return ptr;
 
 out_err:
@@ -301,26 +356,56 @@ out_err:
 }
 
 static bool process_is_process_pointer(struct process* process, void* ptr){
-    for(int i = 0; i < SAMOS_MAX_PROGRAM_ALLOCATIONS; i++){
-        if(process->allocations[i].ptr == ptr){
+    size_t total_allocations = vector_count(process->allocations);
+    for(size_t i = 0; i < total_allocations; i++){
+        struct process_allocation allocation;
+        int res = vector_at(process->allocations, i, &allocation, sizeof(allocation));
+        if(res < 0){
+            break;
+        }
+        if(allocation.ptr == ptr){
             return true;
         }
     }
     return false;
 }
 
+// Lecture 108 - vector-walk variant. Upstream's L108 commit
+// accidentally left this function array-indexing through
+// `process->allocations[i]`, which would index into the vector
+// pointer instead of the elements. The upstream binary still
+// happens to compile because struct vector has a `.ptr` field
+// the array-index syntax silently lands on. We deviate from
+// upstream verbatim and walk the vector properly; the upstream
+// shape would never actually clear a freed slot.
 static void process_allocation_unjoin(struct process* process, void* ptr){
-    for(int i = 0; i < SAMOS_MAX_PROGRAM_ALLOCATIONS; i++){
-        if(process->allocations[i].ptr == ptr){
-            process->allocations[i].ptr  = 0x00;
-            process->allocations[i].size = 0;
+    size_t total_allocations = vector_count(process->allocations);
+    for(size_t i = 0; i < total_allocations; i++){
+        struct process_allocation allocation;
+        int res = vector_at(process->allocations, i, &allocation, sizeof(allocation));
+        if(res < 0){
+            break;
+        }
+        if(allocation.ptr == ptr){
+            allocation.ptr  = NULL;
+            allocation.end  = NULL;
+            allocation.size = 0;
+            vector_overwrite(process->allocations, i, &allocation, sizeof(allocation));
         }
     }
 }
 
 int process_terminate_allocations(struct process* process){
-    for(int i = 0; i < SAMOS_MAX_PROGRAM_ALLOCATIONS; i++){
-        process_free(process, process->allocations[i].ptr);
+    size_t total_allocations = vector_count(process->allocations);
+    for(size_t i = 0; i < total_allocations; i++){
+        struct process_allocation allocation;
+        int res = vector_at(process->allocations, i, &allocation, sizeof(allocation));
+        if(res < 0){
+            break;
+        }
+        if(allocation.ptr){
+            process_free(process, allocation.ptr);
+        }
     }
     return 0;
 }
@@ -581,16 +666,19 @@ out:
 }
 
 void process_free(struct process* process, void* ptr){
-    struct process_allocation* allocation = process_get_allocation_by_addr(process, ptr);
-    if(!allocation){
+    // Lecture 108 - by-start-addr lookup fills a COPY of the
+    // record; we read .ptr / .size off the copy.
+    struct process_allocation allocation;
+    int res = process_get_allocation_by_start_addr(process, ptr, &allocation);
+    if(res < 0){
         return;
     }
 
-    int res = paging_map_to(process->task->paging_desc,
-                            allocation->ptr,
-                            allocation->ptr,
-                            paging_align_address(allocation->ptr + allocation->size),
-                            0x00);
+    res = paging_map_to(process->task->paging_desc,
+                        allocation.ptr,
+                        allocation.ptr,
+                        paging_align_address(allocation.ptr + allocation.size),
+                        0x00);
     if(res < 0){
         return;
     }
