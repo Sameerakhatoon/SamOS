@@ -473,6 +473,14 @@ int process_terminate(struct process* process){
     // does not touch task/stack memory.
     process_close_file_handles(process);
 
+    // Lecture 109 - free the allocations vector after the
+    // contents have been torn down by process_terminate_allocations
+    // above. Mirrors the upstream process_free_process clean-up.
+    if(process->allocations){
+        vector_free(process->allocations);
+        process->allocations = NULL;
+    }
+
     kfree(process->stack);
     task_free(process->task);
     process_unlink(process);
@@ -532,22 +540,97 @@ struct process_file_handle* process_file_handle_get(struct process* process, int
     return NULL;
 }
 
-// Lecture 107-stub: process_validate_memory_or_terminate.
-//
-// The full body (walk the per-process allocation table to verify
-// virt_addr + space_needed lands inside one allocation, otherwise
-// terminate the process) requires process_get_allocation_by_addr
-// and process_allocation_request, both of which L108/L109
-// introduce. Until then this stub returns success so the L107
-// fread path can compile and link.
-//
-// L109 will replace the body with the real validation; the
-// stub stays in place for one lecture only.
+// Lecture 109 - is the supplied virtual address inside the user
+// program stack region? The stack grows downward, so START is
+// the high address and END is the low one.
+bool process_is_stack_memory(struct process* process, void* addr){
+    (void)process;
+    return (uintptr_t)addr >= SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_END
+        && (uintptr_t)addr <= SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START;
+}
+
+// Lecture 109 - range query against the per-process allocation
+// table + the user stack region. Fills `allocation_request_out`
+// with the matching record plus a `peek` block describing how
+// many bytes remain past `addr`. Returns 0 on hit, -EIO when no
+// allocation covers the address.
+int process_get_allocation_by_addr(struct process* process, void* addr,
+                                   struct process_allocation_request* allocation_request_out){
+    memset(allocation_request_out, 0, sizeof(struct process_allocation_request));
+
+    if(process_is_stack_memory(process, addr)){
+        uint64_t addr_int         = (uint64_t)addr;
+        uint64_t stack_size       = SAMOS_USER_PROGRAM_STACK_SIZE;
+        // Stack grows down: total bytes left = bytes between addr
+        // and the high end of the stack region.
+        uint64_t total_bytes_left = SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START - addr_int;
+        allocation_request_out->allocation.ptr  = (void*)SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_END;
+        allocation_request_out->allocation.end  = (void*)SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START;
+        allocation_request_out->allocation.size = stack_size;
+        allocation_request_out->flags |= PROCESS_ALLOCATION_REQUEST_IS_STACK_MEMORY;
+        allocation_request_out->peek.addr             = addr;
+        allocation_request_out->peek.end              = (void*)SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START;
+        allocation_request_out->peek.total_bytes_left = total_bytes_left;
+        return 0;
+    }
+
+    size_t total_allocations = vector_count(process->allocations);
+    for(size_t i = 0; i < total_allocations; i++){
+        struct process_allocation allocation;
+        int res = vector_at(process->allocations, i, &allocation, sizeof(allocation));
+        if(res < 0){
+            break;
+        }
+        uint64_t allocation_addr     = (uint64_t)allocation.ptr;
+        uint64_t allocation_addr_end = (uint64_t)allocation.end;
+        if((uint64_t)addr >= allocation_addr
+           && (uint64_t)addr <= allocation_addr_end){
+            // Upstream bug preserved verbatim: bytes_left is
+            // computed as `allocation_addr_end - bytes_used`
+            // instead of `allocation_addr_end - (uint64_t)addr`.
+            // Since `bytes_used = addr - allocation_addr`, the
+            // subtraction yields the SUM of end + addr - 2*start
+            // which only matches the correct value at the
+            // allocation start. Carrying the upstream form for
+            // diff hygiene; the validate path overstates the
+            // available space which makes -EINVARG return less
+            // often than it should. Inert at L110 because
+            // bytes_used is always 0 there (fread hits the start
+            // of a freshly allocated buffer).
+            size_t bytes_used = (uint64_t)addr - allocation_addr;
+            size_t bytes_left = allocation_addr_end - bytes_used;
+            allocation_request_out->allocation            = allocation;
+            allocation_request_out->peek.addr             = addr;
+            allocation_request_out->peek.end              = (void*)allocation_addr_end;
+            allocation_request_out->peek.total_bytes_left = bytes_left;
+            return 0;
+        }
+    }
+    return -EIO;
+}
+
+// Lecture 109 - real body. Walks the allocation table for the
+// region containing virt_addr; if `space_needed` would run off
+// the end of that region, terminate the process. The L107 stub
+// (returning 0 unconditionally) is replaced here.
 int process_validate_memory_or_terminate(struct process* process,
                                          void* virt_addr,
                                          size_t space_needed){
-    (void)process; (void)virt_addr; (void)space_needed;
-    return 0;
+    int res = 0;
+    struct process_allocation_request allocation_request;
+    res = process_get_allocation_by_addr(process, virt_addr, &allocation_request);
+    if(res < 0){
+        goto out;
+    }
+    if(allocation_request.peek.total_bytes_left < space_needed){
+        res = -EINVARG;
+        goto out;
+    }
+out:
+    if(res < 0){
+        process_terminate(process);
+    }
+    return res;
 }
 
 // Lecture 107 - userland fread. Validate the buffer, translate
