@@ -2,6 +2,7 @@
 #define USERLAND_FILE_H
 
 #include <stddef.h>
+#include <stdint.h>   // L110 - explicit, mirrors upstream
 // Lecture 105 - userland fopen. Thin wrapper over the
 // samos_fopen syscall trampoline.
 

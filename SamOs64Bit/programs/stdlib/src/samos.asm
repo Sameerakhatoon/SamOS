@@ -27,7 +27,7 @@ global samos_system:function
 global samos_exit:function
 global samos_fopen:function   ; L105
 global samos_fclose:function  ; L106
-global samos_read:function    ; L107
+global samos_fread:function    ; L107
 
 ; void print(const char* msg)
 print:
@@ -126,12 +126,12 @@ samos_fclose:
     add  rsp, 8
     ret
 
-; Lecture 107 - long samos_read(void* buffer, size_t size, size_t count, long fd)
+; Lecture 107 - long samos_fread(void* buffer, size_t size, size_t count, long fd)
 ;   rdi = buffer, rsi = size, rdx = count, rcx = fd
 ; Pushes are in stack-item order (item 0 is the LAST push), so the
 ; kernel sees buffer at item 0, size at item 1, count at item 2,
 ; fd at item 3.
-samos_read:
+samos_fread:
     mov  rax, 12           ; SYSTEM_COMMAND12_FREAD
     push qword rcx         ; fd       (stack item 3)
     push qword rdx         ; count    (stack item 2)

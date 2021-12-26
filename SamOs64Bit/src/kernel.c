@@ -319,7 +319,11 @@ void kernel_main(void)
     // the system_terminal now owns the screen and `print` routes
     // through it via terminal_writechar -> terminal_write.
 
-    int res = process_load_switch("@:/SIMPLE.BIN", &p);
+    // Lecture 110 - swap to blank.elf so the L107/L110 fread
+    // test program actually runs. SIMPLE.BIN was kept for the
+    // L67-L69 ATA-PIO speed budget; with fread under test we
+    // accept the longer load time.
+    int res = process_load_switch("@:/blank.elf", &p);
     if(res != SAMOS_ALL_OK){
         panic("Failed to load user program\n");
     }
