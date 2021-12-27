@@ -20,3 +20,7 @@ int fread(void* buffer, size_t size, size_t count, long fd){
 int fseek(int fd, int offset, int whence){
     return (int)samos_fseek(fd, offset, whence);
 }
+
+int fstat(int fd, struct file_stat* file_stat_out){
+    return (int)samos_fstat(fd, file_stat_out);
+}

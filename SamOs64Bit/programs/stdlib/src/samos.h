@@ -37,5 +37,8 @@ void samos_fclose(size_t fd);
 long samos_fread(void* buffer, size_t size, size_t count, long fd);
 // Lecture 111 - userland fseek trampoline.
 long samos_fseek(long fd, long offset, long whence);
+// Lecture 112 - userland fstat trampoline.
+struct file_stat;
+long samos_fstat(long fd, struct file_stat* file_stat_out);
 
 #endif

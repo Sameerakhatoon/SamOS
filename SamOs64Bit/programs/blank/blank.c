@@ -18,13 +18,14 @@ int main(int argc, char** argv){
 
     int fd = fopen("@:/blank.elf", "r");
     if(fd > 0){
-        // Lecture 110 - read the first 512 bytes of the ELF
-        // header through the L107 fread path. buf lives on the
-        // user stack; process_validate_memory_or_terminate hits
-        // the L109 stack-region branch.
-        char buf[512] = {0};
+        // Lecture 112 - exercise fstat on the just-opened ELF.
+        // The L110 fread call is dropped: fstat alone keeps the
+        // userland file API surface visible without holding
+        // the slower ATA-PIO read.
+        struct file_stat file_stat = {0};
         printf("File blank.elf opened\n");
-        fread(buf, 1, sizeof(buf), fd);
+        fstat(fd, &file_stat);
+        printf("File size: %i\n", file_stat.filesize);
         fclose(fd);                   // L106 - close on success
     }else{
         printf("File blank.elf opened failed\n");

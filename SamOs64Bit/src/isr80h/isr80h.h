@@ -16,6 +16,7 @@ enum SystemCommands {
     SYSTEM_COMMAND11_FCLOSE, // L106 - userland fclose
     SYSTEM_COMMAND12_FREAD,  // L107 - userland fread
     SYSTEM_COMMAND13_FSEEK,  // L111 - userland fseek
+    SYSTEM_COMMAND14_FSTAT,  // L112 - userland fstat
 };
 
 void isr80h_register_commands();

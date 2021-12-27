@@ -29,6 +29,7 @@ global samos_fopen:function   ; L105
 global samos_fclose:function  ; L106
 global samos_fread:function    ; L107
 global samos_fseek:function    ; L111
+global samos_fstat:function    ; L112
 
 ; void print(const char* msg)
 print:
@@ -151,4 +152,14 @@ samos_fseek:
     push qword rdi         ; fd     (item 0)
     int  0x80
     add  rsp, 24
+    ret
+
+; Lecture 112 - long samos_fstat(long fd, struct file_stat* out)
+;   rdi = fd, rsi = out
+samos_fstat:
+    mov  rax, 14           ; SYSTEM_COMMAND14_FSTAT
+    push qword rsi         ; out (item 1)
+    push qword rdi         ; fd  (item 0)
+    int  0x80
+    add  rsp, 16
     ret
