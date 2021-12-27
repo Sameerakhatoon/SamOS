@@ -28,6 +28,7 @@ global samos_exit:function
 global samos_fopen:function   ; L105
 global samos_fclose:function  ; L106
 global samos_fread:function    ; L107
+global samos_fseek:function    ; L111
 
 ; void print(const char* msg)
 print:
@@ -139,4 +140,15 @@ samos_fread:
     push qword rdi         ; buffer   (stack item 0)
     int  0x80
     add  rsp, 32
+    ret
+
+; Lecture 111 - long samos_fseek(long fd, long offset, long whence)
+;   rdi = fd, rsi = offset, rdx = whence
+samos_fseek:
+    mov  rax, 13           ; SYSTEM_COMMAND13_FSEEK
+    push qword rdx         ; whence (item 2)
+    push qword rsi         ; offset (item 1)
+    push qword rdi         ; fd     (item 0)
+    int  0x80
+    add  rsp, 24
     ret

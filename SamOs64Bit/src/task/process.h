@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include "task.h"
+#include "fs/file.h"   // L111 - FILE_SEEK_MODE
 #include "config.h"
 #include "kernel.h"
 
@@ -113,6 +114,8 @@ struct process_file_handle*    process_file_handle_get(struct process* process, 
 int                            process_fclose(struct process* process, int fd);
 int                            process_fread(struct process* process, void* virt_ptr,
                                              uint64_t size, uint64_t nmemb, int fd);
+int                            process_fseek(struct process* process, int fd,
+                                             int offset, FILE_SEEK_MODE whence);
 
 // Lecture 108 - vector-backed allocation table accessors.
 int                            process_find_free_allocation_index(struct process* process);

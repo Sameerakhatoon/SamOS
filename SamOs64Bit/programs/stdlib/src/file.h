@@ -11,5 +11,8 @@ int  fopen(const char* filename, const char* mode);
 void fclose(int fd);
 // Lecture 107 - userland fread.
 int  fread(void* buffer, size_t size, size_t count, long fd);
+// Lecture 111 - userland fseek. whence values mirror the kernel
+// FILE_SEEK_MODE enum (SEEK_SET / SEEK_CUR / SEEK_END).
+int  fseek(int fd, int offset, int whence);
 
 #endif
