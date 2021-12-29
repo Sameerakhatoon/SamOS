@@ -120,7 +120,7 @@ static int process_load_data(const char* filename, struct process* process){
 
 int process_map_binary(struct process* process){
     int res = 0;
-    paging_map_to(process->task->paging_desc,
+    paging_map_to(process->paging_desc,
                   (void*)SAMOS_PROGRAM_VIRTUAL_ADDRESS,
                   process->ptr,
                   paging_align_address(process->ptr + process->size),
@@ -144,7 +144,7 @@ static int process_map_elf(struct process* process){
         if(phdr->p_flags & PF_W){
             flags |= PAGING_IS_WRITEABLE;
         }
-        res = paging_map_to(process->task->paging_desc,
+        res = paging_map_to(process->paging_desc,
                             paging_align_to_lower_page((void*)(uintptr_t)phdr->p_vaddr),
                             paging_align_to_lower_page(phdr_phys_address),
                             paging_align_address(phdr_phys_address + phdr->p_memsz),
@@ -158,6 +158,12 @@ static int process_map_elf(struct process* process){
 
 int process_map_memory(struct process* process){
     int res = 0;
+
+    // Lecture 113 - identity-map every E820-usable region into
+    // the process's PML4. Was task_init's responsibility before;
+    // moved here so the descriptor's owner does the wiring.
+    paging_map_e820_memory_regions(process->paging_desc);
+
     switch(process->filetype){
         case PROCESS_FILETYPE_ELF:
             res = process_map_elf(process);
@@ -176,7 +182,7 @@ int process_map_memory(struct process* process){
     // user code can push/pop without page-faulting. Stack grows down
     // from STACK_ADDRESS_START to STACK_ADDRESS_END, so we map starting
     // from END.
-    paging_map_to(process->task->paging_desc,
+    paging_map_to(process->paging_desc,
                   (void*)SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_END,
                   process->stack,
                   paging_align_address(process->stack + SAMOS_USER_PROGRAM_STACK_SIZE),
@@ -228,18 +234,27 @@ int process_load_for_slot(const char* filename, struct process** process, int pr
     _process->stack = program_stack_ptr;
     _process->id    = process_slot;
 
-    task = task_new(_process);
-    if(ERROR_I(task) == 0){
-        res = ERROR_I(task);
+    // Lecture 113 - the paging descriptor moves from task to
+    // process. Create it BEFORE task_new so process_map_memory
+    // (which now hangs off process->paging_desc, and which is
+    // also called BEFORE task_new) sees a live descriptor.
+    _process->paging_desc = paging_desc_new(PAGING_MAP_LEVEL_4);
+    if(!_process->paging_desc){
+        res = -EIO;
         goto out;
     }
-
-    _process->task = task;
 
     res = process_map_memory(_process);
     if(res < 0){
         goto out;
     }
+
+    task = task_new(_process);
+    if(ERROR_I(task) == 0){
+        res = ERROR_I(task);
+        goto out;
+    }
+    _process->task = task;
 
     *process = _process;
     processes[process_slot] = _process;
@@ -284,7 +299,7 @@ int process_find_free_allocation_index(struct process* process){
 
 int process_allocation_set_map(struct process* process, int allocation_entry_index,
                                void* ptr, size_t size){
-    int res = paging_map_to(process->task->paging_desc, ptr, ptr,
+    int res = paging_map_to(process->paging_desc, ptr, ptr,
                             paging_align_address(ptr + size),
                             PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
     if(res < 0){
@@ -483,6 +498,14 @@ int process_terminate(struct process* process){
 
     kfree(process->stack);
     task_free(process->task);
+
+    // Lecture 113 - the paging descriptor moved off the task,
+    // so its free now lives here.
+    if(process->paging_desc){
+        paging_desc_free(process->paging_desc);
+        process->paging_desc = NULL;
+    }
+
     process_unlink(process);
 
 out:
@@ -668,7 +691,7 @@ out:
 // Lecture 112 - shorthand. Walks the process's paging descriptor
 // to translate a virtual address to its physical backing.
 void* process_virtual_address_to_physical(struct process* process, void* virt_addr){
-    return paging_get_physical_address(process->task->paging_desc, virt_addr);
+    return paging_get_physical_address(process->paging_desc, virt_addr);
 }
 
 // Lecture 112 - userland fstat. Validate the user buffer fits in
@@ -803,7 +826,7 @@ void process_free(struct process* process, void* ptr){
         return;
     }
 
-    res = paging_map_to(process->task->paging_desc,
+    res = paging_map_to(process->paging_desc,
                         allocation.ptr,
                         allocation.ptr,
                         paging_align_address(allocation.ptr + allocation.size),

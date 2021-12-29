@@ -9,6 +9,11 @@
 #include "config.h"
 #include "kernel.h"
 
+// L113 - struct process now carries a paging_desc pointer.
+// Forward-declared so callers do not need paging.h just to
+// take struct process*.
+struct paging_desc;
+
 #define PROCESS_FILETYPE_ELF      0
 #define PROCESS_FILETYPE_BINARY   1
 
@@ -65,6 +70,12 @@ struct process {
     uint16_t           id;
     char               filename[SAMOS_MAX_PATH];
     struct task*       task;
+
+    // Lecture 113 - paging descriptor moves from task to process.
+    // task_paging_desc() and task_switch() now forward through
+    // task->process->paging_desc.
+    struct paging_desc* paging_desc;
+
     // Lecture 108 - allocations was a fixed-size array indexed by
     // SAMOS_MAX_PROGRAM_ALLOCATIONS. It is now a vector of
     // struct process_allocation; new allocations grow the vector,

@@ -105,8 +105,10 @@ static void task_list_remove(struct task* task){
 }
 
 int task_free(struct task* task){
-    // L40 - paging_desc_free lands in L43.
-    paging_desc_free(task->paging_desc);
+    // Lecture 113 - paging_desc lives on the process now, so the
+    // free path moves there. task_free only releases the task
+    // record itself; the descriptor is torn down when the
+    // process exits.
     task_list_remove(task);
     kfree(task);
     return 0;
@@ -114,13 +116,14 @@ int task_free(struct task* task){
 
 int task_switch(struct task* task){
     current_task = task;
-    paging_switch(task->paging_desc);
+    paging_switch(task->process->paging_desc);
     return 0;
 }
 
-// Lecture 40 - paging_desc accessors.
+// Lecture 40 + 113 - paging_desc accessor forwards through the
+// owning process.
 struct paging_desc* task_paging_desc(struct task* task){
-    return task->paging_desc;
+    return task->process->paging_desc;
 }
 
 struct paging_desc* task_current_paging_desc(){
@@ -175,7 +178,8 @@ int task_page_task(struct task* task){
 }
 
 void* task_virtual_address_to_physical(struct task* task, void* virtual_address){
-    return paging_get_physical_address(task->paging_desc, virtual_address);
+    // L113 - paging descriptor lives on the process now.
+    return paging_get_physical_address(task->process->paging_desc, virtual_address);
 }
 
 void task_next(){
@@ -262,20 +266,11 @@ out:
 static int task_init(struct task* task, struct process* process){
     memset(task, 0, sizeof(struct task));
 
-    // Lecture 40 - each task gets its own 4-level page tree.
-    task->paging_desc = paging_desc_new(PAGING_MAP_LEVEL_4);
-    if(!task->paging_desc){
-        return -EIO;
-    }
+    // Lecture 113 - the paging descriptor and the e820 mapping
+    // are set up by process_load_for_slot before task_new is
+    // called. task_init only sees the process's already-live
+    // descriptor through process->paging_desc.
 
-    // Lecture 59 - identity-map every E820-usable region into the
-    // task's own PML4. Once we paging_switch to this descriptor
-    // (entering ring 3), the kernel-side data the task still
-    // reaches (its own GDT entries, the IDT we just lidt'd, the
-    // VGA buffer) must stay addressable. Same map the kernel
-    // already built into kernel_paging_desc; we replicate it
-    // per task.
-    paging_map_e820_memory_regions(task->paging_desc);
 
     task->registers.ip = SAMOS_PROGRAM_VIRTUAL_ADDRESS;
     if(process->filetype == PROCESS_FILETYPE_ELF){
