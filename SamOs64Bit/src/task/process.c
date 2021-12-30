@@ -17,11 +17,17 @@
 // The current process that is running.
 struct process* current_process = 0;
 
-static struct process* processes[SAMOS_MAX_PROCESSES] = { 0 };
+// Lecture 114 - process slot table is now a vector. The
+// fixed-size array is retired; process_system_init builds the
+// vector at boot, process_get_free_slot extends it on demand,
+// and process_unlink overwrites the slot back to NULL.
+struct vector* process_vector = NULL;
 
 static int process_close_file_handles(struct process* process);
 
-static int process_close_file_handles(struct process* process);
+void process_system_init(void){
+    process_vector = vector_new(sizeof(struct process*), 10, 0);
+}
 
 // Lecture 108 - allocations are now vector-backed. Initial
 // capacity of 10 matches upstream.
@@ -36,10 +42,13 @@ struct process* process_current(){
 }
 
 struct process* process_get(int process_id){
-    if(process_id < 0 || process_id >= SAMOS_MAX_PROCESSES){
-        return 0;
+    int res = 0;
+    struct process* process_out = NULL;
+    res = vector_at(process_vector, process_id, &process_out, sizeof(process_out));
+    if(res < 0){
+        return ERROR(EINVARG);
     }
-    return processes[process_id];
+    return process_out;
 }
 
 // Lecture 48 - un-stubbed. FAT16 / VFS came back in L46-L47;
@@ -192,13 +201,34 @@ out:
     return res;
 }
 
-int process_get_free_slot(){
-    for(int i = 0; i < SAMOS_MAX_PROCESSES; i++){
-        if(processes[i] == 0){
-            return i;
+// Lecture 114 - scan the vector for a NULL slot; if none is
+// found, push a fresh NULL and return the new index.
+int process_get_free_slot(void){
+    int    res                 = 0;
+    bool   found               = false;
+    size_t total_process_slots = vector_count(process_vector);
+    for(size_t i = 0; i < total_process_slots; i++){
+        struct process* process_out = NULL;
+        res = vector_at(process_vector, i, &process_out, sizeof(process_out));
+        if(res < 0){
+            break;
+        }
+        if(!process_out){
+            found = true;
+            res   = i;
+            break;
         }
     }
-    return -EISTKN;
+    if(res < 0){
+        goto out;
+    }
+    if(!found){
+        struct process* null_process = NULL;
+        int process_index = vector_push(process_vector, &null_process);
+        res = process_index;
+    }
+out:
+    return res;
 }
 
 int process_load_for_slot(const char* filename, struct process** process, int process_slot){
@@ -257,7 +287,10 @@ int process_load_for_slot(const char* filename, struct process** process, int pr
     _process->task = task;
 
     *process = _process;
-    processes[process_slot] = _process;
+    // Lecture 114 - the vector slot was reserved by
+    // process_get_free_slot (either an existing NULL or a fresh
+    // push); take ownership by overwriting it with our pointer.
+    vector_overwrite(process_vector, process_slot, &_process, sizeof(&_process));
 
 out:
     if(ISERR(res)){
@@ -454,18 +487,30 @@ int process_free_program_data(struct process* process){
     return res;
 }
 
-void process_switch_to_any(){
-    for(int i = 0; i < SAMOS_MAX_PROCESSES; i++){
-        if(processes[i]){
-            process_switch(processes[i]);
+// Lecture 114 - vector walk; same effect as the old array
+// loop, plus an early break when vector_at fails (it should
+// not, but we follow upstream's defensive shape).
+void process_switch_to_any(void){
+    size_t total_process_slots = vector_count(process_vector);
+    for(size_t i = 0; i < total_process_slots; i++){
+        struct process* process = NULL;
+        int res = vector_at(process_vector, i, &process, sizeof(&process));
+        if(res < 0){
+            break;
+        }
+        if(process){
+            process_switch(process);
             return;
         }
     }
     panic("No processes to switch too\n");
 }
 
+// Lecture 114 - null the slot via vector_overwrite rather than
+// poking the array.
 static void process_unlink(struct process* process){
-    processes[process->id] = 0x00;
+    struct process* null_process = NULL;
+    vector_overwrite(process_vector, process->id, &null_process, sizeof(&null_process));
     if(current_process == process){
         process_switch_to_any();
     }
