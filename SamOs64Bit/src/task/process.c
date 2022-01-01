@@ -376,6 +376,75 @@ int process_get_allocation_by_start_addr(struct process* process, void* addr,
     return -EIO;
 }
 
+// Lecture 115 - look up an allocation by ptr and report its
+// index. Returns -ENOTFOUND on miss; 0 on hit with the index
+// written to *index_out if non-NULL.
+int process_allocation_exists(struct process* process, void* ptr, size_t* index_out){
+    int res = -ENOTFOUND;
+    size_t total_allocations = vector_count(process->allocations);
+    for(size_t i = 0; i < total_allocations; i++){
+        struct process_allocation allocation;
+        res = vector_at(process->allocations, i, &allocation, sizeof(allocation));
+        if(res < 0){
+            break;
+        }
+        if(allocation.ptr == ptr){
+            if(index_out){
+                *index_out = i;
+            }
+            res = 0;
+            break;
+        }
+    }
+    return res;
+}
+
+// Lecture 115 - userland realloc. Translate the user virtual
+// pointer, call krealloc, then update the existing
+// process_allocation slot through process_allocation_set_map.
+//
+// Upstream bug preserved verbatim: the assignment
+//   old_phys_ptr = old_virt_ptr;
+// is overwritten by task_virtual_address_to_physical on the
+// next line. The `if(old_phys_ptr)` guard is therefore
+// effectively `if(old_virt_ptr != NULL)`. Documented inline
+// to keep the per-commit diff against upstream linear.
+void* process_realloc(struct process* process, void* old_virt_ptr, size_t new_size){
+    int    res                  = 0;
+    void*  new_ptr              = NULL;
+    void*  old_phys_ptr         = NULL;
+    size_t old_allocation_index = 0;
+
+    res = process_allocation_exists(process, old_virt_ptr, &old_allocation_index);
+    if(res < 0){
+        goto out;
+    }
+
+    old_phys_ptr = old_virt_ptr;
+    if(old_phys_ptr){
+        old_phys_ptr = task_virtual_address_to_physical(process->task, old_virt_ptr);
+        if(!old_phys_ptr){
+            res = -ENOMEM;
+            goto out;
+        }
+    }
+
+    new_ptr = krealloc(old_phys_ptr, new_size);
+    if(!new_ptr){
+        res = -ENOMEM;
+        goto out;
+    }
+
+    res = process_allocation_set_map(process, (int)old_allocation_index,
+                                     new_ptr, new_size);
+    if(res < 0){
+        goto out;
+    }
+
+out:
+    return new_ptr;
+}
+
 void* process_malloc(struct process* process, size_t size){
     int   res = 0;
     void* ptr = kzalloc(size);

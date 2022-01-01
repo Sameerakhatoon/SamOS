@@ -12,5 +12,6 @@
 #define EISTKN          8
 #define EINFORMAT       9
 #define EOUTOFRANGE    10  // L64 - FAT cluster chain reached end
+#define ENOTFOUND      11  // L115 - process allocation lookup miss
 
 #endif
