@@ -25,6 +25,19 @@ static size_t real_framebuffer_width               = 0;
 static size_t real_framebuffer_height              = 0;
 static size_t real_framebuffer_pixels_per_scanline = 0;
 
+// Lecture 116 - forward decls for the new child-management
+// helpers landing this lecture.
+void graphics_info_children_free(struct graphics_info* graphics_info);
+
+// Lecture 116 - bounds predicate against a surface's own
+// (width, height). Used by graphics_pixel_get and any future
+// safe-read path.
+bool graphics_bounds_check(struct graphics_info* graphics_info, int x, int y){
+    return !(x < 0 || y < 0
+          || x >= (int)graphics_info->width
+          || y >= (int)graphics_info->height);
+}
+
 struct graphics_info* graphics_screen_info(void){
     return loaded_graphics_info;
 }
@@ -313,6 +326,225 @@ void graphics_redraw(struct graphics_info* g){
 
 void graphics_redraw_all(void){
     graphics_redraw(graphics_screen_info());
+}
+
+// Lecture 116 - safe pixel read. Returns -EINVARG when (x, y)
+// is out of bounds; fills *pixel_out otherwise.
+int graphics_pixel_get(struct graphics_info* graphics_info, uint32_t x, uint32_t y,
+                       struct framebuffer_pixel* pixel_out){
+    int res = 0;
+    if(!graphics_bounds_check(graphics_info, (int)x, (int)y)){
+        res = -EINVARG;
+        goto out;
+    }
+    *pixel_out = graphics_info->pixels[y * graphics_info->width + x];
+out:
+    return res;
+}
+
+// Lecture 116 - vector_reorder comparator. Sorts children so
+// higher z_index sits later in the vector. Returns > 0 when
+// `first` should come AFTER `second`.
+int graphics_reorder(void* first_element, void* second_element){
+    struct graphics_info* first_graphics  = *((struct graphics_info**)first_element);
+    struct graphics_info* second_graphics = *((struct graphics_info**)second_element);
+    return first_graphics->z_index > second_graphics->z_index;
+}
+
+// Lecture 116 - update a surface's z and reorder the parent's
+// children so the compositor walks back-to-front correctly.
+void graphics_set_z_index(struct graphics_info* graphics_info, uint32_t z_index){
+    graphics_info->z_index = z_index;
+    if(graphics_info->parent && graphics_info->parent->children){
+        vector_reorder(graphics_info->parent->children, graphics_reorder);
+    }
+}
+
+// Lecture 116 - surface-to-surface paste. Source pixels go
+// through graphics_pixel_get so bounds checks apply on read;
+// the destination respects its own transparency_key when the
+// caller passes GRAPHICS_FLAG_DO_NOT_OVERWRITE_TRASPARENT_PIXELS
+// (sic: upstream typo "TRASPARENT" preserved).
+void graphics_paste_pixels_to_pixels(struct graphics_info* graphics_info_in,
+                                     struct graphics_info* graphics_info_out,
+                                     uint32_t src_x, uint32_t src_y,
+                                     uint32_t width, uint32_t height,
+                                     uint32_t dst_x, uint32_t dst_y,
+                                     int flags){
+    uint32_t src_x_end = src_x + width;
+    uint32_t src_y_end = src_y + height;
+    if(src_x_end > graphics_info_in->width){
+        src_x_end = graphics_info_in->width;
+    }
+    if(src_y_end > graphics_info_in->height){
+        src_y_end = graphics_info_in->height;
+    }
+    uint32_t final_w = src_x_end - src_x;
+    uint32_t final_h = src_y_end - src_y;
+
+    bool has_transparency_key = false;
+    struct framebuffer_pixel ignore_transparent_pixel = {0};
+    if(memcmp(&graphics_info_out->transparency_key,
+              &ignore_transparent_pixel,
+              sizeof(graphics_info_out->transparency_key)) != 0){
+        has_transparency_key = true;
+    }
+
+    for(uint32_t lx = 0; lx < final_w; lx++){
+        for(uint32_t ly = 0; ly < final_h; ly++){
+            struct framebuffer_pixel pixel = {0};
+            graphics_pixel_get(graphics_info_in, src_x + lx, src_y + ly, &pixel);
+
+            uint32_t dx = dst_x + lx;
+            uint32_t dy = dst_y + ly;
+
+            if(dx < graphics_info_out->width && dy < graphics_info_out->height){
+                if(flags & GRAPHICS_FLAG_DO_NOT_OVERWRITE_TRASPARENT_PIXELS){
+                    if(has_transparency_key){
+                        struct framebuffer_pixel* existing_pixel =
+                            &graphics_info_out->pixels[dy * graphics_info_out->width + dx];
+                        if(memcmp(existing_pixel,
+                                  &graphics_info_out->transparency_key,
+                                  sizeof(struct framebuffer_pixel)) == 0){
+                            continue;
+                        }
+                    }
+                }
+            }
+            graphics_info_out->pixels[dy * graphics_info_out->width + dx] = pixel;
+        }
+    }
+}
+
+// Lecture 116 - build a child surface as a sub-rectangle of an
+// existing surface. The child inherits the parent framebuffer
+// and registers itself in parent->children. With
+// GRAPHICS_FLAG_DO_NOT_COPY_PIXELS the new pixel buffer stays
+// zeroed; otherwise the parent's pixels under the rectangle
+// are pasted in.
+struct graphics_info* graphics_info_create_relative(struct graphics_info* source_graphics,
+                                                    size_t x, size_t y,
+                                                    size_t width, size_t height,
+                                                    int flags){
+    int res = 0;
+    struct graphics_info* new_graphics = NULL;
+    if(source_graphics == NULL){
+        panic("Source graphics null\n");
+        res = -EINVARG;
+        goto out;
+    }
+
+    new_graphics = kzalloc(sizeof(struct graphics_info));
+    if(!new_graphics){
+        res = -ENOMEM;
+        goto out;
+    }
+
+    size_t parent_x      = source_graphics->starting_x;
+    size_t parent_y      = source_graphics->starting_y;
+    size_t parent_width  = source_graphics->horizontal_resolution;
+    size_t parent_height = source_graphics->vertical_resolution;
+
+    size_t starting_x = parent_x + x;
+    size_t starting_y = parent_y + y;
+    size_t ending_x   = starting_x + width;
+    size_t ending_y   = starting_y + height;
+
+    if(!(flags & GRAPHICS_FLAG_ALLOW_OUT_OF_BOUNDS)){
+        if(ending_x > parent_x + parent_width || ending_y > parent_y + parent_height){
+            res = -EINVARG;
+            goto out;
+        }
+    }
+
+    new_graphics->horizontal_resolution = source_graphics->horizontal_resolution;
+    new_graphics->vertical_resolution   = source_graphics->vertical_resolution;
+    new_graphics->pixels_per_scanline   = source_graphics->pixels_per_scanline;
+    new_graphics->width                 = width;
+    new_graphics->height                = height;
+    new_graphics->starting_x            = starting_x;
+    new_graphics->starting_y            = starting_y;
+    new_graphics->relative_x            = x;
+    new_graphics->relative_y            = y;
+    new_graphics->framebuffer           = source_graphics->framebuffer;
+    new_graphics->parent                = source_graphics;
+    new_graphics->children              = vector_new(sizeof(struct graphics_info*), 4, 0);
+    new_graphics->pixels                = kzalloc(new_graphics->width
+                                               * new_graphics->height
+                                               * sizeof(struct framebuffer_pixel));
+    if(!new_graphics->pixels){
+        res = -ENOMEM;
+        goto out;
+    }
+
+    if(!(flags & GRAPHICS_FLAG_DO_NOT_COPY_PIXELS)){
+        graphics_paste_pixels_to_pixels(source_graphics, new_graphics,
+                                        x, y, width, height, 0, 0,
+                                        GRAPHICS_FLAG_DO_NOT_OVERWRITE_TRASPARENT_PIXELS);
+    }
+
+    // Children do NOT own their framebuffer pointer; clear the
+    // clone flag so graphics_info_free does not double-kfree.
+    new_graphics->flags &= ~GRAPHICS_FLAG_CLONED_FRAMEBUFFER;
+
+    vector_push(new_graphics->parent->children, &new_graphics);
+    size_t total_children = vector_count(new_graphics->parent->children);
+    graphics_set_z_index(new_graphics, total_children);
+
+out:
+    if(res < 0){
+        if(new_graphics){
+            if(new_graphics->children){
+                vector_free(new_graphics->children);
+                new_graphics->children = NULL;
+            }
+            kfree(new_graphics);
+            new_graphics = NULL;
+        }
+    }
+    return new_graphics;
+}
+
+// Lecture 116 - tear down a surface and detach from parent.
+// The root surface (loaded_graphics_info) is never freed.
+void graphics_info_free(struct graphics_info* graphics_in){
+    if(!graphics_in){
+        return;
+    }
+    if(graphics_in->children){
+        graphics_info_children_free(graphics_in);
+    }
+    if(graphics_in->pixels){
+        kfree(graphics_in->pixels);
+        graphics_in->pixels = NULL;
+    }
+    if(graphics_in->framebuffer && (graphics_in->flags & GRAPHICS_FLAG_CLONED_FRAMEBUFFER)){
+        kfree(graphics_in->framebuffer);
+        graphics_in->framebuffer = NULL;
+    }
+    if(graphics_in->parent){
+        vector_pop_element(graphics_in->parent->children,
+                           &graphics_in, sizeof(struct graphics_info*));
+    }
+    if(graphics_in == loaded_graphics_info){
+        return;
+    }
+    kfree(graphics_in);
+}
+
+void graphics_info_children_free(struct graphics_info* graphics_info){
+    if(!graphics_info){
+        return;
+    }
+    size_t total_children = vector_count(graphics_info->children);
+    for(size_t i = 0; i < total_children; i++){
+        struct graphics_info* child = NULL;
+        int res = vector_at(graphics_info->children, i, &child, sizeof(struct graphics_info*));
+        if(res < 0){
+            continue;
+        }
+        graphics_info_free(child);
+    }
 }
 
 void graphics_setup(struct graphics_info* main_graphics_info){
