@@ -108,4 +108,7 @@
 
 #define SAMOS_KEYBOARD_BUFFER_SIZE       1024
 
+// Lecture 118 - Window title cap (chars including NUL).
+#define WINDOW_MAX_TITLE                 128
+
 #endif
