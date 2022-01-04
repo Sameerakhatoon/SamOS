@@ -110,5 +110,9 @@
 
 // Lecture 118 - Window title cap (chars including NUL).
 #define WINDOW_MAX_TITLE                 128
+// Lecture 119 - frame thickness in pixels (each side) and the
+// title bar height in pixels. Used by window_create's layout.
+#define WINDOW_BORDER_PIXEL_SIZE         2
+#define WINDOW_TITLE_BAR_HEIGHT          32
 
 #endif
