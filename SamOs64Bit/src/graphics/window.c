@@ -28,11 +28,9 @@
 #include "status.h"
 #include "kernel.h"
 
-// L121-L123 forward decls. window.o stays unlinked so missing
-// bodies are inert at L120.
-void window_draw_title_bar(struct window* window, struct framebuffer_pixel title_bar_bg_color);
-void window_set_z_index(struct window* window, size_t z_index);
-void window_focus(struct window* window);
+// L122-L123 forward decls. window_bring_to_top lands in L122.
+// window.o stays unlinked so missing bodies are inert.
+void window_bring_to_top(struct window* window);
 
 // Vector of struct window* - every live window registers here.
 struct vector* windows_vector = NULL;
@@ -75,6 +73,102 @@ int window_system_initialize_stage2(void){
     // Lecture 119 - stage-2 hook. Mouse + keyboard listener
     // registration lands in L137+ / L175.
     return 0;
+}
+
+// Lecture 121 - paint the title bar: background fill, title
+// text, and the close icon (white pixels ignored so the icon
+// keys against the bar colour).
+void window_draw_title_bar(struct window* window,
+                           struct framebuffer_pixel title_bar_bg_color){
+    if(!window || !window->title_bar_graphics){
+        return;
+    }
+
+    size_t total_window_width_bounds = window->title_bar_graphics->width;
+    size_t icon_pos_x = window->title_bar_components.close_btn.x;
+    size_t icon_pos_y = window->title_bar_components.close_btn.y;
+    const char* title = window->title;
+
+    terminal_draw_rect(window->title_bar_terminal, 0, 0,
+                       total_window_width_bounds, WINDOW_TITLE_BAR_HEIGHT,
+                       title_bar_bg_color);
+
+    terminal_cursor_set(window->title_bar_terminal, 0, 0);
+    terminal_print(window->title_bar_terminal, title);
+
+    struct framebuffer_pixel white_color = {0};
+    white_color.red   = 0xff;
+    white_color.green = 0xff;
+    white_color.blue  = 0xff;
+    terminal_ignore_color(window->title_bar_terminal, white_color);
+    terminal_draw_image(window->title_bar_terminal, icon_pos_x, icon_pos_y, close_icon);
+    terminal_ignore_color_finish(window->title_bar_terminal);
+}
+
+// Lecture 121 - vector_reorder comparator: higher zindex sorts
+// later (front-most window drawn last).
+int window_reorder(void* first_elem, void* second_elem){
+    struct window* win1 = *(struct window**)(first_elem);
+    struct window* win2 = *(struct window**)(second_elem);
+    return (win1->zindex < win2->zindex);
+}
+
+// Lecture 121 - update the underlying graphics z and resort
+// the windows vector so subsequent walks pick up the new
+// ordering.
+void window_set_z_index(struct window* window, int zindex){
+    graphics_set_z_index(window->root_graphics, zindex);
+    vector_reorder(windows_vector, window_reorder);
+}
+
+// Lecture 121 - flip a window out of focus: paint title bar
+// black, redraw the screen region under the window.
+void window_unfocus(struct window* old_focused_window){
+    struct framebuffer_pixel black = {0};
+    black.red   = 0x00;
+    black.green = 0x00;
+    black.blue  = 0x00;
+    window_draw_title_bar(old_focused_window, black);
+    graphics_redraw_region(graphics_screen_info(),
+                           old_focused_window->root_graphics->starting_x,
+                           old_focused_window->root_graphics->starting_y,
+                           old_focused_window->root_graphics->width,
+                           old_focused_window->root_graphics->height);
+    // TODO L146 - emit WINDOW_EVENT_TYPE_LOST_FOCUS.
+}
+
+// Lecture 121 - focus a window: unfocus the previous, bring
+// this one to the front (L122), repaint the title bar red,
+// flush the root graphics region.
+void window_focus(struct window* window){
+    if(!window){
+        return;
+    }
+    if(focused_window == window){
+        return;
+    }
+
+    struct window* old_focused_window = focused_window;
+    focused_window = window;
+
+    struct framebuffer_pixel red = {0};
+    red.red   = 0xff;
+    red.green = 0x00;
+    red.blue  = 0x00;
+
+    if(old_focused_window && old_focused_window->title_bar_graphics){
+        window_unfocus(old_focused_window);
+    }
+
+    window_bring_to_top(window);
+
+    if(window->title_bar_graphics){
+        window_draw_title_bar(window, red);
+    }
+
+    graphics_redraw_graphics_to_screen(window->root_graphics, 0, 0,
+                                       window->root_graphics->width,
+                                       window->root_graphics->height);
 }
 
 // Lecture 119 (part 1 of window_create).
