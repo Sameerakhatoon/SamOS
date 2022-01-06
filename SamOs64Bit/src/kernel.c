@@ -35,6 +35,7 @@
 #include "graphics/image/image.h" // L90 - graphics_image_load
 #include "graphics/font.h"        // L95 - font_system_init / font_draw_text
 #include "graphics/terminal.h"    // L100 - system_terminal handle
+#include "graphics/window.h"      // L122 - window_system_initialize
 
 // L87 - bss-resident default_graphics_info lives in kernel.asm;
 // the long-mode entry stashes the UEFI framebuffer params into it
@@ -220,6 +221,14 @@ void kernel_main(void)
     // matching the post-L74 boot model where graphics is
     // mandatory.
     terminal_system_setup();
+
+    // Lecture 122 - bring up the window system after the
+    // graphics terminal infrastructure but before any user-mode
+    // launch. The stage-2 hook is where mouse + keyboard
+    // listener registration will land in later lectures.
+    window_system_initialize();
+    window_system_initialize_stage2();
+
     struct font* system_font_local = font_get_system_font();
     if(!system_font_local){
         panic("Failed to load system font\n");
@@ -328,6 +337,18 @@ void kernel_main(void)
     // test program actually runs. SIMPLE.BIN was kept for the
     // L67-L69 ATA-PIO speed budget; with fread under test we
     // accept the longer load time.
+    // Lecture 122 - drop a "Test Window" onto the screen and
+    // spin so the L119-L122 chain (window_create + the new
+    // helpers in window.c) can be observed visually under OVMF.
+    // The earlier process_load_switch + task_run_first_ever_task
+    // pair is commented out for the duration of the window-test
+    // window; L154+ wires user programs back through windows.
+    struct window* win = window_create(graphics_screen_info(), NULL,
+                                       "Test Window",
+                                       50, 50, 300, 300, 0, 4395327);
+    (void)win;
+    while(1){
+    }
     int res = process_load_switch("@:/blank.elf", &p);
     if(res != SAMOS_ALL_OK){
         panic("Failed to load user program\n");

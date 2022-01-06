@@ -102,4 +102,17 @@ struct window {
     int    flags;
 };
 
+// Lecture 122 - public window API.
+int             window_system_initialize(void);
+int             window_system_initialize_stage2(void);
+void            window_set_z_index(struct window* window, int zindex);
+void            window_unfocus(struct window* old_focused_window);
+void            window_focus(struct window* window);
+struct window*  window_create(struct graphics_info* graphics_info,
+                              struct font* font,
+                              const char* title,
+                              size_t x, size_t y,
+                              size_t width, size_t height,
+                              int flags, int id);
+
 #endif
