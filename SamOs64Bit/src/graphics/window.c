@@ -198,18 +198,11 @@ void window_event_handler_register(struct window* window, WINDOW_EVENT_HANDLER h
     vector_push(window->event_handlers.handlers, &handler);
 }
 
-// Upstream-typo wrapper: L123 calls `vecotr_at` (sic) in
-// window_drop_event_handlers; not a real vector lib function.
-// We forward to vector_at so the call site stays verbatim in
-// the diff while the build stays clean.
-static inline int vecotr_at(struct vector* vec, size_t index,
-                            void* data_out, size_t size){
-    return vector_at(vec, index, data_out, size);
-}
-
+// L128 - upstream finally corrected the `vecotr_at` typo to
+// `vector_at`. The L123 workaround wrapper is dropped here.
 void window_drop_event_handlers(struct window* window){
     WINDOW_EVENT_HANDLER handler = NULL;
-    vecotr_at(window->event_handlers.handlers, 0, &handler, sizeof(handler));
+    vector_at(window->event_handlers.handlers, 0, &handler, sizeof(handler));
     while(handler){
         window_event_handler_unregister(window, handler);
         vector_at(window->event_handlers.handlers, 0, &handler, sizeof(handler));
