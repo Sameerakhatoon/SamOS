@@ -62,13 +62,11 @@ TIME_MILISECONDS tsc_miliseconds(void){
     return microseconds / 1000;
 }
 
-// Upstream bug preserved verbatim: this function reads
-// `tsc_miliseconds` without parentheses, which evaluates to a
-// function pointer (decays to its address) rather than calling
-// it. Dividing the address by 1000 yields garbage. Linkage
-// quirk only - the file is unlinked at L128.
+// Lecture 129 - upstream finally adds the missing parens so
+// this is a real function call. The L128 cast workaround is
+// removed.
 TIME_SECONDS tsc_seconds(void){
-    TIME_MILISECONDS miliseconds = (TIME_MILISECONDS)(uintptr_t)tsc_miliseconds;
+    TIME_MILISECONDS miliseconds = tsc_miliseconds();
     return miliseconds / 1000;
 }
 
