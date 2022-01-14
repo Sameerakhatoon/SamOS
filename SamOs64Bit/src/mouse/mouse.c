@@ -143,3 +143,93 @@ void mouse_moved(struct mouse* mouse){
         }
     }
 }
+
+// Lecture 133 - handler register / unregister helpers.
+//
+// When called with `mouse == NULL` each helper recurses over
+// EVERY registered mouse driver. The non-NULL case appends or
+// pops the handler from the per-mouse vector.
+
+void mouse_unregister_move_handler(struct mouse* mouse,
+                                   MOUSE_MOVE_EVENT_HANDLER_FUNCTION move_handler){
+    if(mouse){
+        vector_pop_element(mouse->event_handlers.move_handlers,
+                           &move_handler, sizeof(move_handler));
+        return;
+    }
+    size_t total_mice = vector_count(mouse_driver_vector);
+    if(total_mice == 0){
+        panic("NO Mice driers are registered\n"); // sic - upstream typo
+    }
+    for(size_t i = 0; i < total_mice; i++){
+        struct mouse* _mouse = NULL;
+        vector_at(mouse_driver_vector, i, &_mouse, sizeof(_mouse));
+        if(_mouse){
+            mouse_unregister_move_handler(_mouse, move_handler);
+        }
+    }
+}
+
+void mouse_unregister_click_handler(struct mouse* mouse,
+                                    MOUSE_CLICK_EVENT_HANDLER_FUNCTION click_handler){
+    if(mouse){
+        vector_pop_element(mouse->event_handlers.click_handlers,
+                           &click_handler, sizeof(click_handler));
+        return;
+    }
+    size_t total_mice = vector_count(mouse_driver_vector);
+    if(total_mice == 0){
+        panic("NO mice drivers are reigstered\n"); // sic - upstream typo
+    }
+    for(size_t i = 0; i < total_mice; i++){
+        struct mouse* _mouse = NULL;
+        vector_at(mouse_driver_vector, i, &_mouse, sizeof(_mouse));
+        if(_mouse){
+            mouse_unregister_click_handler(_mouse, click_handler);
+        }
+    }
+}
+
+void mouse_register_move_handler(struct mouse* mouse,
+                                 MOUSE_MOVE_EVENT_HANDLER_FUNCTION move_handler){
+    if(mouse){
+        vector_push(mouse->event_handlers.move_handlers, &move_handler);
+        return;
+    }
+    size_t total_mice = vector_count(mouse_driver_vector);
+    if(total_mice == 0){
+        panic("NO Mice drivers are registered\n");
+    }
+    for(size_t i = 0; i < total_mice; i++){
+        struct mouse* _mouse = NULL;
+        vector_at(mouse_driver_vector, i, &_mouse, sizeof(_mouse));
+        if(_mouse){
+            mouse_register_move_handler(_mouse, move_handler);
+        }
+    }
+}
+
+void mouse_register_click_handler(struct mouse* mouse,
+                                  MOUSE_CLICK_EVENT_HANDLER_FUNCTION click_handler){
+    if(mouse){
+        vector_push(mouse->event_handlers.click_handlers, &click_handler);
+        return;
+    }
+    size_t total_mice = vector_count(mouse_driver_vector);
+    if(total_mice == 0){
+        panic("NO mice drivers installed\n");
+    }
+    for(size_t i = 0; i < total_mice; i++){
+        struct mouse* _mouse = NULL;
+        vector_at(mouse_driver_vector, i, &_mouse, sizeof(_mouse));
+        if(_mouse){
+            mouse_register_click_handler(_mouse, click_handler);
+        }
+    }
+}
+
+// Lecture 133 - explicit draw dispatch (no defaulting; the
+// caller must have already wired mouse->draw).
+void mouse_draw(struct mouse* mouse){
+    mouse->draw(mouse);
+}
