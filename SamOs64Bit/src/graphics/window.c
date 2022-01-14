@@ -253,6 +253,107 @@ int window_event_handler(struct window* window, struct window_event* win_event){
     return 0;
 }
 
+// L135/L136 stubs. L135 replaces graphics_info_recalculate
+// with a real recursion over children; L136 replaces
+// window_redraw with the L93 regional flush. window.o is in
+// the build at L122 so we keep both as no-op stubs here until
+// the real bodies arrive.
+__attribute__((weak)) void graphics_info_recalculate(struct graphics_info* g){
+    (void)g;
+}
+
+__attribute__((weak)) void window_redraw(struct window* window){
+    (void)window;
+}
+
+// Lecture 134 - move a window. Computes the strip uncovered
+// by the move (left-or-right band + top-or-bottom band) and
+// asks the L93 regional redraw to repaint just those rather
+// than the whole screen. Falls back to a full root rectangle
+// redraw if the computed strips are bigger than the window
+// itself (which the upstream algorithm can produce after a
+// large diagonal move).
+int window_position_set(struct window* window, size_t new_x, size_t new_y){
+    int res = 0;
+
+    int x_redraw_x      = 0;
+    int x_redraw_y      = 0;
+    int x_redraw_width  = 0;
+    int x_redraw_height = 0;
+
+    int y_redraw_x      = 0;
+    int y_redraw_y      = 0;
+    int y_redraw_width  = 0;
+    int y_redraw_height = 0;
+
+    struct graphics_info* screen = graphics_screen_info();
+    size_t ending_x = new_x + window->width;
+    size_t ending_y = new_y + window->height;
+    if(ending_x > screen->width){
+        new_x = screen->width  - window->width  - 1;
+    }
+    if(ending_y > screen->height){
+        new_y = screen->height - window->height - 1;
+    }
+
+    int old_screen_x = window->root_graphics->starting_x;
+    int old_screen_y = window->root_graphics->starting_y;
+
+    window->root_graphics->relative_x = new_x;
+    window->root_graphics->relative_y = new_y;
+    window->root_graphics->starting_x = new_x;
+    window->root_graphics->starting_y = new_y;
+
+    window->x = new_x;
+    window->y = new_y;
+
+    window_bring_to_top(window);
+    graphics_info_recalculate(window->root_graphics);
+
+    int  x_gap     = old_screen_x - (int)window->root_graphics->starting_x;
+    int  y_gap     = old_screen_y - (int)window->root_graphics->starting_y;
+    bool moved_left = x_gap >= 0;
+    bool moved_up   = y_gap >= 0;
+
+    x_redraw_x      = window->root_graphics->starting_x + window->root_graphics->width;
+    x_redraw_width  = x_gap;
+    x_redraw_y      = old_screen_y;
+    x_redraw_height = window->root_graphics->height;
+    if(!moved_left){
+        x_redraw_x     = window->root_graphics->starting_x + x_gap;
+        x_redraw_width = -x_gap;
+    }
+
+    y_redraw_x      = old_screen_x;
+    y_redraw_y      = window->root_graphics->starting_y + window->root_graphics->height;
+    y_redraw_width  = window->root_graphics->width;
+    y_redraw_height = y_gap;
+    if(!moved_up){
+        y_redraw_y      = window->root_graphics->starting_y + y_gap;
+        y_redraw_height = -y_gap;
+    }
+
+    if((x_redraw_width  > (int)window->root_graphics->width)
+       || (x_redraw_height > (int)window->root_graphics->height)
+       || (y_redraw_width  > (int)window->root_graphics->width)
+       || (y_redraw_height > (int)window->root_graphics->height)){
+        graphics_redraw_region(graphics_screen_info(),
+                               old_screen_x, old_screen_y,
+                               window->root_graphics->width,
+                               window->root_graphics->height);
+    }else{
+        graphics_redraw_region(graphics_screen_info(),
+                               x_redraw_x, x_redraw_y,
+                               x_redraw_width, x_redraw_height);
+        graphics_redraw_region(graphics_screen_info(),
+                               y_redraw_x, y_redraw_y,
+                               y_redraw_width, y_redraw_height);
+    }
+
+    window_redraw(window);
+    return res;
+}
+
 // Lecture 119 (part 1 of window_create).
 //
 // Upstream bug preserved verbatim: this function returns
