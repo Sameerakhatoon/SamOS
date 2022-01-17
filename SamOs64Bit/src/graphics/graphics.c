@@ -147,6 +147,33 @@ void graphics_draw_rect(struct graphics_info* graphics_info,
     }
 }
 
+// Lecture 135 - propagate the parent's screen position into
+// this surface's `starting_x/y` and recurse so every
+// descendant lands at the right absolute coordinate. Called
+// after a window move (L134) updates the root's relative
+// coords.
+void graphics_info_recalculate(struct graphics_info* graphics_info){
+    if(graphics_info->parent){
+        graphics_info->starting_x =
+            graphics_info->relative_x + graphics_info->parent->starting_x;
+        graphics_info->starting_y =
+            graphics_info->relative_y + graphics_info->parent->starting_y;
+    }
+    if(graphics_info->children){
+        size_t total_children = vector_count(graphics_info->children);
+        for(size_t i = 0; i < total_children; i++){
+            struct graphics_info* child_graphics_info = NULL;
+            int res = vector_at(graphics_info->children, i,
+                                &child_graphics_info,
+                                sizeof(struct graphics_info*));
+            if(res < 0){
+                break;
+            }
+            graphics_info_recalculate(child_graphics_info);
+        }
+    }
+}
+
 // Lecture 99 - paint-time pixel-skip filter. Stash a colour the
 // renderer should treat as "do not write this pixel". Black is
 // the "no filter" sentinel; black sources still draw because

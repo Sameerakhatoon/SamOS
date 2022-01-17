@@ -253,15 +253,9 @@ int window_event_handler(struct window* window, struct window_event* win_event){
     return 0;
 }
 
-// L135/L136 stubs. L135 replaces graphics_info_recalculate
-// with a real recursion over children; L136 replaces
-// window_redraw with the L93 regional flush. window.o is in
-// the build at L122 so we keep both as no-op stubs here until
-// the real bodies arrive.
-__attribute__((weak)) void graphics_info_recalculate(struct graphics_info* g){
-    (void)g;
-}
-
+// L135 lands the real graphics_info_recalculate in graphics.c.
+// The L134 weak fallback here is dropped; we keep the
+// L136 window_redraw weak stub until that lecture lands.
 __attribute__((weak)) void window_redraw(struct window* window){
     (void)window;
 }
