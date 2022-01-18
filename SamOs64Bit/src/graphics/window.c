@@ -253,11 +253,11 @@ int window_event_handler(struct window* window, struct window_event* win_event){
     return 0;
 }
 
-// L135 lands the real graphics_info_recalculate in graphics.c.
-// The L134 weak fallback here is dropped; we keep the
-// L136 window_redraw weak stub until that lecture lands.
-__attribute__((weak)) void window_redraw(struct window* window){
-    (void)window;
+// Lecture 136 - real body. The window's root surface forwards
+// to graphics_redraw which composites the back buffer to the
+// physical framebuffer (and L93 recurses into children).
+void window_redraw(struct window* window){
+    graphics_redraw(window->root_graphics);
 }
 
 // Lecture 134 - move a window. Computes the strip uncovered
