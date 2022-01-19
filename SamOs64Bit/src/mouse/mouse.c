@@ -16,9 +16,9 @@
 #include "kernel.h"
 #include "status.h"
 
-// L133+ forward decls (defined in window.c).
-extern struct terminal* window_terminal(struct window* window);
-extern void             window_position_set(struct window* window, size_t x, size_t y);
+// L134/L138 - window_position_set and window_terminal are now
+// declared by graphics/window.h above; the L132 forward decls
+// are dropped.
 
 // Holds all the loaded mouse drivers.
 struct vector* mouse_driver_vector = NULL;

@@ -73,6 +73,13 @@ int window_system_initialize_stage2(void){
     return 0;
 }
 
+// Lecture 138 - public accessor for the body terminal. The
+// mouse module (L132 mouse_draw_default_impl) needs this to
+// avoid reaching through the struct fields directly.
+struct terminal* window_terminal(struct window* window){
+    return window->terminal;
+}
+
 // Lecture 121 - paint the title bar: background fill, title
 // text, and the close icon (white pixels ignored so the icon
 // keys against the bar colour).
