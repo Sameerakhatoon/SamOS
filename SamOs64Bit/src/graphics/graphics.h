@@ -15,6 +15,7 @@
 #include <stdbool.h>
 #include "lib/vector/vector.h"
 #include "graphics/image/image.h"   // L90 - struct image for draw_image
+#include "mouse/mouse.h"            // L141 - MOUSE_CLICK_TYPE for click handlers
 
 enum {
     GRAPHICS_FLAG_ALLOW_OUT_OF_BOUNDS                = 0b00000001,
@@ -131,5 +132,27 @@ void                  graphics_info_free(struct graphics_info* graphics_in);
 // Lecture 135 - recompute starting_x/y from relative_x/y +
 // parent.starting_x/y, then recurse into children.
 void                  graphics_info_recalculate(struct graphics_info* graphics_info);
+
+// Lecture 141 - click routing.
+void                  graphics_click_handler_set(struct graphics_info* graphics,
+                                                 GRAPHICS_MOUSE_CLICK_FUNCTION click_function);
+void                  graphics_mouse_click(struct graphics_info* graphics,
+                                           size_t rel_x_clicked, size_t rel_y_clicked,
+                                           MOUSE_CLICK_TYPE type);
+void                  graphics_mouse_click_handler(struct mouse* mouse,
+                                                   int clicked_x, int clicked_y,
+                                                   MOUSE_CLICK_TYPE type);
+struct graphics_info* graphics_get_at_screen_position(size_t x, size_t y,
+                                                     struct graphics_info* ignored,
+                                                     bool top_first);
+struct graphics_info* graphics_get_child_at_position(struct graphics_info* graphics,
+                                                    size_t x, size_t y,
+                                                    struct graphics_info* ignored,
+                                                    bool top_first);
+bool                  graphics_is_in_ignored_branch(struct graphics_info* elem,
+                                                    struct graphics_info* ignored);
+
+// sic - upstream typo "grpahics_setup_stage_two" preserved.
+void                  grpahics_setup_stage_two(struct graphics_info* main_graphics_info);
 
 #endif
