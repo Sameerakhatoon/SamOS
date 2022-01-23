@@ -67,9 +67,66 @@ out:
     return res;
 }
 
+// Lecture 143 - move-event handler is a TODO stub; L144+
+// will wire it up.
+void window_screen_mouse_move_handler(struct mouse* mouse,
+                                      int moved_to_x, int moved_to_y){
+    (void)mouse; (void)moved_to_x; (void)moved_to_y;
+}
+
+// Lecture 143 - find the window whose root rectangle contains
+// the absolute (x, y) point. Skips `ignore_window` so the
+// cursor sprite never claims the click.
+struct window* window_get_at_position(size_t abs_x, size_t abs_y,
+                                      struct window* ignore_window){
+    size_t total_windows = vector_count(windows_vector);
+    for(size_t i = 0; i < total_windows; i++){
+        struct window* win = NULL;
+        vector_at(windows_vector, i, &win, sizeof(win));
+        if(win && win != ignore_window){
+            size_t whole_win_width  = win->root_graphics->width;
+            size_t whole_win_height = win->root_graphics->height;
+            size_t end_abs_x = win->root_graphics->starting_x + whole_win_width;
+            size_t end_abs_y = win->root_graphics->starting_y + whole_win_height;
+            if(abs_x >= win->x && abs_x < end_abs_x
+               && abs_y >= win->y && abs_y < end_abs_y){
+                return win;
+            }
+        }
+    }
+    return NULL;
+}
+
+// L144 lands `window_click`; we keep a weak stub here until
+// then so the link is clean.
+__attribute__((weak)) void window_click(struct window* window,
+                                        int rel_x, int rel_y,
+                                        MOUSE_CLICK_TYPE type){
+    (void)window; (void)rel_x; (void)rel_y; (void)type;
+}
+
+// Lecture 143 - mouse-subsystem click callback. Resolves the
+// window under the cursor (skipping the cursor sprite),
+// translates to window-relative coords, hands off to
+// window_click, and focuses the window.
+void window_click_handler(struct mouse* mouse, int abs_x, int abs_y,
+                          MOUSE_CLICK_TYPE type){
+    struct window* win = window_get_at_position(abs_x, abs_y, mouse->graphic.window);
+    if(win){
+        int rel_x = abs_x - win->root_graphics->starting_x;
+        int rel_y = abs_y - win->root_graphics->starting_y;
+        window_click(win, rel_x, rel_y, type);
+        window_focus(win);
+    }
+}
+
 int window_system_initialize_stage2(void){
-    // Lecture 119 - stage-2 hook. Mouse + keyboard listener
-    // registration lands in L137+ / L175.
+    // Lecture 143 - register the window-level mouse handlers
+    // so clicks (handled below) and moves (TODO stub) flow
+    // into the window subsystem. Keyboard listener lands in
+    // L175.
+    mouse_register_move_handler(NULL,  window_screen_mouse_move_handler);
+    mouse_register_click_handler(NULL, window_click_handler);
     return 0;
 }
 
