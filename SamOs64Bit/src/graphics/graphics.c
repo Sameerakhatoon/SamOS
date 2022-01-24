@@ -437,6 +437,22 @@ void graphics_move_handler_set(struct graphics_info* graphics,
     graphics->event_handlers.mouse_move = move_function;
 }
 
+// Lecture 145 - walk elem->parent chain looking for ancestor.
+// True if ancestor is elem itself or any of its ancestors.
+// NULL ancestor is never an ancestor.
+bool graphics_has_ancestor(struct graphics_info* elem,
+                           struct graphics_info* ancestor){
+    if(!ancestor){
+        return false;
+    }
+    for(struct graphics_info* cur = elem; cur != NULL; cur = cur->parent){
+        if(cur == ancestor){
+            return true;
+        }
+    }
+    return false;
+}
+
 // Lecture 141 - is `elem` (or any of its ancestors) the
 // `ignored` subtree root? Used by the click hit-test to skip
 // the mouse-cursor window.

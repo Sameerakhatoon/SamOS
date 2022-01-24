@@ -45,6 +45,12 @@ struct window* focused_window = NULL;
 // Auto-incrementing id stamped on windows that pass id == -1.
 int window_autoincrement_id_current = 100000;
 
+// Lecture 145 - forward decls for the helpers landing later
+// in this file. window.h exports them publicly.
+size_t window_get_largest_zindex(void);
+int    window_recalculate_zindexes(void);
+bool   window_owns_graphics(struct window* win, struct graphics_info* graphics);
+
 int window_system_initialize(void){
     int res = 0;
 
@@ -65,6 +71,23 @@ int window_system_initialize(void){
     window_autoincrement_id_current = 100000;
 out:
     return res;
+}
+
+// Lecture 145 - find the window that owns `graphics` (i.e.
+// the window whose root_graphics is graphics or an ancestor
+// of graphics).
+struct window* window_get_from_graphics(struct graphics_info* graphics){
+    struct window* window = NULL;
+    size_t total_windows = vector_count(windows_vector);
+    for(size_t i = 0; i < total_windows; i++){
+        struct window* win = NULL;
+        vector_at(windows_vector, i, &win, sizeof(win));
+        if(win && window_owns_graphics(win, graphics)){
+            window = win;
+            break;
+        }
+    }
+    return window;
 }
 
 // Lecture 143 - move-event handler is a TODO stub; L144+
@@ -329,6 +352,70 @@ int window_event_handler(struct window* window, struct window_event* win_event){
 // physical framebuffer (and L93 recurses into children).
 void window_redraw(struct window* window){
     graphics_redraw(window->root_graphics);
+}
+
+// Lecture 145 - convenience wrappers + helpers.
+void window_redraw_body_region(struct window* window, int x, int y, int width, int height){
+    graphics_redraw_region(window->graphics, x, y, width, height);
+}
+
+void window_redraw_region(struct window* window, int x, int y, int width, int height){
+    graphics_redraw_region(window->root_graphics, x, y, width, height);
+}
+
+void window_title_set(struct window* window, const char* title){
+    strncpy(window->title, title, sizeof(window->title));
+    struct framebuffer_pixel title_bar_bg_color = {0};   // black
+    window_draw_title_bar(window, title_bar_bg_color);
+    window_redraw(window);
+}
+
+// Lecture 145 - get the front-most window's zindex. The L121
+// vector_reorder sorts by zindex ascending, so the first
+// element is the highest. (Note: upstream's `windows_vector`
+// ordering chooses index 0 as topmost, which differs from
+// graphics children where last = topmost.)
+size_t window_get_largest_zindex(void){
+    size_t z_index = 0;
+    size_t total_windows = vector_count(windows_vector);
+    if(total_windows > 0){
+        struct window* win = NULL;
+        vector_at(windows_vector, 0, &win, sizeof(win));
+        if(win){
+            z_index = win->zindex;
+        }
+    }
+    return z_index;
+}
+
+// Lecture 145 - assign every window a fresh zindex equal to
+// `child_count + index + 1`. Called after the windows vector
+// order changes.
+int window_recalculate_zindexes(void){
+    size_t total_windows = vector_count(windows_vector);
+    size_t last_zindex   = 0;
+    for(size_t i = 0; i < total_windows; i++){
+        struct window* child_window = NULL;
+        vector_at(windows_vector, i, &child_window, sizeof(child_window));
+        if(child_window){
+            size_t z_index =
+                vector_count(child_window->root_graphics->children) + i + 1;
+            graphics_set_z_index(child_window->root_graphics, z_index);
+            last_zindex = z_index;
+        }
+    }
+    return last_zindex;
+}
+
+struct window* window_focused(void){
+    return focused_window;
+}
+
+bool window_owns_graphics(struct window* win, struct graphics_info* graphics){
+    if(graphics == win->root_graphics){
+        return true;
+    }
+    return graphics_has_ancestor(graphics, win->root_graphics);
 }
 
 // Lecture 134 - move a window. Computes the strip uncovered

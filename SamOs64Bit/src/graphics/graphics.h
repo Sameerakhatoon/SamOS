@@ -133,6 +133,10 @@ void                  graphics_info_free(struct graphics_info* graphics_in);
 // parent.starting_x/y, then recurse into children.
 void                  graphics_info_recalculate(struct graphics_info* graphics_info);
 
+// Lecture 145 - is `ancestor` reachable by walking elem->parent?
+bool                  graphics_has_ancestor(struct graphics_info* elem,
+                                            struct graphics_info* ancestor);
+
 // Lecture 141 - click routing.
 void                  graphics_click_handler_set(struct graphics_info* graphics,
                                                  GRAPHICS_MOUSE_CLICK_FUNCTION click_function);
