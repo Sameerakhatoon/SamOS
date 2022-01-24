@@ -97,12 +97,19 @@ struct window* window_get_at_position(size_t abs_x, size_t abs_y,
     return NULL;
 }
 
-// L144 lands `window_click`; we keep a weak stub here until
-// then so the link is clean.
-__attribute__((weak)) void window_click(struct window* window,
-                                        int rel_x, int rel_y,
-                                        MOUSE_CLICK_TYPE type){
-    (void)window; (void)rel_x; (void)rel_y; (void)type;
+// window_event_push is defined later in this file; forward-
+// decl so window_click can call it from above.
+void window_event_push(struct window* window, struct window_event* event);
+
+// Lecture 144 - real body. Pushes a WINDOW_EVENT_TYPE_MOUSE_CLICK
+// into the per-window event handler chain. The L123 default
+// handler currently ignores it; L146+ wires real listeners.
+void window_click(struct window* window, int rel_x, int rel_y, MOUSE_CLICK_TYPE type){
+    struct window_event event = {0};
+    event.type           = WINDOW_EVENT_TYPE_MOUSE_CLICK;
+    event.data.click.x   = rel_x;
+    event.data.click.y   = rel_y;
+    window_event_push(window, &event);
 }
 
 // Lecture 143 - mouse-subsystem click callback. Resolves the

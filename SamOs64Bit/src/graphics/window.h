@@ -129,4 +129,9 @@ struct terminal* window_terminal(struct window* window);
 // Lecture 134 - move a window.
 int             window_position_set(struct window* window, size_t new_x, size_t new_y);
 
+// Lecture 144 - push a MOUSE_CLICK event into the window's
+// handler chain. window-relative coords.
+void            window_click(struct window* window, int rel_x, int rel_y,
+                             MOUSE_CLICK_TYPE type);
+
 #endif
