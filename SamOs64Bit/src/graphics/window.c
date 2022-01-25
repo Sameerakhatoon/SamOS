@@ -226,7 +226,12 @@ void window_unfocus(struct window* old_focused_window){
                            old_focused_window->root_graphics->starting_y,
                            old_focused_window->root_graphics->width,
                            old_focused_window->root_graphics->height);
-    // TODO L146 - emit WINDOW_EVENT_TYPE_LOST_FOCUS.
+
+    // Lecture 146 - emit a WINDOW_EVENT_TYPE_LOST_FOCUS event so
+    // listeners can act on the focus loss.
+    struct window_event event = {0};
+    event.type = WINDOW_EVENT_TYPE_LOST_FOCUS;
+    window_event_push(old_focused_window, &event);
 }
 
 // Lecture 122 - bring a window to the top by giving it the
@@ -281,6 +286,11 @@ void window_focus(struct window* window){
     graphics_redraw_graphics_to_screen(window->root_graphics, 0, 0,
                                        window->root_graphics->width,
                                        window->root_graphics->height);
+
+    // Lecture 146 - emit a WINDOW_EVENT_TYPE_FOCUS event.
+    struct window_event event = {0};
+    event.type = WINDOW_EVENT_TYPE_FOCUS;
+    window_event_push(window, &event);
 }
 
 // Lecture 123 - event handler registration walks.
