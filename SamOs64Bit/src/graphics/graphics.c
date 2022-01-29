@@ -270,9 +270,12 @@ void graphics_ignore_color(struct graphics_info* graphics_info,
 // different semantic slots (ignore_color is paint-time;
 // transparency_key is composite-time). Mirroring upstream
 // keeps the diff readable; a follow-up patch can split them.
+// Lecture 150 - upstream finally writes to the right slot
+// (transparency_key, not ignore_color). The bug documented in
+// the L99 comment block is fixed.
 void graphics_transparency_key_set(struct graphics_info* graphics_info,
                                    struct framebuffer_pixel pixel_color){
-    graphics_info->ignore_color = pixel_color;
+    graphics_info->transparency_key = pixel_color;
 }
 
 // Lecture 99 - clear the composite-time transparency key. The
@@ -362,8 +365,11 @@ void graphics_redraw_region(struct graphics_info* g,
     if(local_x >= g->width || local_y >= g->height){
         return;
     }
+    // Lecture 150 - clip width instead of returning early so a
+    // wider-than-the-surface redraw rectangle still paints the
+    // covered portion.
     if(local_x + width > g->width){
-        return;
+        width = g->width - local_x;
     }
     if(local_y + height > g->height){
         height = g->height - local_y;
@@ -396,8 +402,8 @@ void graphics_redraw_region(struct graphics_info* g,
 
         uint32_t intersect_left   = MAX(child_abs_left,   region_abs_left);
         uint32_t intersect_top    = MAX(child_abs_top,    region_abs_top);
-        // L93 upstream bug preserved: should be MIN.
-        uint32_t intersect_right  = MAX(child_abs_right,  region_abs_right);
+        // Lecture 150 - fixed: the L93 MAX bug is corrected.
+        uint32_t intersect_right  = MIN(child_abs_right,  region_abs_right);
         uint32_t intersect_bottom = MIN(child_abs_bottom, region_abs_bottom);
 
         if(intersect_right > intersect_left && intersect_bottom > intersect_top){
@@ -520,7 +526,10 @@ struct graphics_info* graphics_get_child_at_position(struct graphics_info* graph
             if(graphics_is_in_ignored_branch(child, ignored)){
                 continue;
             }
-            if(x > child->starting_x && x < child->starting_x + child->width
+            // Lecture 150 - fix the L141 inconsistency: forward
+            // iteration now uses `x >=` to match the top_first
+            // branch.
+            if(x >= child->starting_x && x < child->starting_x + child->width
                && y >= child->starting_y && y < child->starting_y + child->height){
                 result = graphics_get_child_at_position(child, x, y, ignored, top_first);
                 if(result){
@@ -531,11 +540,11 @@ struct graphics_info* graphics_get_child_at_position(struct graphics_info* graph
         }
     }
 
-    // Upstream bug preserved: the right-edge check uses
-    // `starting_y + graphics->width` rather than
-    // `starting_x + graphics->width`. Carried verbatim.
+    // Lecture 150 - fix: right-edge check now correctly adds
+    // `width` to `starting_x` (was the L141-documented
+    // `starting_y` bug).
     if(x >= graphics->starting_x
-       && x < graphics->starting_y + graphics->width
+       && x < graphics->starting_x + graphics->width
        && y >= graphics->starting_y
        && y < graphics->starting_y + graphics->height){
         return graphics;
@@ -597,7 +606,7 @@ void graphics_set_z_index(struct graphics_info* graphics_info, uint32_t z_index)
 // Lecture 116 - surface-to-surface paste. Source pixels go
 // through graphics_pixel_get so bounds checks apply on read;
 // the destination respects its own transparency_key when the
-// caller passes GRAPHICS_FLAG_DO_NOT_OVERWRITE_TRASPARENT_PIXELS
+// caller passes GRAPHICS_FLAG_DO_NOT_OVERWRITE_TRANSPARENT_PIXELS
 // (sic: upstream typo "TRASPARENT" preserved).
 void graphics_paste_pixels_to_pixels(struct graphics_info* graphics_info_in,
                                      struct graphics_info* graphics_info_out,
@@ -633,7 +642,7 @@ void graphics_paste_pixels_to_pixels(struct graphics_info* graphics_info_in,
             uint32_t dy = dst_y + ly;
 
             if(dx < graphics_info_out->width && dy < graphics_info_out->height){
-                if(flags & GRAPHICS_FLAG_DO_NOT_OVERWRITE_TRASPARENT_PIXELS){
+                if(flags & GRAPHICS_FLAG_DO_NOT_OVERWRITE_TRANSPARENT_PIXELS){
                     if(has_transparency_key){
                         struct framebuffer_pixel* existing_pixel =
                             &graphics_info_out->pixels[dy * graphics_info_out->width + dx];
@@ -714,7 +723,7 @@ struct graphics_info* graphics_info_create_relative(struct graphics_info* source
     if(!(flags & GRAPHICS_FLAG_DO_NOT_COPY_PIXELS)){
         graphics_paste_pixels_to_pixels(source_graphics, new_graphics,
                                         x, y, width, height, 0, 0,
-                                        GRAPHICS_FLAG_DO_NOT_OVERWRITE_TRASPARENT_PIXELS);
+                                        GRAPHICS_FLAG_DO_NOT_OVERWRITE_TRANSPARENT_PIXELS);
     }
 
     // Children do NOT own their framebuffer pointer; clear the
@@ -845,8 +854,8 @@ void graphics_setup(struct graphics_info* main_graphics_info){
 // into graphics_mouse_click_handler.
 //
 // Upstream-typo function name preserved verbatim
-// ("grpahics_setup_stage_two" - the `r` and `a` are swapped).
-void grpahics_setup_stage_two(struct graphics_info* main_graphics_info){
+// ("graphics_setup_stage_two" - the `r` and `a` are swapped).
+void graphics_setup_stage_two(struct graphics_info* main_graphics_info){
     (void)main_graphics_info;
     mouse_register_click_handler(NULL, graphics_mouse_click_handler);
     // Lecture 142 - also wire the move handler.

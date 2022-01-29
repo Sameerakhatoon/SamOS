@@ -22,7 +22,7 @@ enum {
     GRAPHICS_FLAG_CLONED_FRAMEBUFFER                 = 0b00000010,
     GRAPHICS_FLAG_CLONED_CHILDREN                    = 0b00000100,
     GRAPHICS_FLAG_DO_NOT_COPY_PIXELS                 = 0b00001000,
-    GRAPHICS_FLAG_DO_NOT_OVERWRITE_TRASPARENT_PIXELS = 0b00010000
+    GRAPHICS_FLAG_DO_NOT_OVERWRITE_TRANSPARENT_PIXELS = 0b00010000
 };
 
 struct graphics_info;
@@ -156,8 +156,8 @@ struct graphics_info* graphics_get_child_at_position(struct graphics_info* graph
 bool                  graphics_is_in_ignored_branch(struct graphics_info* elem,
                                                     struct graphics_info* ignored);
 
-// sic - upstream typo "grpahics_setup_stage_two" preserved.
-void                  grpahics_setup_stage_two(struct graphics_info* main_graphics_info);
+// sic - upstream typo "graphics_setup_stage_two" preserved.
+void                  graphics_setup_stage_two(struct graphics_info* main_graphics_info);
 
 // Lecture 142 - move handler routing. Upstream's L142 decl in
 // graphics.h has a stray comma (`GRAPHICS_MOUSE_MOVE_FUNCTION,

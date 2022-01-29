@@ -37,6 +37,7 @@
 #include "graphics/font.h"        // L95 - font_system_init / font_draw_text
 #include "graphics/terminal.h"    // L100 - system_terminal handle
 #include "graphics/window.h"      // L122 - window_system_initialize
+#include "mouse/mouse.h"          // L150 - mouse_system_init / load_static_drivers
 
 // L87 - bss-resident default_graphics_info lives in kernel.asm;
 // the long-mode entry stashes the UEFI framebuffer params into it
@@ -229,6 +230,13 @@ void kernel_main(void)
     // listener registration will land in later lectures.
     window_system_initialize();
     window_system_initialize_stage2();
+
+    // Lecture 150 - mouse + graphics stage-2 setup. The mouse
+    // system loads static drivers (TODO L137 PS/2 hook) and
+    // graphics registers the click + move handlers.
+    mouse_system_init();
+    mouse_system_load_static_drivers();
+    graphics_setup_stage_two(&default_graphics_info);
 
     struct font* system_font_local = font_get_system_font();
     if(!system_font_local){

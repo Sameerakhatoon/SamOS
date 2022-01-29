@@ -76,5 +76,6 @@ void mouse_click(struct mouse* mouse, MOUSE_CLICK_TYPE type);
 void mouse_position_set(struct mouse* mouse, size_t x, size_t y);
 int  mouse_register(struct mouse* mouse);
 int  mouse_system_init(void);
+int  mouse_system_load_static_drivers(void);
 
 #endif
