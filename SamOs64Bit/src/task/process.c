@@ -35,6 +35,9 @@ static void process_init(struct process* process){
     memset(process, 0, sizeof(struct process));
     process->allocations  = vector_new(sizeof(struct process_allocation), 10, 0);
     process->file_handles = vector_new(sizeof(struct process_file_handle*), 4, 0);
+    // Lecture 153 - userland pointer registry.
+    process->kernel_userland_ptrs_vector =
+        vector_new(sizeof(struct userland_ptr*), 4, 0);
 }
 
 struct process* process_current(){
@@ -608,6 +611,12 @@ int process_terminate(struct process* process){
     if(process->allocations){
         vector_free(process->allocations);
         process->allocations = NULL;
+    }
+
+    // Lecture 153 - drop the userland pointer registry.
+    if(process->kernel_userland_ptrs_vector){
+        vector_free(process->kernel_userland_ptrs_vector);
+        process->kernel_userland_ptrs_vector = NULL;
     }
 
     kfree(process->stack);
