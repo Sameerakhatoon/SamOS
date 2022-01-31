@@ -150,4 +150,8 @@ void            window_title_set(struct window* window, const char* title);
 // userspace code in L153+.
 void            window_event_push(struct window* window, struct window_event* event);
 
+// Lecture 154 - close a window. Frees the surface, drops the
+// node from the compositor list, releases the title bar.
+void            window_close(struct window* window);
+
 #endif
