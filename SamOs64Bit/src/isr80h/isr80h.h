@@ -19,6 +19,7 @@ enum SystemCommands {
     SYSTEM_COMMAND14_FSTAT,  // L112 - userland fstat
     SYSTEM_COMMAND15_REALLOC, // L115 - userland realloc
     SYSTEM_COMMAND16_WINDOW_CREATE, // L154 - userland window create
+    SYSTEM_COMMAND17_SYSOUT_TO_WINDOW, // L158 - divert stdout to a window
 };
 
 void isr80h_register_commands();
