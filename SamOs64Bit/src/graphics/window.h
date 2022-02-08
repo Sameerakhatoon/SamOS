@@ -54,6 +54,31 @@ struct window_event {
     } data;
 };
 
+// Lecture 160 - userland-facing copy of struct window_event.
+// The userland struct mirrors the data union but omits the
+// kernel-only keypress slot; window_event_to_userland enforces
+// the data-region sizes match.
+struct window_event_userland {
+    int             type;
+    int             win_id;
+    struct window*  window;
+    union {
+        struct {
+            // No extra data for focus.
+        } focus;
+        // positions are relative to the window body.
+        struct {
+            int x;
+            int y;
+        } move;
+        // relative to the window body.
+        struct {
+            int x;
+            int y;
+        } click;
+    } data;
+};
+
 typedef int (*WINDOW_EVENT_HANDLER)(struct window* window, struct window_event* event);
 
 enum {
@@ -153,5 +178,10 @@ void            window_event_push(struct window* window, struct window_event* ev
 // Lecture 154 - close a window. Frees the surface, drops the
 // node from the compositor list, releases the title bar.
 void            window_close(struct window* window);
+
+// Lecture 160 - copy a kernel window event into its userland
+// projection. Panics if the data-union sizes diverge.
+void            window_event_to_userland(struct window_event* kernel_win_event_in,
+                                         struct window_event_userland* userland_win_event_out);
 
 #endif

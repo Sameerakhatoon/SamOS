@@ -69,6 +69,47 @@ out:
     return res;
 }
 
+// Lecture 160 - reserve N slots and advance the live element
+// count to cover them. Unlike vector_push, no data is written;
+// callers vector_overwrite later. Used for the per-process
+// window-event ring buffer.
+int vector_grow(struct vector* vec, size_t total_elements){
+    int res = 0;
+    // Will always grow up never down.
+    res = vector_resize(vec, total_elements);
+    if(res < 0){
+        goto out;
+    }
+    vec->t_elems += total_elements;
+out:
+    return res;
+}
+
+// Lecture 160 - linear scan for an element by value. Sets
+// *index_out to where the match lives (or to total_elems when
+// not found, matching upstream's quirk: the loop counter leaks
+// out and gets stored regardless). Returns 0 on hit, negative
+// on miss / bad size.
+int vector_has(struct vector* vec, void* elem_val_ptr, size_t elem_size, size_t* index_out){
+    int res = 0;
+    if(vec->e_size != elem_size){
+        return -EINVARG;
+    }
+    res = -EOUTOFRANGE;
+    char tmp_buf[elem_size];
+    size_t total_elems = vector_count(vec);
+    size_t i = 0;
+    for(i = 0; i < total_elems; i++){
+        vector_at(vec, i, tmp_buf, elem_size);
+        if(memcmp(elem_val_ptr, tmp_buf, elem_size) == 0){
+            res = 0;
+            break;
+        }
+    }
+    *index_out = i;
+    return res;
+}
+
 int vector_push(struct vector* vec, void* elem){
     int res = 0;
     res = vector_resize(vec, 1);
