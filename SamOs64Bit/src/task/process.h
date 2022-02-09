@@ -28,6 +28,7 @@ struct elf_file;
 // struct process* do not need to drag the graphics headers in.
 struct window;
 struct graphics_info;
+struct window_event;
 
 struct process_allocation {
     void*  ptr;
@@ -227,5 +228,11 @@ void                    process_print_char(struct process* process, char c);
 void                    process_print(struct process* process, const char* message);
 void                    process_set_sysout_window(struct process* process,
                                                   struct process_window* win);
+
+// Lecture 161 - per-process window-event push and pop.
+int                     process_push_window_event(struct process* process,
+                                                  struct window_event* event);
+int                     process_pop_window_event(struct process* process,
+                                                 struct window_event* event_out);
 
 #endif
