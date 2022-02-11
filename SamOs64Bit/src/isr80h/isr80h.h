@@ -21,6 +21,7 @@ enum SystemCommands {
     SYSTEM_COMMAND16_WINDOW_CREATE, // L154 - userland window create
     SYSTEM_COMMAND17_SYSOUT_TO_WINDOW, // L158 - divert stdout to a window
     SYSTEM_COMMAND18_GET_WINDOW_EVENT, // L163 - drain a window event
+    SYSTEM_COMMAND19_WINDOW_GRAPHICS_GET, // L165 - userspace graphics info
 };
 
 void isr80h_register_commands();
