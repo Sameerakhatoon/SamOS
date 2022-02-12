@@ -94,4 +94,8 @@ struct paging_desc_entry* paging_get(struct paging_desc* desc, void* virtual_add
 void  paging_load_directory(uintptr_t* directory);
 void  paging_invalidate_tlb_entry(void* addr);
 
+// Lecture 166 - round val_in up to the next page boundary.
+// Returns val_in unchanged when already page-aligned.
+uint64_t paging_align_value_to_upper_page(uint64_t val_in);
+
 #endif

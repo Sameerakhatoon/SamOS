@@ -235,4 +235,15 @@ int                     process_push_window_event(struct process* process,
 int                     process_pop_window_event(struct process* process,
                                                  struct window_event* event_out);
 
+// Lecture 166 - userspace mapping helpers. Hand a phys range
+// off to the process address space (must be page-aligned).
+struct framebuffer_pixel;
+int                     process_map_into_userspace(struct process* process,
+                                                   void* phys_ptr, size_t t_size,
+                                                   int map_flags, void** virt_addr_out);
+int                     process_map_graphics_framebuffer_pixels_into_userspace(struct process* process,
+                                                                               struct graphics_info* graphics_in,
+                                                                               struct framebuffer_pixel** virt_addr_out,
+                                                                               size_t* size_out);
+
 #endif

@@ -22,6 +22,7 @@ enum SystemCommands {
     SYSTEM_COMMAND17_SYSOUT_TO_WINDOW, // L158 - divert stdout to a window
     SYSTEM_COMMAND18_GET_WINDOW_EVENT, // L163 - drain a window event
     SYSTEM_COMMAND19_WINDOW_GRAPHICS_GET, // L165 - userspace graphics info
+    SYSTEM_COMMAND20_GRAPHICS_PIXELS_BUFFER_GET, // L166 - userspace pixels mapping
 };
 
 void isr80h_register_commands();

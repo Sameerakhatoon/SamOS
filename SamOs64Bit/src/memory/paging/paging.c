@@ -369,6 +369,16 @@ int paging_map_e820_memory_regions(struct paging_desc* desc)
     return 0;
 }
 
+// Lecture 166 - page-up alignment helper. Pixel-buffer sizes
+// rarely land on a page boundary, so the framebuffer mapper
+// rounds up before calling paging_map_range.
+uint64_t paging_align_value_to_upper_page(uint64_t val_in){
+    if((uint64_t)val_in % PAGING_PAGE_SIZE){
+        return ((uint64_t)val_in + PAGING_PAGE_SIZE - ((uint64_t)val_in % PAGING_PAGE_SIZE));
+    }
+    return val_in;
+}
+
 int paging_map_range(struct paging_desc* desc, void* virt, void* phys, size_t count, int flags)
 {
     int res = 0;
