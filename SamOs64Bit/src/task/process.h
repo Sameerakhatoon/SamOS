@@ -29,6 +29,9 @@ struct elf_file;
 struct window;
 struct graphics_info;
 struct window_event;
+// Lecture 168 - hoisted forward decl so the L166 helper sigs at
+// the bottom of this header compile without including graphics.h.
+struct framebuffer_pixel;
 
 struct process_allocation {
     void*  ptr;
@@ -237,7 +240,6 @@ int                     process_pop_window_event(struct process* process,
 
 // Lecture 166 - userspace mapping helpers. Hand a phys range
 // off to the process address space (must be page-aligned).
-struct framebuffer_pixel;
 int                     process_map_into_userspace(struct process* process,
                                                    void* phys_ptr, size_t t_size,
                                                    int map_flags, void** virt_addr_out);
