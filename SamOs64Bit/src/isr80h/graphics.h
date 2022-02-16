@@ -34,5 +34,7 @@ struct userland_graphics* isr80h_graphics_make_userland_metadata(struct process*
 // Lecture 166 - hand the kernel pixel buffer back as a userland mapping.
 struct interrupt_frame;
 void* isr80h_command20_graphics_pixels_get(struct interrupt_frame* frame);
+// Lecture 171 - userland creates a relative graphics surface.
+void* isr80h_command22_graphics_create(struct interrupt_frame* frame);
 
 #endif
