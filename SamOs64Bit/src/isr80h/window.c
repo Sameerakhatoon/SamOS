@@ -177,3 +177,49 @@ void* isr80h_command23_window_redraw_region(struct interrupt_frame* frame){
     window_redraw_body_region(kern_window, rect_x, rect_y, rect_width, rect_height);
     return NULL;
 }
+
+// Lecture 173 - title-setter helper. Upstream typo: the
+// function is spelled `isr90h_command24_update_window_title`
+// (90h vs 80h). Preserved verbatim per the project rule on
+// upstream identifiers.
+void* isr90h_command24_update_window_title(struct window* window,
+                                           struct interrupt_frame* frame){
+    int res = 0;
+    const char* title_ptr = task_virtual_address_to_physical(task_current(),
+                                                             task_get_stack_item(task_current(), 2));
+    if(!title_ptr){
+        res = -EINVARG;
+        goto out;
+    }
+    window_title_set(window, title_ptr);
+out:
+    return (void*)(intptr_t)res;
+}
+
+// Lecture 173 - dispatch updates by subcommand. Stack: [0] is
+// the update_type, [1] is the userland window handle, [2..] are
+// subcommand-specific payload pointers.
+void* isr80h_command24_update_window(struct interrupt_frame* frame){
+    int res = 0;
+    struct window* kern_window = NULL;
+    uint64_t update_type = (uint64_t)task_get_stack_item(task_current(), 0);
+    void* user_win_ptr   = task_get_stack_item(task_current(), 1);
+    if(!user_win_ptr){
+        res = -EINVARG;
+        goto out;
+    }
+    kern_window = isr80h_window_from_process_window_virt(user_win_ptr);
+    if(!kern_window){
+        res = -EINVARG;
+        goto out;
+    };
+    switch(update_type){
+        case ISR80H_WINDOW_UPDATE_TITLE:
+            res = (int)(intptr_t)isr90h_command24_update_window_title(kern_window, frame);
+            break;
+        default:
+            res = -EINVARG;
+    }
+out:
+    return (void*)(int64_t)res;
+}
