@@ -14,5 +14,7 @@
 #define EOUTOFRANGE    10  // L64 - FAT cluster chain reached end
 #define ENOTFOUND      11  // L115 - process allocation lookup miss
 #define ETIMEOUT       12  // L137 - PS/2 mouse wait timeout
+#define EINVAL         13  // L178 - PCI ECAM/MCFG invalid args
+#define ENOENT         14  // L178 - PCI ECAM no ranges installed
 
 #endif
