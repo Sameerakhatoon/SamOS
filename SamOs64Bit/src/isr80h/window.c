@@ -178,11 +178,11 @@ void* isr80h_command23_window_redraw_region(struct interrupt_frame* frame){
     return NULL;
 }
 
-// Lecture 173 - title-setter helper. Upstream typo: the
-// function is spelled `isr90h_command24_update_window_title`
-// (90h vs 80h). Preserved verbatim per the project rule on
-// upstream identifiers.
-void* isr90h_command24_update_window_title(struct window* window,
+// Lecture 173 / 180 - title-setter helper. L173 upstream had
+// the function spelled `isr90h_command24_update_window_title`
+// (90h vs 80h). L180 fixed it to `isr80h_`. SamOs follows the
+// upstream fix.
+void* isr80h_command24_update_window_title(struct window* window,
                                            struct interrupt_frame* frame){
     int res = 0;
     const char* title_ptr = task_virtual_address_to_physical(task_current(),
@@ -215,7 +215,7 @@ void* isr80h_command24_update_window(struct interrupt_frame* frame){
     };
     switch(update_type){
         case ISR80H_WINDOW_UPDATE_TITLE:
-            res = (int)(intptr_t)isr90h_command24_update_window_title(kern_window, frame);
+            res = (int)(uintptr_t)isr80h_command24_update_window_title(kern_window, frame);
             break;
         default:
             res = -EINVARG;

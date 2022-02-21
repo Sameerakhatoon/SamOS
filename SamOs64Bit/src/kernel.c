@@ -26,6 +26,7 @@
 #include "task/process.h"
 #include "isr80h/isr80h.h"
 #include "io/tsc.h"           // L129 - udelay
+#include "io/pci.h"           // L180 - pci_init
 #include "keyboard/keyboard.h"
 #include "fs/file.h"
 #include "fs/pparser.h"
@@ -198,6 +199,9 @@ void kernel_main(void)
     // L38 div_test smoke is gone; from L50 onward the test
     // token is "tss ready".
     idt_init();
+
+    // Lecture 180 - enumerate PCI devices once the IDT is up.
+    pci_init();
 
     // Lecture 57 - subsystem initializers. fs_init wires the
     // generic VFS layer (registers the FAT16 driver). disk_
