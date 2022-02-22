@@ -82,7 +82,12 @@ int gpt_mount_partitions(struct gpt_partition_table_header* partition_header){
         // L77 - depends on disk_create_new + PEACHOS_DISK_TYPE_PARTITION
         // (= SAMOS_DISK_TYPE_PARTITION in our prefix scheme) which the
         // L78 virtual-disk patch adds.
-        res = disk_create_new(SAMOS_DISK_TYPE_PARTITION, entry->starting_lba, entry->ending_lba, gpt_primary_disk->sector_size, NULL);
+        // Lecture 183 - new disk_create_new signature: pass
+        // driver=NULL, hardware_disk=primary, driver_private=NULL.
+        res = disk_create_new(NULL, gpt_primary_disk,
+                              SAMOS_DISK_TYPE_PARTITION,
+                              entry->starting_lba, entry->ending_lba,
+                              gpt_primary_disk->sector_size, NULL, NULL);
         if(res < 0){
             goto out;
         }

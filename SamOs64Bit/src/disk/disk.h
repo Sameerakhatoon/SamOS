@@ -17,11 +17,19 @@ typedef unsigned int SAMOS_DISK_TYPE;
 // FAT16 volume label matches.
 #define SAMOS_KERNEL_FILESYSTEM_NAME "SAMOS      "
 
+// Lecture 183 - forward decl for the driver pointer added below.
+struct disk_driver;
+
 struct disk {
     SAMOS_DISK_TYPE     type;
     int                 sector_size;
     int                 id;
     struct filesystem*  filesystem;
+
+    // Lecture 183 - back-pointer to the physical disk this disk
+    // is hosted on. Partition disks point at their hardware
+    // disk; REAL disks point at themselves.
+    struct disk*        hardware_disk;
 
     // Lecture 78 - LBA bounds. Set both to zero for the
     // primary disk; all bounds checking is then bypassed.
@@ -29,17 +37,28 @@ struct disk {
     size_t              ending_lba;
 
     void*               fs_private;
+
+    // Lecture 183 - disk-driver-side opaque pointer (PATA per-
+    // channel state, NVME submission queue, etc).
+    void*               driver_private;
 };
 
 void         disk_search_and_init();
 struct disk* disk_get(int index);
 int          disk_read_block(struct disk* idisk, unsigned int lba, int total, void* buf);
 
-// Lecture 78 - virtual-disk constructor. Pushes a new struct disk
-// onto the disk_vector. type=REAL for physical, PARTITION for a
-// virtual disk that spans a GPT entry's LBA range.
-int          disk_create_new(int type, int starting_lba, int ending_lba,
-                             size_t sector_size, struct disk** disk_out);
+// Lecture 78 / 183 - virtual-disk constructor. L183 widens the
+// signature with a `disk_driver*`, a `hardware_disk*`, and a
+// `driver_private` pointer. type=REAL forces hardware_disk=self.
+int          disk_create_new(struct disk_driver* driver,
+                             struct disk* hardware_disk,
+                             int type, int starting_lba, int ending_lba,
+                             size_t sector_size,
+                             void* driver_private_data,
+                             struct disk** disk_out);
+
+// Lecture 183 - accessor for the disk's hardware backing.
+struct disk* disk_hardware_disk(struct disk* disk);
 
 struct disk* disk_primary(void);
 struct disk* disk_primary_fs_disk(void);

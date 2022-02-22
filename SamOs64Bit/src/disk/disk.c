@@ -63,19 +63,49 @@ int disk_read_sector(int lba, int total, void* buf){
     return 0;
 }
 
-int disk_create_new(int type, int starting_lba, int ending_lba,
-                    size_t sector_size, struct disk** disk_out){
+// Lecture 183 - return the hardware-disk back-pointer.
+struct disk* disk_hardware_disk(struct disk* disk){
+    return disk->hardware_disk;
+}
+
+int disk_create_new(struct disk_driver* driver,
+                    struct disk* hardware_disk,
+                    int type, int starting_lba, int ending_lba,
+                    size_t sector_size, void* driver_private_data,
+                    struct disk** disk_out){
     int res = 0;
     struct disk* disk = kzalloc(sizeof(struct disk));
     if(!disk){
         res = -ENOMEM;
         goto out;
     }
-    disk->type         = type;
-    disk->id           = vector_count(disk_vector);
-    disk->sector_size  = sector_size;
-    disk->starting_lba = starting_lba;
-    disk->ending_lba   = ending_lba;
+
+    // Lecture 183 - REAL disks own themselves; passing in a
+    // separate hardware_disk for a REAL disk is illegal. A
+    // partition disk must point at a REAL backing disk.
+    if(hardware_disk && type == SAMOS_DISK_TYPE_REAL){
+        res = -EINVARG;
+        goto out;
+    }
+    if(type == SAMOS_DISK_TYPE_REAL){
+        hardware_disk = disk;
+    }
+    if(hardware_disk == NULL){
+        res = -EINVARG;
+        goto out;
+    }
+    if(hardware_disk->type != SAMOS_DISK_TYPE_REAL){
+        res = -EINVARG;
+        goto out;
+    }
+
+    disk->type           = type;
+    disk->id             = vector_count(disk_vector);
+    disk->sector_size    = sector_size;
+    disk->starting_lba   = starting_lba;
+    disk->ending_lba     = ending_lba;
+    disk->driver_private = driver_private_data;
+    disk->hardware_disk  = hardware_disk;
 
     // Try to attach a filesystem driver. Not having one is
     // not an error - some disks (raw scratch partitions) don't
@@ -116,7 +146,10 @@ void disk_search_and_init(){
         res = -ENOMEM;
         goto out;
     }
-    res = disk_create_new(SAMOS_DISK_TYPE_REAL, 0, 0, SAMOS_SECTOR_SIZE,
+    // Lecture 183 - REAL disks pass driver=NULL and
+    // hardware_disk=NULL; the new disk becomes its own hw disk.
+    res = disk_create_new(NULL, NULL, SAMOS_DISK_TYPE_REAL, 0, 0,
+                          SAMOS_SECTOR_SIZE, NULL,
                           &disk_primary_handle);
     if(res < 0){
         goto out;
