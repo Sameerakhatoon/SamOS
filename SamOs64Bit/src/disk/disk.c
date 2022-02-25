@@ -68,6 +68,35 @@ struct disk* disk_hardware_disk(struct disk* disk){
     return disk->hardware_disk;
 }
 
+// Lecture 186 - delegate partition creation to the disk's
+// driver. The driver vtable is responsible for spinning up the
+// virtual disk that maps starting_lba..ending_lba.
+int disk_create_partition(struct disk* disk, int starting_lba, int ending_lba,
+                          struct disk** partition_disk_out){
+    return disk_driver_mount_partition(disk->driver, disk, starting_lba, ending_lba,
+                                       partition_disk_out);
+}
+
+// Lecture 186 - extracted FS-mount step. disk_create_new used
+// to inline this; L186 splits it so callers can choose when to
+// run fs_resolve relative to driver-side mount work.
+int disk_filesystem_mount(struct disk* disk){
+    disk->filesystem = fs_resolve(disk);
+    if(disk->filesystem){
+        char fs_name[11] = {0};
+        char primary_drive_fs_name[11] = {0};
+        strncpy(primary_drive_fs_name, SAMOS_KERNEL_FILESYSTEM_NAME,
+                strlen(SAMOS_KERNEL_FILESYSTEM_NAME));
+        if(disk->filesystem->volume_name){
+            disk->filesystem->volume_name(disk->fs_private, fs_name, sizeof(fs_name));
+            if(strncmp(fs_name, primary_drive_fs_name, sizeof(fs_name)) == 0){
+                primary_fs_disk = disk;
+            }
+        }
+    }
+    return 0;
+}
+
 int disk_create_new(struct disk_driver* driver,
                     struct disk* hardware_disk,
                     int type, int starting_lba, int ending_lba,
@@ -104,28 +133,22 @@ int disk_create_new(struct disk_driver* driver,
     disk->sector_size    = sector_size;
     disk->starting_lba   = starting_lba;
     disk->ending_lba     = ending_lba;
+    disk->driver         = driver;
     disk->driver_private = driver_private_data;
     disk->hardware_disk  = hardware_disk;
 
-    // Try to attach a filesystem driver. Not having one is
-    // not an error - some disks (raw scratch partitions) don't
-    // hold filesystems.
-    disk->filesystem = fs_resolve(disk);
-    if(disk->filesystem){
-        char fs_name[11] = {0};
-        char primary_drive_fs_name[11] = {0};
-        strncpy(primary_drive_fs_name, SAMOS_KERNEL_FILESYSTEM_NAME,
-                strlen(SAMOS_KERNEL_FILESYSTEM_NAME));
-        // Lecture 84 - the volume_name vtable slot is live;
-        // ask the filesystem for its label and match it against
-        // the kernel-expected name. Falls back to "first disk
-        // wins" only when no disk matches.
-        if(disk->filesystem->volume_name){
-            disk->filesystem->volume_name(disk->fs_private, fs_name, sizeof(fs_name));
-            if(strncmp(fs_name, primary_drive_fs_name, sizeof(fs_name)) == 0){
-                primary_fs_disk = disk;
-            }
-        }
+    // Lecture 186 - filesystem mount moves out of this function
+    // into disk_filesystem_mount. Callers run it after the
+    // driver-side mount work completes. SamOs DEVIATION: the
+    // bootstrap caller still has no driver registered (L189
+    // wires PATA), so we run fs_resolve inline when the disk
+    // arrived without a driver to keep the kernel boot path
+    // alive until then. Upstream drops the inline call and
+    // crashes during early boot, since fs_resolve is normally
+    // called from disk_filesystem_mount that the L189 PATA
+    // bootstrap will invoke.
+    if(!driver){
+        disk_filesystem_mount(disk);
         if(primary_fs_disk == NULL){
             primary_fs_disk = disk;
         }
@@ -184,6 +207,16 @@ int disk_read_block(struct disk* idisk, unsigned int lba, int total, void* buf){
         if(idisk->starting_lba != 0 && idisk->ending_lba != 0){
             return -EIO;
         }
+    }
+    // Lecture 186 - route through the disk-driver vtable when
+    // a driver is registered. SamOs DEVIATION: fall back to the
+    // direct ATA path when the disk predates L189's PATA driver
+    // registration so the bootstrap disk0 keeps working.
+    if(idisk->driver){
+        if(!idisk->driver->functions.read){
+            return -EIO;
+        }
+        return idisk->driver->functions.read(idisk, absolute_lba, total, buf);
     }
     return disk_read_sector(absolute_lba, total, buf);
 }
