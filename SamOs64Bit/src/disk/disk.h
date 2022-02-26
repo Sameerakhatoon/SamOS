@@ -48,7 +48,9 @@ struct disk {
     void*               driver_private;
 };
 
-void         disk_search_and_init();
+// Lecture 189 - returns int now (0 OK / negative on error).
+int          disk_search_and_init();
+int          disk_mount_all();
 struct disk* disk_get(int index);
 int          disk_read_block(struct disk* idisk, unsigned int lba, int total, void* buf);
 
