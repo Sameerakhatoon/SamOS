@@ -117,6 +117,10 @@ int pci_device_get(size_t index, struct pci_device** device_out);
 int pci_device_base_class(struct pci_device* device);
 int pci_device_subclass(struct pci_device* device);
 
-void bus_enable_bus_master(struct pci_device* device);
+// Lecture 193 - upstream renames the public decl from
+// `bus_enable_bus_master` to `pci_enable_bus_master`. SamOs
+// follows the rename; the L180 forwarder stays in pci.c for
+// any callers still spelling the old name.
+void pci_enable_bus_master(struct pci_device* d);
 
 #endif
