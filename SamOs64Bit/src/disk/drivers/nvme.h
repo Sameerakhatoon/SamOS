@@ -59,13 +59,10 @@ struct nvme_submission_queue_entry {
 #define NVME_COMPLETION_QUEUE_STATUS(e) \
     (((e)->status_phase_and_command_identifier >> 17) & 0x7FFFU)
 
-// Lecture 190 - upstream defined the struct under the typo'd
-// name `nvme_compeltion_queue_entry`. Preserved verbatim per
-// the project rule. The correctly-spelled pointer type below
-// (`struct nvme_completion_queue_entry*`) lives as an
-// incomplete-type pointer until a future lecture fixes the
-// typo.
-struct nvme_compeltion_queue_entry {
+// Lecture 190 / 192 - L190 originally defined this struct
+// under the typo'd name `nvme_compeltion_queue_entry`. L192
+// fixes the spelling.
+struct nvme_completion_queue_entry {
     uint32_t command_specific;
     uint32_t command_specific2;
     uint32_t sq_iden_and_head_ptr;
@@ -73,8 +70,6 @@ struct nvme_compeltion_queue_entry {
 } __attribute__((packed));
 
 struct pci_device;
-struct nvme_completion_queue_entry;  // L190 - incomplete; matches the
-                                     // typo gap above.
 
 struct nvme_disk_driver_private {
     struct pci_device* device;
