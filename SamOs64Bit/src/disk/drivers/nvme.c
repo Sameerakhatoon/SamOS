@@ -243,13 +243,9 @@ static void* nvme_pci_mmio_base(struct pci_device* dev){
     return (void*)(uintptr_t)((high << 32) | low);
 }
 
-// Lecture 193 - shim for the upstream `nvme_disk_driver_umount`
-// typo (missing 'n'). The body forwards to the L192-forward-
-// declared `nvme_disk_driver_unmount` so call sites keep the
-// upstream identifier verbatim.
-static void nvme_disk_driver_umount(struct disk* disk){
-    nvme_disk_driver_unmount(disk);
-}
+// Lecture 195 - L193 shipped a `nvme_disk_driver_umount` (no
+// 'n') call site. L195 fixes it to `nvme_disk_driver_unmount`.
+// SamOs follows the fix and drops the typo'd shim.
 
 static int nvme_disk_driver_mount_for_device(struct disk_driver* driver,
                                              struct pci_device* dev){
@@ -300,7 +296,7 @@ static int nvme_disk_driver_mount_for_device(struct disk_driver* driver,
     p->submission_queue.ptr = kzalloc(sizeof(*p->submission_queue.ptr) * p->submission_queue.size);
     p->completion_queue.ptr = kzalloc(sizeof(*p->completion_queue.ptr) * p->completion_queue.size);
     if(!p->submission_queue.ptr || !p->completion_queue.ptr){
-        nvme_disk_driver_umount(disk);
+        nvme_disk_driver_unmount(disk);
         return -ENOMEM;
     }
 
@@ -479,7 +475,9 @@ static int nvme_disk_driver_read(struct disk* disk, unsigned int lba,
         if(rc < 0){
             return rc;
         }
-        (void)(slba + nlb);  // upstream wrote `slba + nlb;` (dead expr)
+        // Lecture 195 - upstream L194 wrote `slba + nlb;` (a
+        // dead expression). L195 fixes it to `slba += nlb;`.
+        slba += nlb;
         p += (size_t)nlb * NVME_SECTOR_SIZE;
         remaining -= nlb;
     }
