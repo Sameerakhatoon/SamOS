@@ -228,6 +228,15 @@ void kernel_main(void)
     // mandatory.
     terminal_system_setup();
 
+    // Lecture 196 - keyboard_init must run before
+    // window_system_initialize_stage2 because L175's stage 2
+    // registers a window-level keyboard listener and
+    // keyboard_register_handler resolves NULL to
+    // keyboard_default(), which is the head of the
+    // inserted-keyboards list. Upstream L196 hoists keyboard_init
+    // up here from later in kernel_main.
+    keyboard_init();
+
     // Lecture 122 - bring up the window system after the
     // graphics terminal infrastructure but before any user-mode
     // launch. The stage-2 hook is where mouse + keyboard
@@ -301,10 +310,12 @@ void kernel_main(void)
     isr80h_register_commands();
     print("register isr80h\n");
 
-    // Lecture 58 - initialise the PS/2 keyboard driver. Won't
-    // actually receive scancodes until IRQ1 is unmasked at the
-    // PIC AND interrupts are sti'd, both still pending.
-    keyboard_init();
+    // Lecture 58 / 196 - keyboard_init was originally called
+    // here. L196 moves it before window_system_initialize_stage2
+    // so the keyboard listener registration succeeds. The call
+    // up at the top of kernel_main is the live one; this site
+    // is left as a marker so the audit trail records the move.
+    // keyboard_init();
 
     print("tss ready\n");
 
