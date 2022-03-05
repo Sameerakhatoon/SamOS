@@ -7,6 +7,7 @@
 #include "file.h" // L105 - command 10 fopen
 #include "window.h" // L154 - command 16 window_create
 #include "graphics.h" // L166 - command 20 graphics pixels
+#include "time.h"     // L198 - command 25 udelay
 
 void isr80h_register_commands(){
     isr80h_register_command(SYSTEM_COMMAND0_SUM,    isr80h_command0_sum);
@@ -34,4 +35,5 @@ void isr80h_register_commands(){
     isr80h_register_command(SYSTEM_COMMAND22_GRAPHICS_CREATE,      isr80h_command22_graphics_create);
     isr80h_register_command(SYSTEM_COMMAND23_WINDOW_REDRAW_REGION, isr80h_command23_window_redraw_region);
     isr80h_register_command(SYSTEM_COMMAND24_UPDATE_WINDOW,        isr80h_command24_update_window);
+    isr80h_register_command(SYSTEM_COMMAND25_UDELAY,               isr80h_command25_udelay);
 }

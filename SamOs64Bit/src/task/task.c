@@ -301,14 +301,12 @@ bool task_asleep(struct task* task){
     return task->sleeping.sleep_until_microseconds > tsc_microseconds();
 }
 
-// Lecture 197 - park the task until tsc_microseconds() exceeds
-// the deadline. Upstream bug preserved: the deadline is set to
-// `tsc_microseconds() * microseconds` (multiplication). The
-// obvious intent is `+ microseconds`. As written most callers
-// will sleep almost forever; preserved verbatim per the project
-// rule.
+// Lecture 197 / 198 - park the task until tsc_microseconds()
+// exceeds the deadline. L197 shipped the deadline as
+// `tsc_microseconds() * microseconds` (multiplication, bug).
+// L198 part 2 fixes it to `+ microseconds`. SamOs follows.
 void task_sleep(struct task* task, TIME_MICROSECONDS microseconds){
-    task->sleeping.sleep_until_microseconds = tsc_microseconds() * microseconds;
+    task->sleeping.sleep_until_microseconds = tsc_microseconds() + microseconds;
 }
 
 // Lecture 197 - rotate from the current task forward in the
