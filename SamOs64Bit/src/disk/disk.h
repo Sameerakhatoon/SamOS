@@ -20,6 +20,8 @@ typedef unsigned int SAMOS_DISK_TYPE;
 
 // Lecture 183 - forward decl for the driver pointer added below.
 struct disk_driver;
+// Lecture 203 - forward decl for the per-disk stream cache.
+struct disk_stream_cache;
 
 struct disk {
     SAMOS_DISK_TYPE     type;
@@ -35,6 +37,10 @@ struct disk {
     // is hosted on. Partition disks point at their hardware
     // disk; REAL disks point at themselves.
     struct disk*        hardware_disk;
+
+    // Lecture 203 - per-disk stream cache. The L204+ source
+    // populates it lazily on first cached read.
+    struct disk_stream_cache* cache;
 
     // Lecture 78 - LBA bounds. Set both to zero for the
     // primary disk; all bounds checking is then bypassed.
