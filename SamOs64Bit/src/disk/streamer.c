@@ -102,6 +102,85 @@ void diskstreamer_cache_bucket_level3_free(struct disk_stream_cache_bucket_level
     kfree(level3);
 }
 
+// Lecture 205 - round-robin eviction. When the queue is full
+// the oldest bucket's refcount drops; on zero we free it.
+int diskstreamer_cache_round_robin_add(struct disk_stream_cache* cache,
+                                       struct disk_stream_cache_bucket_level3* level3){
+    int res = 0;
+    int index = cache->mem_roundrobin.pos % DISK_STREAM_CACHE_ROUNDROBIN_MAX;
+    struct disk_stream_cache_bucket_level3* old_elem = cache->mem_roundrobin.queue[index];
+    if(old_elem){
+        old_elem->roundrobin_count--;
+        if(old_elem->roundrobin_count == 0){
+            diskstreamer_cache_bucket_level3_free(old_elem);
+        }
+    }
+    cache->mem_roundrobin.queue[index] = level3;
+    cache->mem_roundrobin.queue[index]->roundrobin_count++;
+    cache->mem_roundrobin.pos++;
+    return res;
+}
+
+// Lecture 205 - look up the cache sector for `pos`. Walks
+// level1 -> level2 -> level3 -> sector. Returns
+// DISK_STREAMER_CACHE_STATUS_NEW_CACHE_ENTRY when the slot was
+// freshly allocated (caller must populate it) or
+// DISK_STREAMER_CACHE_STATUS_CACHE_FOUND on hit.
+//
+// Upstream uses -EINVAL / -ENOENT here; SamOs's status.h
+// provides EINVAL / ENOENT (added at L178).
+int diskstreamer_cache_find(struct disk* disk, int pos,
+                            struct disk_stream_cache_sector** cache_sector_out){
+    int res = DISK_STREAMER_CACHE_STATUS_CACHE_FOUND;
+    struct disk_stream_cache* cache = disk->cache;
+    if(!cache){
+        return -ENOENT;
+    }
+
+    long level1_size = DISK_STREAM_BUCKET1_BYTE_SIZE(disk->sector_size);
+    long level2_size = DISK_STREAM_BUCKET2_BYTE_SIZE(disk->sector_size);
+    long level3_size = DISK_STREAM_BUCKET3_BYTE_SIZE(disk->sector_size);
+
+    long level1_bucket = pos / level1_size;
+    long pos_in_level1 = pos % level1_size;
+    long level2_bucket = pos_in_level1 / level2_size;
+    long pos_in_level2 = pos_in_level1 % level2_size;
+    long level3_bucket = pos_in_level2 / level3_size;
+
+    struct disk_stream_cache_bucket_level1* level1 =
+        diskstreamer_cache_bucket_level1_get(cache, level1_bucket);
+    if(!level1){
+        return -EINVAL;
+    }
+    struct disk_stream_cache_bucket_level2* level2 =
+        diskstreamer_cache_bucket_level2_get(level1, level2_bucket);
+    if(!level2){
+        return -EINVAL;
+    }
+    struct disk_stream_cache_bucket_level3* level3 =
+        diskstreamer_cache_bucket_level3_get(level2, level3_bucket);
+    if(!level3){
+        return -EINVAL;
+    }
+
+    long pos_in_level3 = pos_in_level2 % level3_size;
+    int byte_offset    = (pos_in_level3 % (sizeof(level3->sectors) * disk->sector_size));
+    int sector_index   = (byte_offset / disk->sector_size);
+    if(!level3->sectors[sector_index]){
+        level3->sectors[sector_index] = kzalloc(sizeof(struct disk_stream_cache_sector));
+        if(!level3->sectors[sector_index]){
+            return -ENOMEM;
+        }
+        level3->total_sectors++;
+        diskstreamer_cache_round_robin_add(cache, level3);
+        res = DISK_STREAMER_CACHE_STATUS_NEW_CACHE_ENTRY;
+    }
+    if(cache_sector_out){
+        *cache_sector_out = level3->sectors[sector_index];
+    }
+    return res;
+}
+
 struct disk_stream* diskstreamer_new(int disk_id){
     struct disk* disk = disk_get(disk_id);
     if(!disk){
