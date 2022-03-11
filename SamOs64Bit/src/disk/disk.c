@@ -27,6 +27,7 @@
 #include "memory/heap/kheap.h"
 #include "string/string.h"
 #include "lib/vector/vector.h"
+#include "disk/streamer.h"     // L206 - diskstreamer_cache_new
 
 struct vector* disk_vector = NULL;
 
@@ -73,6 +74,18 @@ struct disk* disk_hardware_disk(struct disk* disk){
 // PATA driver source links.
 void* disk_private_data_driver(struct disk* disk){
     return disk->driver_private;
+}
+
+// Lecture 206 - absolute-LBA + byte-offset helpers used by the
+// stream cache lookup.
+long disk_real_sector(struct disk* idisk, unsigned int lba){
+    size_t absolute_lba = idisk->starting_lba + lba;
+    return absolute_lba;
+}
+
+long disk_real_offset(struct disk* idisk, unsigned int lba){
+    size_t absolute_lba = disk_real_sector(idisk, lba);
+    return absolute_lba * idisk->sector_size;
 }
 
 // Lecture 186 - delegate partition creation to the disk's
@@ -143,6 +156,8 @@ int disk_create_new(struct disk_driver* driver,
     disk->driver         = driver;
     disk->driver_private = driver_private_data;
     disk->hardware_disk  = hardware_disk;
+    // Lecture 206 - allocate the per-disk stream cache eagerly.
+    disk->cache          = diskstreamer_cache_new();
 
     // Lecture 186 - filesystem mount moves out of this function
     // into disk_filesystem_mount. Callers run it after the

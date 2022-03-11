@@ -88,6 +88,11 @@ int          disk_create_partition(struct disk* disk,
 // L188 PATA source links cleanly.)
 void*        disk_private_data_driver(struct disk* disk);
 
+// Lecture 206 - absolute-LBA + byte-offset accessors used by
+// the disk stream cache.
+long         disk_real_sector(struct disk* idisk, unsigned int lba);
+long         disk_real_offset(struct disk* idisk, unsigned int lba);
+
 struct disk* disk_primary(void);
 struct disk* disk_primary_fs_disk(void);
 

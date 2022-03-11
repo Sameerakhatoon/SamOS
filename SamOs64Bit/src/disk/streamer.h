@@ -73,6 +73,9 @@ struct disk_stream {
 //   level 2 index = 30  (32768 * 1024 = 33554432 (32 MB))
 //   level 3 index = 2   (512 * 64 = 32768)
 
+// Lecture 206 - cache allocator exposed for callers (disk.c).
+struct disk_stream_cache* diskstreamer_cache_new();
+
 struct disk_stream* diskstreamer_new(int disk_id);
 // Lecture 83 - bind a streamer directly to an already-resolved
 // disk pointer (e.g. a GPT partition virtual disk). Skips the
