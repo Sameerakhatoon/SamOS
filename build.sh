@@ -32,15 +32,23 @@ CURRENT_DIR=$(pwd)
 # expectation: this script is run from the SamOs project root, which
 # in an EDK2 setup is symlinked under MdeModulePkg/Application/SamOs/.
 #
+# EDK2 toolchain auto-detection. Modern Ubuntu (24+) ships gcc 13
+# which maps to EDK2's GCCNOLTO tag. Older boxes may use GCC5.
+# Override via $EDK2_TOOLCHAIN if needed.
+: "${EDK2_TOOLCHAIN:=GCCNOLTO}"
+: "${EDK2_ROOT:=$HOME/edk2}"
+
 # If EDK2 isn't set up, skip this step and just build the BIOS path.
-if [ -d ../../../BaseTools ]; then
-    cd ../../../
-    export EDK_TOOLS_PATH=$HOME/edk2/BaseTools
+if [ -d "$EDK2_ROOT/BaseTools" ]; then
+    cd "$EDK2_ROOT"
+    export EDK_TOOLS_PATH="$EDK2_ROOT/BaseTools"
     . edksetup.sh BaseTools
-    build
+    build -p MdeModulePkg/MdeModulePkg.dsc \
+          -m MdeModulePkg/Application/SamOs/SamOs.inf \
+          -a X64 -t "$EDK2_TOOLCHAIN"
     cd "$CURRENT_DIR"
 else
-    echo "EDK2 not detected at ../../../BaseTools - skipping UEFI build."
+    echo "EDK2 not detected at $EDK2_ROOT/BaseTools - skipping UEFI build."
     echo "(see file header for setup notes)"
 fi
 
@@ -54,13 +62,14 @@ cd "$CURRENT_DIR"
 # -------------------------------------------------------------------
 # Step 3 (UEFI-only): compose the GPT-partitioned disk image.
 # -------------------------------------------------------------------
-if [ ! -f ../../../Build/MdeModule/DEBUG_GCC/X64/SamOs.efi ]; then
-    echo "SamOs.efi not produced - skipping disk image composition."
+EDK2_OUT="$EDK2_ROOT/Build/MdeModule/DEBUG_${EDK2_TOOLCHAIN}/X64/SamOs.efi"
+if [ ! -f "$EDK2_OUT" ]; then
+    echo "SamOs.efi not produced at $EDK2_OUT - skipping disk image composition."
     echo "BIOS path image is at SamOs64Bit/bin/os.bin (16 MiB)."
     exit 0
 fi
 
-mkdir -p ./bin /mnt/d
+mkdir -p ./bin /tmp/samos-mnt
 
 dd if=/dev/zero bs=1048576 count=700 of=./bin/os.img
 LOOPDEV=$(sudo losetup --find --show --partscan ./bin/os.img)
@@ -80,15 +89,17 @@ lsblk "$LOOPDEV"
 sudo mkfs.vfat -n ABC   "${LOOPDEV}p1"
 sudo mkfs.vfat -n SAMOS "${LOOPDEV}p2"
 
-sudo mount -t vfat "${LOOPDEV}p2" /mnt/d
-# (kernel copy into /mnt/d would go here once the UEFI path actually
-# loads it from p2; in upstream L71 this is just a placeholder.)
-sudo umount /mnt/d
-
-cp ../../../Build/MdeModule/DEBUG_GCC/X64/SamOs.efi ./bin/SamOs.efi
-sudo mkdir -p /mnt/d/EFI/BOOT
-sudo cp ./bin/SamOs.efi /mnt/d/EFI/Boot/BOOTX64.efi
-sudo umount /mnt/d || true
+# Mount the ESP. The UEFI loader reads kernel.bin from the same
+# filesystem it was loaded from (ReadFileFromCurrentFilesystem),
+# so the kernel + user ELFs go HERE, not on partition 2.
+sudo mount -t vfat "${LOOPDEV}p1" /tmp/samos-mnt
+sudo mkdir -p /tmp/samos-mnt/EFI/BOOT
+cp "$EDK2_OUT" ./bin/SamOs.efi
+sudo cp ./bin/SamOs.efi /tmp/samos-mnt/EFI/BOOT/BOOTX64.EFI
+sudo cp ./SamOs64Bit/bin/kernel.bin /tmp/samos-mnt/kernel.bin
+sudo cp ./SamOs64Bit/programs/blank/blank.elf /tmp/samos-mnt/BLANK.ELF || true
+sudo cp ./SamOs64Bit/programs/shell/shell.elf /tmp/samos-mnt/SHELL.ELF || true
+sudo umount /tmp/samos-mnt
 sudo losetup -d "$LOOPDEV"
 
-echo "Build completed"
+echo "Build completed (bin/os.img + bin/SamOs.efi)"

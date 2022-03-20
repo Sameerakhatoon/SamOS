@@ -27,6 +27,7 @@
 #include "isr80h/isr80h.h"
 #include "io/tsc.h"           // L129 - udelay
 #include "io/pci.h"           // L180 - pci_init
+#include "bootmarker.h"       // e2e: stage markers for runtime tests
 #include "keyboard/keyboard.h"
 #include "fs/file.h"
 #include "fs/pparser.h"
@@ -127,6 +128,7 @@ void kernel_main(void)
     // is gone; system_terminal is created later, after the
     // framebuffer-side graphics_setup and font_system_init.
     struct graphics_info* screen_info = NULL;
+    boot_marker_set(BM_STAGE_KERNEL_MAIN, 0);
     print("Hello 64-bit!\n");
 
     // Lecture 18 - read the E820 memory map BEFORE kheap_init.
@@ -176,6 +178,7 @@ void kernel_main(void)
     // switch CR3 to it. The L21 marker print is gone; if we got
     // here without faulting, paging_switch worked.
     paging_switch(kernel_paging_desc);
+    boot_marker_set(BM_STAGE_PAGING_SWITCHED, 0);
 
     // Lecture 32 - hand the live kernel multiheap off to
     // multiheap_ready. Builds shadow heaps for every paging-
@@ -184,6 +187,7 @@ void kernel_main(void)
     // adds. Must run AFTER paging_switch (multiheap_ready
     // panics if no descriptor is loaded).
     kheap_post_paging();
+    boot_marker_set(BM_STAGE_MULTIHEAP_READY, 0);
     print("multiheap ready\n");
 
     // Lecture 87 - bring up the graphics subsystem. The struct
@@ -199,9 +203,11 @@ void kernel_main(void)
     // L38 div_test smoke is gone; from L50 onward the test
     // token is "tss ready".
     idt_init();
+    boot_marker_set(BM_STAGE_IDT_LIVE, 0);
 
     // Lecture 180 - enumerate PCI devices once the IDT is up.
     pci_init();
+    boot_marker_set(BM_STAGE_PCI_SCANNED, (uint32_t)pci_device_count());
 
     // Lecture 57 - subsystem initializers. fs_init wires the
     // generic VFS layer (registers the FAT16 driver). disk_
@@ -209,7 +215,10 @@ void kernel_main(void)
     // and binds the filesystem driver to each. After this we
     // can fopen("0:/foo") from kernel context.
     fs_init();
+    boot_marker_set(BM_STAGE_FS_RESOLVED, 0);
     disk_search_and_init();
+    boot_marker_set(BM_STAGE_DISK_INITED,
+                    disk_primary_fs_disk() ? (uint32_t)disk_primary_fs_disk()->id + 1 : 0);
 
     // Lecture 82 - now that disks are enumerated, parse GPT
     // headers and spin up a virtual disk per partition.
@@ -236,6 +245,7 @@ void kernel_main(void)
     // inserted-keyboards list. Upstream L196 hoists keyboard_init
     // up here from later in kernel_main.
     keyboard_init();
+    boot_marker_set(BM_STAGE_KEYBOARD_INIT, 0);
 
     // Lecture 122 - bring up the window system after the
     // graphics terminal infrastructure but before any user-mode
@@ -243,6 +253,7 @@ void kernel_main(void)
     // listener registration will land in later lectures.
     window_system_initialize();
     window_system_initialize_stage2();
+    boot_marker_set(BM_STAGE_WINDOW_STAGE2, 0);
 
     // Lecture 150 - mouse + graphics stage-2 setup. The mouse
     // system loads static drivers (TODO L137 PS/2 hook) and
@@ -250,6 +261,8 @@ void kernel_main(void)
     mouse_system_init();
     mouse_system_load_static_drivers();
     graphics_setup_stage_two(&default_graphics_info);
+    boot_marker_set(BM_STAGE_GRAPHICS_UP,
+                    (uint32_t)((uintptr_t)default_graphics_info.framebuffer & 0xFFFFFFFFu));
 
     struct font* system_font_local = font_get_system_font();
     if(!system_font_local){
@@ -300,6 +313,7 @@ void kernel_main(void)
     // Lecture 114 - build the process slot vector before any
     // process_load can touch it.
     process_system_init();
+    boot_marker_set(BM_STAGE_PROCESS_INIT, 0);
 
     print("tss load was fine\n");
 
@@ -308,6 +322,7 @@ void kernel_main(void)
     // isr80h_commands[] table; isr80h_handler dispatches a
     // user-supplied command id into that table on each int 0x80.
     isr80h_register_commands();
+    boot_marker_set(BM_STAGE_ISR80H_READY, BM_STAGE_MAX - 1);
     print("register isr80h\n");
 
     // Lecture 58 / 196 - keyboard_init was originally called
