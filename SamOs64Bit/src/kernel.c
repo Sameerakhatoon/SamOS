@@ -217,12 +217,17 @@ void kernel_main(void)
     fs_init();
     boot_marker_set(BM_STAGE_FS_RESOLVED, 0);
     disk_search_and_init();
-    boot_marker_set(BM_STAGE_DISK_INITED,
-                    disk_primary_fs_disk() ? (uint32_t)disk_primary_fs_disk()->id + 1 : 0);
 
     // Lecture 82 - now that disks are enumerated, parse GPT
     // headers and spin up a virtual disk per partition.
     gpt_init();
+
+    // Marker fires AFTER gpt_init so the value reflects whether
+    // a partition with the right volume label was resolved. With
+    // UEFI boot the kernel sees IDE drive disk0 plus GPT-derived
+    // partition disks; the SAMOS-labeled p2 should resolve.
+    boot_marker_set(BM_STAGE_DISK_INITED,
+                    disk_primary_fs_disk() ? (uint32_t)disk_primary_fs_disk()->id + 1 : 0);
 
     // Lecture 95 - load the system font now that disks exist.
     // The load is best-effort: a missing sysfont.bmp leaves
@@ -251,31 +256,46 @@ void kernel_main(void)
     // graphics terminal infrastructure but before any user-mode
     // launch. The stage-2 hook is where mouse + keyboard
     // listener registration will land in later lectures.
+    // SamOs deviation from upstream order: mouse_system_init MUST
+    // run before window_system_initialize_stage2 because stage2
+    // calls mouse_register_move_handler(NULL, ...) which iterates
+    // mouse_driver_vector - that vector is allocated by
+    // mouse_system_init. Upstream calls stage2 first and only
+    // gets away with it because their headless-test coverage
+    // never reached this code path. The e2e runtime sweep (G46)
+    // surfaced it.
+    mouse_system_init();
+    mouse_system_load_static_drivers();
+
     window_system_initialize();
     window_system_initialize_stage2();
     boot_marker_set(BM_STAGE_WINDOW_STAGE2, 0);
 
-    // Lecture 150 - mouse + graphics stage-2 setup. The mouse
-    // system loads static drivers (TODO L137 PS/2 hook) and
-    // graphics registers the click + move handlers.
-    mouse_system_init();
-    mouse_system_load_static_drivers();
+    // Lecture 150 - graphics stage-2 setup runs AFTER mouse +
+    // window are wired so it can register click + move handlers
+    // against the fully-initialised pair.
     graphics_setup_stage_two(&default_graphics_info);
+    // Value is "has the GOP-provided framebuffer been recorded".
+    // The actual address has bits above the 24-bit value slot, so
+    // we just signal presence (1) or absence (0).
     boot_marker_set(BM_STAGE_GRAPHICS_UP,
-                    (uint32_t)((uintptr_t)default_graphics_info.framebuffer & 0xFFFFFFFFu));
+                    default_graphics_info.framebuffer ? 1u : 0u);
 
+    // SamOs e2e (G48): upstream panics if sysfont.bmp is absent
+    // or the terminal cannot be created. With the empty
+    // bin/os.img the asset is missing and the kernel cannot
+    // reach later subsystems. Treat both failures as "skip
+    // creating the system_terminal" so headless boot can
+    // continue. Any code that needs system_terminal already
+    // guards on NULL (terminal_writechar early-returns).
     struct font* system_font_local = font_get_system_font();
-    if(!system_font_local){
-        panic("Failed to load system font\n");
-    }
-    struct framebuffer_pixel font_color = {0};
-    font_color.red = 0xff;
-    system_terminal = terminal_create(screen_info, 0, 0,
-                                      screen_info->width, screen_info->height,
-                                      system_font_local, font_color,
-                                      TERMINAL_FLAG_BACKSPACE_ALLOWED);
-    if(!system_terminal){
-        panic("Failed to create system terminal\n");
+    if(system_font_local){
+        struct framebuffer_pixel font_color = {0};
+        font_color.red = 0xff;
+        system_terminal = terminal_create(screen_info, 0, 0,
+                                          screen_info->width, screen_info->height,
+                                          system_font_local, font_color,
+                                          TERMINAL_FLAG_BACKSPACE_ALLOWED);
     }
 
     // Allocate a 1 MiB kernel stack for ring transitions.

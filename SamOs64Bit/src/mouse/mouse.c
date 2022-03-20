@@ -159,7 +159,9 @@ void mouse_unregister_move_handler(struct mouse* mouse,
     }
     size_t total_mice = vector_count(mouse_driver_vector);
     if(total_mice == 0){
-        panic("NO Mice driers are registered\n"); // sic - upstream typo
+        return; // SamOs e2e (G47): upstream panics; we tolerate
+                // headless boot with no PS/2 mouse registered.
+                // Original: panic("NO Mice driers are registered\n"); (sic)
     }
     for(size_t i = 0; i < total_mice; i++){
         struct mouse* _mouse = NULL;
@@ -179,7 +181,8 @@ void mouse_unregister_click_handler(struct mouse* mouse,
     }
     size_t total_mice = vector_count(mouse_driver_vector);
     if(total_mice == 0){
-        panic("NO mice drivers are reigstered\n"); // sic - upstream typo
+        return; // SamOs e2e (G47): see _move_handler equivalent above.
+                // Original: panic("NO mice drivers are reigstered\n"); (sic)
     }
     for(size_t i = 0; i < total_mice; i++){
         struct mouse* _mouse = NULL;
@@ -198,7 +201,7 @@ void mouse_register_move_handler(struct mouse* mouse,
     }
     size_t total_mice = vector_count(mouse_driver_vector);
     if(total_mice == 0){
-        panic("NO Mice drivers are registered\n");
+        return; // SamOs e2e (G47): see unregister equivalents above.
     }
     for(size_t i = 0; i < total_mice; i++){
         struct mouse* _mouse = NULL;
@@ -217,7 +220,7 @@ void mouse_register_click_handler(struct mouse* mouse,
     }
     size_t total_mice = vector_count(mouse_driver_vector);
     if(total_mice == 0){
-        panic("NO mice drivers installed\n");
+        return; // SamOs e2e (G47): see _move_handler equivalent above.
     }
     for(size_t i = 0; i < total_mice; i++){
         struct mouse* _mouse = NULL;

@@ -55,7 +55,13 @@ typedef enum {
     BM_STAGE_KEYBOARD_INIT    = 10,  // keyboard_init returned
     BM_STAGE_WINDOW_STAGE2    = 11,  // window_system_initialize_stage2 done
     BM_STAGE_ISR80H_READY     = 12,  // isr80h_register_commands done
-    BM_STAGE_MAX              = 13,
+
+    // Reserved free slots for ad-hoc kernel-side probes during
+    // diagnosis. Tests in tests64/e2e/ ignore them by default.
+    BM_STAGE_DEBUG_A          = 13,
+    BM_STAGE_DEBUG_B          = 14,
+    BM_STAGE_DEBUG_C          = 15,
+    BM_STAGE_MAX              = 16,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.
