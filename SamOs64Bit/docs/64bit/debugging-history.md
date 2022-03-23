@@ -58,6 +58,9 @@ that upstream itself fixed it in.
 | G43 | Late-session investigation: every QEMU `-hda` boot test triple-faults | post-L208 | A 169-test sweep showed ~53 boot-trace tests failing identically: "kernel did not write expected token to 0xb8000" | QEMU `-d int,cpu_reset -D /tmp/qemu.log` showed EFER=0 + IDTR=BIOS IVT, traced to the L74 deviation (G13) | Wrote a PAE / CR3 / EFER.LME / CR0.PG transition + 64-bit GDT slot in `boot.asm`, plus a 64-bit far jump to 0x100000 |
 | G44 | Even with G43 in place, kernel's `.data` section was past the 250-sector load and never reached RAM | G43 follow-up | First print() wrote one char from an obviously-uninit `static` then the kernel halted | Compared `wc -c bin/kernel.bin` to boot.asm's `mov ecx, 250` (250 * 512 = 128 KiB < 169 KiB kernel) | Two back-to-back LBA28 PIO reads of 200 sectors each (LBA28 single-command cap = 255 sectors) |
 | G45 | Post-L100 the kernel's `print()` path writes to the graphics framebuffer, not to 0xb8000 | introduced L100 | Boot-trace regression tests that `pmemsave 0xb8000` to scrape "Hello 64-bit!" et al find only SeaBIOS leftovers | Comparison: `print()` calls `terminal_writechar` -> `terminal_write` (graphics terminal) since L100 | The right reformulation is `grep -a 'token' bin/kernel.bin` -- the print path is intact in the source, just no longer landing at 0xb8000. The boot-trace tests need to be reformulated when revived |
+| G46 | `window_system_initialize_stage2()` called `mouse_register_*` before `mouse_system_init()` had allocated `mouse_driver_vector` | introduced L150 (live since the port commit) | e2e sweep shows stage 11 (window_stage2) never reached; debug marker drilled the hang to `mouse_register_move_handler` | `tests64/e2e/run-all.sh` failure trace + debug markers inserted around the call sites | `kernel.c`: hoist `mouse_system_init()` + `mouse_system_load_static_drivers()` to BEFORE `window_system_initialize_stage2()`. Documented as a SamOs deviation since upstream's order works only because their headless test coverage never reached this code path |
+| G47 | `mouse_register_*` panicked when no mouse driver is registered; `mouse_system_load_static_drivers()` is a TODO stub, so headless boot has no PS/2 mouse | shipped at L132, latent until L150 stage 2 wired the bulk-register path | Same as G46: stage 11 never reached. Kernel halts inside `panic()` which writes to graphics terminal (invisible in headless) | Code review of `mouse.c` after G46 fix surfaced four identical `if(total_mice == 0){ panic(...) }` sites | Change all four panics to silent `return`. Documented as SamOs port deviation. `chapters/...` will list this once a port-deviation chapter exists |
+| G48 | `kernel_main` panics on missing `sysfont.bmp` / failed `terminal_create` | shipped at L100, latent for the e2e sweep until `bin/os.img` was built without the asset | After G46/G47 fixes, e2e sweep shows stage 8 (graphics_setup_stage_two) reached but stages 9 (process_init), 12 (isr80h) never reached | Marker dump after G47 narrowed the halt to between stages 8 and 9 | `kernel.c`: wrap the font + terminal_create in `if(system_font_local){ ... }` so headless boot continues without a system terminal. `terminal_writechar` already NULL-checks the global, so callers of `print()` early-return harmlessly |
 
 ---
 
@@ -419,6 +422,36 @@ The match count tells you the number of preserved-upstream
 markers currently live. After every lecture port, this number
 should monotonically increase (new markers added) and decrease
 only when a later lecture fixes the typo (markers retired).
+
+---
+
+## Cluster G: latent panics surfaced by the e2e sweep (G46-G48)
+
+Once the e2e runtime tests started actually booting the kernel
+under UEFI (see `e2e-runtime-testing.md`), three latent panic
+sites surfaced in quick succession. They were all "the panic
+was unreachable for upstream because their test coverage never
+booted past stage 7" rather than "we ported it wrong".
+
+The diagnosis loop in each case:
+
+1. Run `bash tests64/e2e/run-all.sh`. See which stage's
+   marker is the highest one written.
+2. Insert ad-hoc markers (BM_STAGE_DEBUG_A/B/C) around the
+   suspected hang site in `kernel.c` and rebuild.
+3. Re-run the sweep. The new markers narrow the hang to a
+   single function call.
+4. Read the function body. The panic call is usually obvious.
+
+The pattern that ties G46-G48 together: panic-on-missing-X
+gates that were never exercised in upstream's manual UEFI boot
+because the boot DID have X in their environment. SamOs's
+headless e2e environment doesn't, so the gates trip.
+
+The fix in each case is to make the gate tolerant
+(`return` instead of `panic`, or wrap in `if (x)`), since the
+absence of the asset is benign rather than catastrophic. The
+e2e sweep is now 12/12 PASS under UEFI.
 
 ---
 
