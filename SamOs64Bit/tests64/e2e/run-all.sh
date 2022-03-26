@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # tests64/e2e/run-all.sh - walk every e2e test (NN-name.sh) and
-# report pass/fail. Each one boots QEMU end-to-end so the full
-# sweep takes ~90 seconds.
+# report pass/fail. Each one boots QEMU end-to-end (~25 s per
+# test); with the init-checkpoint suite (01-12) plus the feature
+# self-test suite (13-21) the full sweep takes ~9 minutes.
 set -u
 cd "$(dirname "$0")"
 

@@ -61,7 +61,25 @@ typedef enum {
     BM_STAGE_DEBUG_A          = 13,
     BM_STAGE_DEBUG_B          = 14,
     BM_STAGE_DEBUG_C          = 15,
-    BM_STAGE_MAX              = 16,
+
+    // Feature-test slots (kernel_selftest writes these). Each
+    // slot stores 1 (pass) or 0 (fail) in the value half. Add
+    // new feature checks at the end and bump BM_STAGE_MAX.
+    BM_FEATURE_KMALLOC_RT     = 16,  // kmalloc(N) + kfree round trip
+    BM_FEATURE_KMALLOC_BIG    = 17,  // kmalloc(64K) returns non-NULL
+    BM_FEATURE_DISK_READ      = 18,  // disk_read_block(0) returns boot signature
+    BM_FEATURE_FS_FOPEN       = 19,  // fopen("@:/BLANK.ELF") returns fd > 0
+    BM_FEATURE_FS_FREAD_ELF   = 20,  // first 4 bytes of BLANK.ELF == ELF magic
+    BM_FEATURE_FS_FSTAT       = 21,  // fstat reports BLANK.ELF size > 0
+    BM_FEATURE_FS_FCLOSE      = 22,  // fclose succeeds
+    BM_FEATURE_PCI_IDE        = 23,  // PCI list contains class 1 subclass 1 device
+    BM_FEATURE_PCI_VGA        = 24,  // PCI list contains class 3 device
+    BM_FEATURE_TSC_INCREASES  = 25,  // tsc_microseconds advances between calls
+    BM_FEATURE_VECTOR_OPS     = 26,  // vector_new + push + at + free works
+    BM_FEATURE_PAGING_LOOKUP  = 27,  // paging_get_physical_address roundtrips a known mapping
+    BM_FEATURE_KZALLOC_ZERO   = 28,  // kzalloc returns memory that reads as zero
+
+    BM_STAGE_MAX              = 29,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.
