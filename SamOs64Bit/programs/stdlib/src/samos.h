@@ -43,4 +43,9 @@ long samos_fstat(long fd, struct file_stat* file_stat_out);
 // Lecture 115 - userland realloc trampoline.
 void* samos_realloc(void* old_ptr, size_t new_size);
 
+// SamOs e2e: write `value` into the kernel's bootmarker slot
+// `slot`. Slot must be >= 40 (BM_USER_FEATURE_BASE) and below
+// BM_STAGE_MAX, otherwise the syscall returns -1.
+int samos_e2e_mark(unsigned int slot, unsigned int value);
+
 #endif

@@ -36,4 +36,5 @@ void isr80h_register_commands(){
     isr80h_register_command(SYSTEM_COMMAND23_WINDOW_REDRAW_REGION, isr80h_command23_window_redraw_region);
     isr80h_register_command(SYSTEM_COMMAND24_UPDATE_WINDOW,        isr80h_command24_update_window);
     isr80h_register_command(SYSTEM_COMMAND25_UDELAY,               isr80h_command25_udelay);
+    isr80h_register_command(SYSTEM_COMMAND26_E2E_MARK,              isr80h_command26_e2e_mark);
 }
