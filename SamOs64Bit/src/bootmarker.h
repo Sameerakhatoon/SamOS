@@ -83,8 +83,13 @@ typedef enum {
     BM_FEATURE_KREALLOC_RT    = 31,  // krealloc(p, larger) preserves prefix bytes
     BM_FEATURE_STREAMER_CACHE = 32,  // diskstreamer_cache_new returns non-NULL
     BM_FEATURE_FS_PARSE_PATH  = 33,  // pathparser_parse("@:/X") returns root + first part
+    BM_FEATURE_E820_ENTRIES   = 34,  // e820_total_entries() returns > 0
+    BM_FEATURE_E820_ACCESS    = 35,  // e820_total_accessible_memory() > 1 MiB
+    BM_FEATURE_DISK_ENUM      = 36,  // disk_get(0) returns a real disk
+    BM_FEATURE_GRAPHICS_FB    = 37,  // graphics_screen_info() returns non-NULL
+    BM_FEATURE_GRAPHICS_SIZE  = 38,  // screen info has width>0 + height>0
 
-    BM_STAGE_MAX              = 34,
+    BM_STAGE_MAX              = 39,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.
