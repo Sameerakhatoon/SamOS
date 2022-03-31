@@ -352,6 +352,35 @@ void kernel_main(void)
     // tests64/e2e/feature-*.sh dump the markers and assert.
     kernel_selftest();
 
+    // SamOs e2e (Phase 2): if a user-side selftest ELF is on the
+    // primary FS, load it as the first task and drop into ring 3
+    // so it can exercise the user syscall surface (fopen, fread,
+    // fseek, fstat, fclose, malloc, free, realloc) and report
+    // back through SYSTEM_COMMAND26_E2E_MARK into the BM_USER_*
+    // slots. task_run_first_ever_task never returns, so the
+    // window_create + spin path below is skipped when SELFTEST.ELF
+    // is present. In a normal build without the selftest ELF,
+    // process_load_switch returns non-zero and we fall through
+    // to the legacy boot path.
+    // We load BLANK.ELF as the canonical user-side selftest.
+    // blank.c was extended to write its own marker slots (see
+    // BM_USER_* in src/bootmarker.h) so the act of loading +
+    // running it exercises the full ring-3 syscall surface
+    // (fopen, fread, fseek, fstat, fclose, malloc, free,
+    // realloc, e2e_mark itself). Bypassing the window_create
+    // path below is intentional: it is unreachable in the
+    // current build since the window-create path spins forever
+    // and `task_run_first_ever_task` never returns either.
+    {
+        struct process* user_selftest_proc = 0;
+        if(process_load_switch("@:/BLANK.ELF", &user_selftest_proc) == SAMOS_ALL_OK){
+            print("e2e: running user-side BLANK.ELF selftest\n");
+            enable_interrupts();
+            task_run_first_ever_task();
+            // unreachable
+        }
+    }
+
     // Lecture 58 / 196 - keyboard_init was originally called
     // here. L196 moves it before window_system_initialize_stage2
     // so the keyboard listener registration succeeds. The call
