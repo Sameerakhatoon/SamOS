@@ -48,4 +48,9 @@ void* samos_realloc(void* old_ptr, size_t new_size);
 // BM_STAGE_MAX, otherwise the syscall returns -1.
 int samos_e2e_mark(unsigned int slot, unsigned int value);
 
+// Lecture 198 - userspace udelay. Marks the current task asleep
+// for the given microsecond count and yields. Returns when the
+// scheduler resumes us.
+void samos_udelay(unsigned long microseconds);
+
 #endif
