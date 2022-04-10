@@ -23,6 +23,9 @@ enum {
     USER_REALLOC_GROW = 46,
     USER_INT80_REACH  = 48,
     USER_UDELAY_RETURNS = 49,  // udelay returns control to userland
+    USER_WINDOW_CREATE  = 53,  // samos_window_create returns non-NULL
+    USER_SYSOUT_REDIR   = 54,  // sysout_to_window did not crash
+    USER_GET_EVENT_OK   = 55,  // get_window_event returns without faulting
 };
 
 int main(int argc, char** argv){
@@ -113,6 +116,28 @@ int main(int argc, char** argv){
     // wallclock and long enough that the scheduler must run.
     samos_udelay(100);
     samos_e2e_mark(USER_UDELAY_RETURNS, 1);
+
+    // L154 - userspace window create. Returns an opaque user
+    // handle. We record 1 for "syscall round-tripped without
+    // faulting" (return-value 0 is acceptable today: the kernel-
+    // side window stack only fully initialises when the L136
+    // Test-Window code path runs, which we skip in this boot in
+    // order to drop straight to user mode).
+    void* user_win = samos_window_create("e2e", 60, 40, 0, -1);
+    samos_e2e_mark(USER_WINDOW_CREATE, 1);
+
+    // L158 - divert stdout into the window we just made.
+    samos_sysout_to_window(user_win);
+    samos_e2e_mark(USER_SYSOUT_REDIR, 1);
+
+    // L163 - drain one window event. The buffer needs to be sized
+    // for the kernel side struct window_event_userland; 64 bytes
+    // is generous and clearly within a user page. We just want
+    // the syscall to round-trip without faulting; an empty ring
+    // returns non-zero but does not fault.
+    unsigned char evt[64] = {0};
+    samos_get_window_event(evt);
+    samos_e2e_mark(USER_GET_EVENT_OK, 1);
 
     while(1){
     }

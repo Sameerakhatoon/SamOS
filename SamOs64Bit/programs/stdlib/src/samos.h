@@ -53,4 +53,18 @@ int samos_e2e_mark(unsigned int slot, unsigned int value);
 // scheduler resumes us.
 void samos_udelay(unsigned long microseconds);
 
+// Lecture 154 - userspace window create. Returns an opaque user
+// handle (pointer that lives in the user mapping) or NULL.
+void* samos_window_create(const char* title, int width, int height,
+                          int flags, int id);
+
+// Lecture 158 - divert the process's stdout into the given user
+// window handle. No-op if the handle is NULL or stale.
+void samos_sysout_to_window(void* user_window);
+
+// Lecture 163 - drain a single event off the per-process window
+// event ring into the caller-supplied buffer. Returns 0 if an
+// event was delivered, non-zero if the ring was empty.
+long samos_get_window_event(void* event_out);
+
 #endif

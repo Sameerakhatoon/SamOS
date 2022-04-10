@@ -33,6 +33,9 @@ global samos_fstat:function    ; L112
 global samos_realloc:function  ; L115
 global samos_e2e_mark:function ; SamOs e2e: marker write
 global samos_udelay:function   ; L198 - userspace udelay / task sleep
+global samos_window_create:function  ; L154
+global samos_sysout_to_window:function ; L158
+global samos_get_window_event:function ; L163
 
 ; void print(const char* msg)
 print:
@@ -197,6 +200,40 @@ samos_e2e_mark:
 samos_udelay:
     mov  rax, 25           ; SYSTEM_COMMAND25_UDELAY
     push qword rdi         ; microseconds (item 0)
+    int  0x80
+    add  rsp, 8
+    ret
+
+; Lecture 154 - void* samos_window_create(const char* title,
+;                                         int w, int h, int flags, int id)
+;   rdi = title, rsi = w, rdx = h, rcx = flags, r8 = id
+; Stack item 0 = title, item 1 = w, item 2 = h, item 3 = flags,
+; item 4 = id.
+samos_window_create:
+    mov  rax, 16           ; SYSTEM_COMMAND16_WINDOW_CREATE
+    push qword r8          ; id     (item 4)
+    push qword rcx         ; flags  (item 3)
+    push qword rdx         ; height (item 2)
+    push qword rsi         ; width  (item 1)
+    push qword rdi         ; title  (item 0)
+    int  0x80
+    add  rsp, 40
+    ret
+
+; Lecture 158 - void samos_sysout_to_window(void* user_window)
+;   rdi = user_window pointer (returned from samos_window_create)
+samos_sysout_to_window:
+    mov  rax, 17           ; SYSTEM_COMMAND17_SYSOUT_TO_WINDOW
+    push qword rdi
+    int  0x80
+    add  rsp, 8
+    ret
+
+; Lecture 163 - long samos_get_window_event(void* event_out)
+;   rdi = pointer to struct window_event_userland to populate
+samos_get_window_event:
+    mov  rax, 18           ; SYSTEM_COMMAND18_GET_WINDOW_EVENT
+    push qword rdi
     int  0x80
     add  rsp, 8
     ret
