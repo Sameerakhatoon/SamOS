@@ -97,6 +97,9 @@ typedef enum {
     BM_FEATURE_FAT16_LABEL    = 59,  // primary FS reports a non-empty volume label
     BM_FEATURE_PCI_BARS       = 60,  // at least one PCI device has a non-zero BAR
     BM_FEATURE_TASK_SLEEP     = 61,  // kernel-side task_sleep call does not crash
+    BM_FEATURE_ELF_LOAD       = 62,  // elf_load + elf_validate + elf_close on BLANK.ELF
+    BM_FEATURE_PARSE_MULTIPART = 63, // pathparser_parse splits multi-part paths
+    // (BM_STAGE_MAX is 64 - leave 1 free slot for future probes)
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
