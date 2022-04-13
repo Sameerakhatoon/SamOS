@@ -99,7 +99,19 @@ typedef enum {
     BM_FEATURE_TASK_SLEEP     = 61,  // kernel-side task_sleep call does not crash
     BM_FEATURE_ELF_LOAD       = 62,  // elf_load + elf_validate + elf_close on BLANK.ELF
     BM_FEATURE_PARSE_MULTIPART = 63, // pathparser_parse splits multi-part paths
-    // (BM_STAGE_MAX is 64 - leave 1 free slot for future probes)
+
+    // ---- second probe band -------------------------------------------
+    BM_FEATURE_ELF_ENTRY      = 64,  // elf_get_entry_ptr returns non-NULL
+    BM_FEATURE_ELF_PHNUM      = 65,  // header->e_phnum > 0
+    BM_FEATURE_KERNEL_DESC    = 66,  // kernel_desc() returns the kernel paging desc
+    BM_FEATURE_PROCESS_GET    = 67,  // process_get reachable
+    BM_FEATURE_PCI_FN_COUNT   = 68,  // pci_device_count > 1
+    BM_FEATURE_TASK_CURRENT   = 69,  // task_current() == NULL at kernel_main (sentinel)
+    BM_FEATURE_FS_FREAD_8     = 70,  // fread 8 bytes returns ELF magic + class + endian
+    BM_FEATURE_TSC_FREQ       = 71,  // tsc_microseconds delta on busy loop >= 0
+    BM_FEATURE_E820_TYPED     = 72,  // at least one e820 entry has type == 1
+    BM_FEATURE_KMALLOC_ALIGN  = 73,  // kmalloc(8) returns 8-byte aligned pointer
+    BM_FEATURE_KFREE_REUSE    = 74,  // kmalloc / kfree / kmalloc returns same address
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
@@ -118,7 +130,14 @@ typedef enum {
     BM_USER_TSC_UDELAY        = 49,  // udelay(1000) advances TSC
     BM_USER_TSC_MONOTONIC     = 50,  // two TSC reads with gap differ
 
-    BM_STAGE_MAX              = 64,
+    // user-side band 2
+    BM_USER_GETKEY_NB         = 80,  // samos_getkey non-blocking returns
+    BM_USER_PRINT_OK          = 81,  // samos print did not fault
+    BM_USER_PUTCHAR_OK        = 82,  // samos_putchar did not fault
+    BM_USER_PARSE_CMD_OK      = 83,  // samos_parse_command returned a non-NULL list
+    BM_USER_PROC_ARGS_OK      = 84,  // samos_process_get_arguments round trip
+
+    BM_STAGE_MAX              = 96,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.
