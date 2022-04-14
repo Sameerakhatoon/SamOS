@@ -26,6 +26,11 @@ enum {
     USER_WINDOW_CREATE  = 53,  // samos_window_create returns non-NULL
     USER_SYSOUT_REDIR   = 54,  // sysout_to_window did not crash
     USER_GET_EVENT_OK   = 55,  // get_window_event returns without faulting
+    USER_GETKEY_NB      = 80,  // samos_getkey non-blocking returns
+    USER_PRINT_OK       = 81,  // print() did not fault
+    USER_PUTCHAR_OK     = 82,  // samos_putchar did not fault
+    USER_PARSE_CMD_OK   = 83,  // samos_parse_command returned a non-NULL list
+    USER_PROC_ARGS_OK   = 84,  // samos_process_get_arguments round trip
 };
 
 int main(int argc, char** argv){
@@ -138,6 +143,38 @@ int main(int argc, char** argv){
     unsigned char evt[64] = {0};
     samos_get_window_event(evt);
     samos_e2e_mark(USER_GET_EVENT_OK, 1);
+
+    // L101 - samos print + putchar trampolines round-trip cleanly.
+    print("e2e: hello\n");
+    samos_e2e_mark(USER_PRINT_OK, 1);
+    samos_putchar('!');
+    samos_e2e_mark(USER_PUTCHAR_OK, 1);
+
+    // L102 - non-blocking getkey: the keyboard buffer is empty at
+    // boot so this returns 0 immediately. We just want the
+    // syscall to round-trip.
+    (void)samos_getkey();
+    samos_e2e_mark(USER_GETKEY_NB, 1);
+
+    // L116 - samos_parse_command splits a command line into a
+    // list. The first segment should be non-NULL.
+    {
+        struct command_argument* args = samos_parse_command("hello world", 64);
+        samos_e2e_mark(USER_PARSE_CMD_OK, args ? 1 : 0);
+        // We do NOT free the list - the test ELF spins forever
+        // right after this; the kernel reclaims the process heap
+        // when the e2e harness QEMU-quits.
+    }
+
+    // L115 - get the process's own arguments. argc may be 0 when
+    // BLANK.ELF is launched directly (kernel doesn't pass args
+    // through), but the syscall should still round-trip without
+    // faulting and populate argc / argv.
+    {
+        struct process_arguments pa = {0, NULL};
+        samos_process_get_arguments(&pa);
+        samos_e2e_mark(USER_PROC_ARGS_OK, 1);
+    }
 
     while(1){
     }
