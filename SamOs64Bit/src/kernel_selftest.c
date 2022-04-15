@@ -12,6 +12,7 @@
 #include "memory/heap/kheap.h"
 #include "memory/memory.h"
 #include "memory/paging/paging.h"
+#include "string/string.h"
 #include "disk/disk.h"
 #include "fs/file.h"
 #include "io/pci.h"
@@ -504,6 +505,55 @@ int kernel_selftest(void) {
         if (p && (((uintptr_t)p) % 8) == 0) mark_pass(BM_FEATURE_KMALLOC_ALIGN);
         else                                 mark_fail(BM_FEATURE_KMALLOC_ALIGN);
         if (p) kfree(p);
+    }
+
+    // String helpers.
+    if (strlen("hello") == 5) mark_pass(BM_FEATURE_STRLEN);
+    else                      mark_fail(BM_FEATURE_STRLEN);
+
+    {
+        char dst[8] = {0};
+        strncpy(dst, "abcdefgh", 4);
+        // SamOs's strncpy reserves the last slot for the null
+        // terminator (loop runs while i < count-1), so for
+        // count=4 we get "abc\0", not "abcd".
+        if (dst[0] == 'a' && dst[1] == 'b' && dst[2] == 'c' && dst[3] == 0)
+            mark_pass(BM_FEATURE_STRNCPY);
+        else
+            mark_fail(BM_FEATURE_STRNCPY);
+    }
+
+    {
+        char buf[8];
+        memset(buf, 0xAB, sizeof(buf));
+        int ok = 1;
+        for (int i = 0; i < (int)sizeof(buf); i++) {
+            if ((unsigned char)buf[i] != 0xAB) { ok = 0; break; }
+        }
+        if (ok) mark_pass(BM_FEATURE_MEMSET);
+        else    mark_fail(BM_FEATURE_MEMSET);
+    }
+
+    {
+        char src[8] = {1,2,3,4,5,6,7,8};
+        char dst[8] = {0};
+        memcpy(dst, src, sizeof(dst));
+        int ok = 1;
+        for (int i = 0; i < (int)sizeof(dst); i++) {
+            if (dst[i] != src[i]) { ok = 0; break; }
+        }
+        if (ok) mark_pass(BM_FEATURE_MEMCPY);
+        else    mark_fail(BM_FEATURE_MEMCPY);
+    }
+
+    {
+        char a[4] = {1,2,3,4};
+        char b[4] = {1,2,3,4};
+        char c[4] = {1,2,3,5};
+        if (memcmp(a, b, 4) == 0 && memcmp(a, c, 4) != 0)
+            mark_pass(BM_FEATURE_MEMCMP);
+        else
+            mark_fail(BM_FEATURE_MEMCMP);
     }
 
     // kmalloc -> kfree -> kmalloc returns non-NULL again. (We
