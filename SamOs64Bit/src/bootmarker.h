@@ -117,6 +117,13 @@ typedef enum {
     BM_FEATURE_MEMSET         = 77,  // memset writes the fill byte
     BM_FEATURE_MEMCPY         = 78,  // memcpy roundtrips
     BM_FEATURE_MEMCMP         = 79,  // memcmp returns 0 on equal, non-zero on differ
+    BM_FEATURE_ITOA           = 85,  // itoa(123) returns "123"
+    BM_FEATURE_STRCMP_DIFF    = 86,  // strncmp distinguishes different strings
+    BM_FEATURE_KMALLOC_LARGE  = 87,  // kmalloc(1 MiB) succeeds
+    BM_FEATURE_ELF_BLANK_ENTRY = 88, // blank ELF entry pointer falls in user virt range
+    BM_FEATURE_DISK_SECTOR_512 = 89, // primary disk reports sector_size == 512 (PATA)
+    BM_FEATURE_ROUND_KP_PAGE  = 90,  // paging_align_address rounds 0x1234 to 0x2000
+    BM_FEATURE_ELF_LOAD_RECLOSE = 91, // load + close + load again works
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
