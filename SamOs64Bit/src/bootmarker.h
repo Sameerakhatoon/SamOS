@@ -124,6 +124,10 @@ typedef enum {
     BM_FEATURE_DISK_SECTOR_512 = 89, // primary disk reports sector_size == 512 (PATA)
     BM_FEATURE_ROUND_KP_PAGE  = 90,  // paging_align_address rounds 0x1234 to 0x2000
     BM_FEATURE_ELF_LOAD_RECLOSE = 91, // load + close + load again works
+    BM_FEATURE_BMP_FORMAT     = 92,  // graphics_image_format_get("image/bmp") returns non-NULL
+    BM_FEATURE_PCI_HOSTBR     = 93,  // PCI bus has a host bridge (class 6:0 or 0:0)
+    BM_FEATURE_VECTOR_POP     = 94,  // vector_pop + vector_count round trip
+    BM_FEATURE_VECTOR_AT_LAST = 95,  // vector_at returns last-pushed element
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
@@ -149,7 +153,7 @@ typedef enum {
     BM_USER_PARSE_CMD_OK      = 83,  // samos_parse_command returned a non-NULL list
     BM_USER_PROC_ARGS_OK      = 84,  // samos_process_get_arguments round trip
 
-    BM_STAGE_MAX              = 96,
+    BM_STAGE_MAX              = 100,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.

@@ -25,6 +25,7 @@
 #include "idt/irq.h"
 #include "task/task.h"
 #include "loader/formats/elfloader.h"
+#include "graphics/image/image.h"
 #include "lib/vector/vector.h"
 #include "kernel.h"
 
@@ -638,6 +639,65 @@ int kernel_selftest(void) {
         if (ef2) elf_close(ef2);
         if (rc1 == 0 && rc2 == 0) mark_pass(BM_FEATURE_ELF_LOAD_RECLOSE);
         else                       mark_fail(BM_FEATURE_ELF_LOAD_RECLOSE);
+    }
+
+    // L89 BMP image format registered.
+    if (graphics_image_format_get("image/bmp")) mark_pass(BM_FEATURE_BMP_FORMAT);
+    else                                          mark_fail(BM_FEATURE_BMP_FORMAT);
+
+    // PCI bus has a host bridge (class 6 subclass 0). On QEMU
+    // -machine pc this is the i440FX bridge at 0:0.
+    {
+        int host_seen = 0;
+        size_t n = pci_device_count();
+        for (size_t i = 0; i < n; i++) {
+            struct pci_device* dev = NULL;
+            if (pci_device_get(i, &dev) < 0 || !dev) continue;
+            if (dev->class.base == 0x06 && dev->class.subclass == 0x00) {
+                host_seen = 1; break;
+            }
+        }
+        if (host_seen) mark_pass(BM_FEATURE_PCI_HOSTBR);
+        else           mark_fail(BM_FEATURE_PCI_HOSTBR);
+    }
+
+    // vector_pop + vector_count round trip.
+    {
+        struct vector* v = vector_new(sizeof(int), 4, 0);
+        int ok = 0;
+        if (v) {
+            int x = 42;
+            vector_push(v, &x);
+            int y = 99;
+            vector_push(v, &y);
+            int read_last = 0;
+            ok  = (vector_at(v, 1, &read_last, sizeof(read_last)) == 0
+                   && read_last == 99);
+            vector_pop(v);
+            ok &= (vector_count(v) == 1);
+            vector_free(v);
+        }
+        if (ok) mark_pass(BM_FEATURE_VECTOR_POP);
+        else    mark_fail(BM_FEATURE_VECTOR_POP);
+    }
+
+    // vector_at retrieves the last-pushed element at index N-1.
+    {
+        struct vector* v = vector_new(sizeof(char), 4, 0);
+        int ok = 0;
+        if (v) {
+            char a = 'X';
+            char b = 'Y';
+            char c = 'Z';
+            vector_push(v, &a);
+            vector_push(v, &b);
+            vector_push(v, &c);
+            char out = 0;
+            ok = (vector_at(v, 2, &out, sizeof(out)) == 0 && out == 'Z');
+            vector_free(v);
+        }
+        if (ok) mark_pass(BM_FEATURE_VECTOR_AT_LAST);
+        else    mark_fail(BM_FEATURE_VECTOR_AT_LAST);
     }
 
     return 0;
