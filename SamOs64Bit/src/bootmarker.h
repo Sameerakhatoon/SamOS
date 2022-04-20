@@ -128,6 +128,7 @@ typedef enum {
     BM_FEATURE_PCI_HOSTBR     = 93,  // PCI bus has a host bridge (class 6:0 or 0:0)
     BM_FEATURE_VECTOR_POP     = 94,  // vector_pop + vector_count round trip
     BM_FEATURE_VECTOR_AT_LAST = 95,  // vector_at returns last-pushed element
+    BM_FEATURE_NVME_PRESENT   = 96,  // PCI list contains class 0x01:0x08 NVMe
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is

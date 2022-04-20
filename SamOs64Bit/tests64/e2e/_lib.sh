@@ -76,6 +76,15 @@ boot_and_dump() {
         qemu_args+=(-bios "$E2E_OVMF" -machine pc -cpu Skylake-Server)
     fi
 
+    # Optional extra QEMU args per test (e.g. -device nvme,...).
+    # The test exports E2E_EXTRA_QEMU_ARGS as a single string;
+    # we split on whitespace and append.
+    if [ -n "${E2E_EXTRA_QEMU_ARGS:-}" ]; then
+        # shellcheck disable=SC2206
+        local extra=($E2E_EXTRA_QEMU_ARGS)
+        qemu_args+=("${extra[@]}")
+    fi
+
     e2e_log "booting (mode=$E2E_BOOT_MODE, image=$E2E_IMAGE, sleep=$seconds s)"
     (
         sleep "$seconds"

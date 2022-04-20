@@ -681,6 +681,25 @@ int kernel_selftest(void) {
         else    mark_fail(BM_FEATURE_VECTOR_POP);
     }
 
+    // L86 NVMe device present (only when QEMU is invoked with
+    // -device nvme,...). Mark 1 if class 0x01:0x08 is in the
+    // PCI list; mark 0 otherwise (the default QEMU pc machine
+    // does not expose NVMe, so this is "0 unless explicitly
+    // attached" - tests that care set up the device).
+    {
+        int seen = 0;
+        size_t n = pci_device_count();
+        for (size_t i = 0; i < n; i++) {
+            struct pci_device* dev = NULL;
+            if (pci_device_get(i, &dev) < 0 || !dev) continue;
+            if (dev->class.base == 0x01 && dev->class.subclass == 0x08) {
+                seen = 1; break;
+            }
+        }
+        if (seen) mark_pass(BM_FEATURE_NVME_PRESENT);
+        else      mark_fail(BM_FEATURE_NVME_PRESENT);
+    }
+
     // vector_at retrieves the last-pushed element at index N-1.
     {
         struct vector* v = vector_new(sizeof(char), 4, 0);
