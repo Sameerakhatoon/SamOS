@@ -681,6 +681,31 @@ int kernel_selftest(void) {
         else    mark_fail(BM_FEATURE_VECTOR_POP);
     }
 
+    // Phase 5 cont'd: composite the back buffer to the actual
+    // framebuffer, then verify the front buffer is non-zero.
+    // This is the only path in the current build that proves
+    // the graphics_redraw_all + framebuffer write chain works
+    // end to end in the headless kernel (terminal/font are
+    // skipped per G48). We rely on the synthetic pixels we
+    // wrote earlier in selftest_framebuffer_painted.
+    {
+        struct graphics_info* g = graphics_screen_info();
+        if (g && g->framebuffer && g->pixels) {
+            graphics_redraw_all();
+            uint8_t* fb = (uint8_t*)g->framebuffer;
+            size_t fb_bytes = (size_t)g->width * (size_t)g->height * 4;
+            size_t scan = fb_bytes < (256 * 1024) ? fb_bytes : (256 * 1024);
+            int any_nonzero = 0;
+            for (size_t i = 0; i < scan; i++) {
+                if (fb[i] != 0) { any_nonzero = 1; break; }
+            }
+            if (any_nonzero) mark_pass(BM_FEATURE_FB_FRONT_BUF);
+            else             mark_fail(BM_FEATURE_FB_FRONT_BUF);
+        } else {
+            mark_fail(BM_FEATURE_FB_FRONT_BUF);
+        }
+    }
+
     // L86 NVMe device present (only when QEMU is invoked with
     // -device nvme,...). Mark 1 if class 0x01:0x08 is in the
     // PCI list; mark 0 otherwise (the default QEMU pc machine
