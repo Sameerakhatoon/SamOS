@@ -725,6 +725,19 @@ int kernel_selftest(void) {
         else      mark_fail(BM_FEATURE_NVME_PRESENT);
     }
 
+    // L92 font load. With the stub sysfont.bmp now staged on
+    // both partitions, font_load should return a non-NULL
+    // struct and bits_width_per_character should equal 9.
+    {
+        struct font* f = font_load("@:/sysfont.bmp");
+        if (f) mark_pass(BM_FEATURE_FONT_LOADED);
+        else   mark_fail(BM_FEATURE_FONT_LOADED);
+        if (f && f->bits_width_per_character == 9)
+            mark_pass(BM_FEATURE_FONT_PIXEL_W);
+        else
+            mark_fail(BM_FEATURE_FONT_PIXEL_W);
+    }
+
     // vector_at retrieves the last-pushed element at index N-1.
     {
         struct vector* v = vector_new(sizeof(char), 4, 0);
