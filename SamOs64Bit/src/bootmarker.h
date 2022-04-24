@@ -132,6 +132,10 @@ typedef enum {
     BM_FEATURE_FB_FRONT_BUF   = 97,  // after graphics_redraw_all, front framebuffer is non-zero
     BM_FEATURE_FONT_LOADED    = 98,  // font_load("@:/sysfont.bmp") returns non-NULL
     BM_FEATURE_FONT_PIXEL_W   = 99,  // loaded font reports the cell width (9)
+    BM_FEATURE_TERMINAL       = 100, // terminal_create returns a struct
+    BM_FEATURE_TERMINAL_WRITE = 101, // terminal_write returns >= 0
+    BM_FEATURE_BMP_IMG_LOAD   = 102, // graphics_image_load("@:/sysfont.bmp") returns non-NULL
+    BM_FEATURE_FONT_DRAW      = 103, // font_draw_text writes to a graphics_info
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
@@ -157,7 +161,7 @@ typedef enum {
     BM_USER_PARSE_CMD_OK      = 83,  // samos_parse_command returned a non-NULL list
     BM_USER_PROC_ARGS_OK      = 84,  // samos_process_get_arguments round trip
 
-    BM_STAGE_MAX              = 104,
+    BM_STAGE_MAX              = 112,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.
