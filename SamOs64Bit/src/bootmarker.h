@@ -136,6 +136,11 @@ typedef enum {
     BM_FEATURE_TERMINAL_WRITE = 101, // terminal_write returns >= 0
     BM_FEATURE_BMP_IMG_LOAD   = 102, // graphics_image_load("@:/sysfont.bmp") returns non-NULL
     BM_FEATURE_FONT_DRAW      = 103, // font_draw_text writes to a graphics_info
+    BM_FEATURE_MOUSE_REG      = 104, // mouse_register(synthetic_mouse) succeeds
+    BM_FEATURE_MOUSE_CLICK_H  = 105, // mouse_register_click_handler attached
+    BM_FEATURE_MOUSE_MOVE_H   = 106, // mouse_register_move_handler attached
+    BM_FEATURE_MOUSE_CLICK    = 107, // mouse_click invokes registered handler
+    BM_FEATURE_MOUSE_MOVE     = 108, // mouse_moved invokes registered handler
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
