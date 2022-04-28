@@ -144,6 +144,13 @@ typedef enum {
     BM_FEATURE_WIN_CREATE     = 109, // kernel-side window_create returns non-NULL
     BM_FEATURE_WIN_REDRAW     = 110, // window_redraw on the created window does not crash
     BM_FEATURE_WIN_POS_SET    = 111, // window_position_set returns 0
+    BM_FEATURE_WIN_FOCUS      = 113, // window_focus does not crash
+    BM_FEATURE_WIN_CLICK_DISPATCH = 114, // window_click reaches a handler
+    BM_FEATURE_WIN_EVT_RING   = 115, // event handler registered
+    BM_FEATURE_WIN_HANDLER_UNREG = 116, // window_event_handler_unregister round trip
+    BM_FEATURE_STREAMER_CACHE_HIT = 117, // diskstreamer_cache_new twice
+    BM_FEATURE_KMALLOC_MANY   = 118, // 100 small allocs back to back
+    BM_FEATURE_KMALLOC_BIG_FREE = 119, // 1 MiB alloc + free + 1 MiB alloc
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
@@ -169,7 +176,7 @@ typedef enum {
     BM_USER_PARSE_CMD_OK      = 83,  // samos_parse_command returned a non-NULL list
     BM_USER_PROC_ARGS_OK      = 84,  // samos_process_get_arguments round trip
 
-    BM_STAGE_MAX              = 112,
+    BM_STAGE_MAX              = 120,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.
