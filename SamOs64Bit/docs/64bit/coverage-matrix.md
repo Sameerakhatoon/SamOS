@@ -141,15 +141,30 @@ first user task and writes user-band markers via
 | G47 | mouse panic -> return | `22-gotcha-fidelity.sh` |
 | G48 | kernel.c font/terminal guard | `22-gotcha-fidelity.sh` + `08-graphics.sh` |
 
-## Headcount
+## Headcount (refreshed after the extended push)
 
-  Vol 1 (139 lectures)        covered ≈ 67%  partial ≈ 6%   skipped ≈ 27%
-  Part Two Mod 1 (103 lectures) covered ≈ 75%  partial ≈ 8%   skipped ≈ 17%
-  Part Two Mod 2 (106 lectures) covered ≈ 50%  partial ≈ 26%  skipped ≈ 24%
-  Gotchas (33 entries)         covered ≈ 91%  skipped ≈ 9% (BIOS-path-only)
+  Vol 1 (139 lectures)        covered ≈ 75%  partial ≈ 4%   skipped ≈ 21%
+  Part Two Mod 1 (103 lectures) covered ≈ 94%  partial ≈ 3%   skipped ≈ 3%
+  Part Two Mod 2 (106 lectures) covered ≈ 78%  partial ≈ 10%  skipped ≈ 12%
+  Gotchas (33 entries)         covered ≈ 94%  skipped ≈ 6% (BIOS-path-only)
 
-  Total e2e scripts on the branch: 72
-  run-all walltime under UEFI on Ubuntu-fresh: ~30 minutes
+  Total e2e scripts on the branch: 91
+  run-all walltime under UEFI on Ubuntu-fresh: ~38 minutes
+
+Major coverage unlocks landed since the first matrix pass:
+  * sysfont.bmp stub staged on the ESP (G48 retired). Light up
+    font_load, BMP image_load, terminal_create + terminal_write,
+    font_draw_text, font cache hit.
+  * Synthetic mouse driver registered in kernel_selftest.
+    Unblocks L27-L44: mouse_register, click + move handler
+    register, click + move dispatch.
+  * Kernel-side window lifecycle: window_create, window_redraw,
+    window_position_set, window_focus, window_click, event
+    handler register + unregister.
+  * NVMe via -device nvme on a per-test E2E_EXTRA_QEMU_ARGS path.
+  * QEMU screendump captures the actual framebuffer to PPM.
+  * Keyboard buffer API surface, PCI vendor field, multi-MiB
+    kmalloc recycle.
 
 "Skipped" rows are intentional and the reason is in the row; they
 are not unaddressed gaps. The biggest *real* gaps remaining:
