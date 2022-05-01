@@ -138,7 +138,7 @@ expected_stage_byte() { printf '%02x' "$1"; }
 # "yes/no" but a trace of how far boot got.
 dump_marker_summary() {
     local s hi
-    for ((s=1; s<128; s++)); do
+    for ((s=1; s<132; s++)); do
         hi=$(marker_high "$s")
         if [ "$hi" = "$(expected_high)" ]; then
             local v
