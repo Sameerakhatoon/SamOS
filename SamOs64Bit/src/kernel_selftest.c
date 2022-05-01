@@ -1065,5 +1065,126 @@ int kernel_selftest(void) {
         else                          mark_fail(BM_FEATURE_TASK_GET_NEXT);
     }
 
+    // L122 tolower (caps-lock / case-handling helper).
+    if (tolower('A') == 'a' && tolower('a') == 'a' && tolower('5') == '5')
+        mark_pass(BM_FEATURE_TOLOWER);
+    else
+        mark_fail(BM_FEATURE_TOLOWER);
+
+    // L99 graphics_draw_rect on the back buffer does not crash.
+    {
+        struct graphics_info* g = graphics_screen_info();
+        if (g) {
+            struct framebuffer_pixel red = {0xFF, 0, 0, 0};
+            graphics_draw_rect(g, 0, 0, 16, 16, red);
+            mark_pass(BM_FEATURE_GRAPHICS_RECT);
+        } else {
+            mark_fail(BM_FEATURE_GRAPHICS_RECT);
+        }
+    }
+
+    // L161 window_event_push on a fresh window.
+    {
+        struct graphics_info* g = graphics_screen_info();
+        struct window* w = NULL;
+        if (g && loaded_font) {
+            w = window_create(g, loaded_font, "evt", 200, 200, 100, 80, 0, -1);
+        }
+        if (w) {
+            struct window_event evt = {0};
+            evt.type = WINDOW_EVENT_TYPE_FOCUS;
+            window_event_push(w, &evt);
+            mark_pass(BM_FEATURE_WIN_EVT_PUSH);
+        } else {
+            mark_fail(BM_FEATURE_WIN_EVT_PUSH);
+        }
+    }
+
+    if (isdigit('5') && !isdigit('a')) mark_pass(BM_FEATURE_ISDIGIT);
+    else                                mark_fail(BM_FEATURE_ISDIGIT);
+
+    if (tonumericdigit('7') == 7) mark_pass(BM_FEATURE_TONUMERIC);
+    else                            mark_fail(BM_FEATURE_TONUMERIC);
+
+    {
+        const char* s = "abc/xyz";
+        if (strnlen_terminator(s, 16, '/') == 3) mark_pass(BM_FEATURE_STRNLEN_TERM);
+        else                                       mark_fail(BM_FEATURE_STRNLEN_TERM);
+    }
+
+    {
+        struct graphics_info* g = graphics_screen_info();
+        if (g) {
+            graphics_redraw_region(g, 0, 0, 16, 16);
+            mark_pass(BM_FEATURE_GRAPHICS_REDRAW_REGION);
+        } else {
+            mark_fail(BM_FEATURE_GRAPHICS_REDRAW_REGION);
+        }
+    }
+
+    // kzalloc(32 KiB) is fully zeroed.
+    {
+        char* p = kzalloc(32 * 1024);
+        int ok = 1;
+        if (!p) ok = 0;
+        for (int i = 0; ok && i < 32 * 1024; i++) {
+            if (p[i] != 0) { ok = 0; break; }
+        }
+        if (p) kfree(p);
+        if (ok) mark_pass(BM_FEATURE_KZALLOC_BIG);
+        else    mark_fail(BM_FEATURE_KZALLOC_BIG);
+    }
+
+    // L87 graphics_pixel_get round trip: write a known pixel via
+    // direct buffer write, read back via graphics_pixel_get.
+    {
+        struct graphics_info* gi = graphics_screen_info();
+        int ok = 0;
+        if (gi && gi->pixels) {
+            // Mark pixel (0,0) blue.
+            gi->pixels[0].blue     = 0xFF;
+            gi->pixels[0].green    = 0;
+            gi->pixels[0].red      = 0;
+            gi->pixels[0].reserved = 0;
+            struct framebuffer_pixel read_pixel = {0};
+            if (graphics_pixel_get(gi, 0, 0, &read_pixel) >= 0
+                && read_pixel.blue == 0xFF) {
+                ok = 1;
+            }
+        }
+        if (ok) mark_pass(BM_FEATURE_GFX_PIXEL_GET);
+        else    mark_fail(BM_FEATURE_GFX_PIXEL_GET);
+    }
+
+    // L95 font_draw_text at a non-zero offset.
+    {
+        struct graphics_info* gi = graphics_screen_info();
+        struct framebuffer_pixel red = {0, 0, 0xFF, 0};
+        if (gi && loaded_font
+            && font_draw_text(gi, loaded_font, 16, 32, "e2e", red) >= 0)
+            mark_pass(BM_FEATURE_FONT_DRAW_OFFSET);
+        else
+            mark_fail(BM_FEATURE_FONT_DRAW_OFFSET);
+    }
+
+    // Vector grows beyond initial capacity (4 -> push 10).
+    {
+        struct vector* v = vector_new(sizeof(int), 4, 0);
+        int ok = 1;
+        if (v) {
+            for (int i = 0; i < 10 && ok; i++) {
+                if (vector_push(v, &i) < 0) ok = 0;
+            }
+            if (ok && vector_count(v) != 10) ok = 0;
+            vector_free(v);
+        } else { ok = 0; }
+        if (ok) mark_pass(BM_FEATURE_VECTOR_GROW);
+        else    mark_fail(BM_FEATURE_VECTOR_GROW);
+    }
+
+    // kfree(NULL) is a no-op (doesn't crash).
+    kfree(NULL);
+    mark_pass(BM_FEATURE_FREE_NULL);
+
     return 0;
 }
