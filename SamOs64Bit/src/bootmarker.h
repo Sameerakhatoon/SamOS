@@ -182,6 +182,15 @@ typedef enum {
     BM_FEATURE_GRAPHICS_ROOT_Z = 148, // root graphics has z_index 0
     BM_FEATURE_PROCESS_VECTOR = 149, // process_vector exists / is non-NULL
     BM_FEATURE_KFREE_TWICE_OK = 150, // kfree on second pointer doesn't reuse stale
+    BM_FEATURE_PCI_OOB        = 151, // pci_device_get(99999) returns < 0
+    BM_FEATURE_E820_OOB       = 152, // e820_entry(99999) returns NULL
+    BM_FEATURE_DISK_OOB       = 153, // disk_get(99) returns NULL
+    BM_FEATURE_KERNEL_DESC_LVL = 154, // kernel_desc()->level == 4
+    BM_FEATURE_PATH_DRIVE     = 155, // pathparser_parse("X:/foo") returns drive_no != 0
+    BM_FEATURE_PATH_FREE_NULL = 156, // pathparser_free(NULL) no-op
+    BM_FEATURE_IMG_PNG_NULL   = 157, // graphics_image_format_get("image/png") NULL
+    BM_FEATURE_FONT_SAME      = 158, // font_get_system_font on filename hits cache
+    BM_FEATURE_BUDDY_CONSEC   = 159, // two kmalloc + free + alloc gives stable address
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is

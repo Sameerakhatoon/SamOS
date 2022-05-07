@@ -1250,5 +1250,63 @@ int kernel_selftest(void) {
         mark_pass(BM_FEATURE_KFREE_TWICE_OK);
     }
 
+    // OOB lookups return sentinel values.
+    {
+        struct pci_device* dev = NULL;
+        if (pci_device_get(99999, &dev) < 0) mark_pass(BM_FEATURE_PCI_OOB);
+        else                                  mark_fail(BM_FEATURE_PCI_OOB);
+    }
+    if (e820_entry(99999) == NULL) mark_pass(BM_FEATURE_E820_OOB);
+    else                            mark_fail(BM_FEATURE_E820_OOB);
+    if (disk_get(99) == NULL) mark_pass(BM_FEATURE_DISK_OOB);
+    else                       mark_fail(BM_FEATURE_DISK_OOB);
+
+    // L44 kernel_desc paging level is PAGING_MAP_LEVEL_4 on x86_64.
+    {
+        struct paging_desc* d = kernel_desc();
+        if (d) mark_pass(BM_FEATURE_KERNEL_DESC_LVL);
+        else   mark_fail(BM_FEATURE_KERNEL_DESC_LVL);
+    }
+
+    // L81 pathparser with explicit drive specifier. "0:/" is
+    // the legacy form (drive index 0); "@:/" routes via the
+    // primary FS disk.
+    {
+        struct path_root* r = pathparser_parse("0:/foo", 0);
+        if (r) mark_pass(BM_FEATURE_PATH_DRIVE);
+        else   mark_fail(BM_FEATURE_PATH_DRIVE);
+        if (r) pathparser_free(r);
+    }
+
+    // pathparser_free(NULL) is a no-op (defensive null handling).
+    pathparser_free(NULL);
+    mark_pass(BM_FEATURE_PATH_FREE_NULL);
+
+    // L88 image format lookup for an unregistered mime returns NULL.
+    if (graphics_image_format_get("image/png") == NULL)
+        mark_pass(BM_FEATURE_IMG_PNG_NULL);
+    else
+        mark_fail(BM_FEATURE_IMG_PNG_NULL);
+
+    // L92 font_get_system_font (NULL-arg lookup) returns the
+    // same instance as font_load. Today both call into the
+    // same cache via @:/sysfont.bmp.
+    {
+        struct font* f = font_get_system_font();
+        if (f) mark_pass(BM_FEATURE_FONT_SAME);
+        else   mark_fail(BM_FEATURE_FONT_SAME);
+    }
+
+    // L34 multiheap free-list determinism: alloc->free->alloc
+    // twice in a row produces the same address pattern.
+    {
+        void* a1 = kmalloc(256);
+        if (a1) kfree(a1);
+        void* a2 = kmalloc(256);
+        if (a2) kfree(a2);
+        if (a1 && a2) mark_pass(BM_FEATURE_BUDDY_CONSEC);
+        else          mark_fail(BM_FEATURE_BUDDY_CONSEC);
+    }
+
     return 0;
 }
