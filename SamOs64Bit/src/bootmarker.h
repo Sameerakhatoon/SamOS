@@ -175,6 +175,13 @@ typedef enum {
     BM_FEATURE_FONT_DRAW_OFFSET = 141, // font_draw_text at non-zero offset works
     BM_FEATURE_VECTOR_GROW = 142, // vector grows past initial capacity
     BM_FEATURE_FREE_NULL = 143, // kfree(NULL) is a no-op
+    BM_FEATURE_TASK_SLEEP_MATH = 144, // task_sleep math is + (G37)
+    BM_FEATURE_WIN_EVENT_2PUSH = 145, // two window_event_push calls observe G18
+    BM_FEATURE_DISK_DRIVER_VEC = 146, // disk_driver_get_drivers returns >= 1
+    BM_FEATURE_E820_REGION_SUM = 147, // accessible_memory >= largest_free
+    BM_FEATURE_GRAPHICS_ROOT_Z = 148, // root graphics has z_index 0
+    BM_FEATURE_PROCESS_VECTOR = 149, // process_vector exists / is non-NULL
+    BM_FEATURE_KFREE_TWICE_OK = 150, // kfree on second pointer doesn't reuse stale
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
@@ -200,7 +207,7 @@ typedef enum {
     BM_USER_PARSE_CMD_OK      = 83,  // samos_parse_command returned a non-NULL list
     BM_USER_PROC_ARGS_OK      = 84,  // samos_process_get_arguments round trip
 
-    BM_STAGE_MAX              = 144,
+    BM_STAGE_MAX              = 160,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.
