@@ -31,6 +31,7 @@ enum {
     USER_PUTCHAR_OK     = 82,  // samos_putchar did not fault
     USER_PARSE_CMD_OK   = 83,  // samos_parse_command returned a non-NULL list
     USER_PROC_ARGS_OK   = 84,  // samos_process_get_arguments round trip
+    USER_KEY_RECEIVED   = 160, // samos_getkey eventually returns a non-zero key
 };
 
 int main(int argc, char** argv){
@@ -174,6 +175,28 @@ int main(int argc, char** argv){
         struct process_arguments pa = {0, NULL};
         samos_process_get_arguments(&pa);
         samos_e2e_mark(USER_PROC_ARGS_OK, 1);
+    }
+
+    // L82-L88 / L122 PS/2 keyboard end to end: poll the keyboard
+    // buffer for up to ~15 seconds. The host-side e2e test
+    // (116-user-keyboard-input) uses QEMU 'sendkey' to inject
+    // a keypress shortly after boot. The kernel's classic PS/2
+    // driver receives IRQ1, pushes the char into our process's
+    // keyboard buffer, and samos_getkey returns it.
+    //
+    // We sleep 50 ms between polls via samos_udelay so the
+    // scheduler has time to run the IRQ handler + the rest
+    // of the timer / mouse paths between checks. 300 iterations
+    // = ~15 seconds, which is comfortably past the host-side
+    // sendkey timing.
+    {
+        int got_key = 0;
+        for (int i = 0; i < 300; i++) {
+            int k = samos_getkey();
+            if (k != 0) { got_key = 1; break; }
+            samos_udelay(50 * 1000); // 50 ms
+        }
+        samos_e2e_mark(USER_KEY_RECEIVED, got_key ? 1 : 0);
     }
 
     while(1){
