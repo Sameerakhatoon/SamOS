@@ -192,6 +192,13 @@ typedef enum {
     BM_FEATURE_FONT_SAME      = 158, // font_get_system_font on filename hits cache
     BM_FEATURE_BUDDY_CONSEC   = 159, // two kmalloc + free + alloc gives stable address
     BM_USER_KEY_RECEIVED      = 160, // user-side selftest received a key via samos_getkey
+    BM_FEATURE_DISK_BLOCK_4K  = 161, // disk_read_block at LBA 8 (4 KiB offset) succeeds
+    BM_FEATURE_BMP_BAD_FILE   = 162, // graphics_image_load("@:/NO.BMP") returns NULL
+    BM_FEATURE_STREAMER_SEEK_NEG = 163, // diskstreamer_seek(stream, -1) returns < 0
+    BM_FEATURE_TERMINAL_LOOKUP = 164, // terminal_get_at_screen_position(0, 0, NULL) returns the kernel terminal or NULL safely
+    BM_FEATURE_FONT_LOAD_BAD  = 165, // font_load("@:/MISSING.BMP") returns NULL
+    BM_FEATURE_MULTIHEAP_OOM  = 166, // kmalloc(SIZE_MAX) returns NULL gracefully
+    BM_FEATURE_GFX_NESTED     = 167, // graphics_info_create_relative round trip
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
@@ -217,7 +224,7 @@ typedef enum {
     BM_USER_PARSE_CMD_OK      = 83,  // samos_parse_command returned a non-NULL list
     BM_USER_PROC_ARGS_OK      = 84,  // samos_process_get_arguments round trip
 
-    BM_STAGE_MAX              = 168,
+    BM_STAGE_MAX              = 176,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.

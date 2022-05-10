@@ -36,8 +36,8 @@ E2E_OVMF="/usr/share/ovmf/OVMF.fd"
 # Where the QEMU monitor will dump the marker region.
 E2E_DUMP="${E2E_DUMP:-/tmp/samos-e2e-markers.bin}"
 
-# Marker region is BM_STAGE_MAX (160) * 8 = 1280 bytes.
-E2E_MARKER_REGION_SIZE=1280
+# Marker region is BM_STAGE_MAX (176) * 8 = 1408 bytes; round to 1536.
+E2E_MARKER_REGION_SIZE=1536
 
 e2e_log() { echo "[e2e] $*" >&2; }
 e2e_fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -138,7 +138,7 @@ expected_stage_byte() { printf '%02x' "$1"; }
 # "yes/no" but a trace of how far boot got.
 dump_marker_summary() {
     local s hi
-    for ((s=1; s<160; s++)); do
+    for ((s=1; s<176; s++)); do
         hi=$(marker_high "$s")
         if [ "$hi" = "$(expected_high)" ]; then
             local v
