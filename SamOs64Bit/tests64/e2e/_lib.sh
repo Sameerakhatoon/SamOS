@@ -85,13 +85,34 @@ boot_and_dump() {
         qemu_args+=("${extra[@]}")
     fi
 
-    e2e_log "booting (mode=$E2E_BOOT_MODE, image=$E2E_IMAGE, sleep=$seconds s)"
-    (
-        sleep "$seconds"
-        printf 'pmemsave 0x6000 %d "%s"\n' "$E2E_MARKER_REGION_SIZE" "$E2E_DUMP"
-        printf 'quit\n'
-    ) | timeout $((seconds + 10)) qemu-system-x86_64 "${qemu_args[@]}" \
-            > /tmp/samos-e2e-qemu.log 2>&1 || true
+    # Cold-start absorber. Without this, the very first QEMU
+    # invocation after the WSL distro warms up (fresh /tmp,
+    # loop device cleanup from build.sh, OVMF first-page faults
+    # not yet primed) sometimes loses the monitor-command race
+    # and exits before pmemsave delivers. One short retry is
+    # enough; the second-and-subsequent QEMU invocations within
+    # the same shell never need it.
+    local attempt
+    for attempt in 1 2; do
+        rm -f "$E2E_DUMP"
+        if [ "$attempt" -gt 1 ]; then
+            e2e_log "warming up (attempt $attempt)"
+            sleep 1
+        fi
+        e2e_log "booting (mode=$E2E_BOOT_MODE, image=$E2E_IMAGE, sleep=$seconds s)"
+        (
+            sleep "$seconds"
+            printf 'pmemsave 0x6000 %d "%s"\n' "$E2E_MARKER_REGION_SIZE" "$E2E_DUMP"
+            printf 'quit\n'
+        ) | timeout $((seconds + 10)) qemu-system-x86_64 "${qemu_args[@]}" \
+                > /tmp/samos-e2e-qemu.log 2>&1 || true
+
+        # Successful run produced a non-empty dump file. If so,
+        # we are done; otherwise fall through to one retry.
+        if [ -s "$E2E_DUMP" ]; then
+            break
+        fi
+    done
 
     e2e_log "qemu exit, dump size=$(stat -c %s "$E2E_DUMP" 2>/dev/null || echo missing)"
 
