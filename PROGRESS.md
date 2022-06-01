@@ -1,0 +1,69 @@
+# SamOs progress
+
+Walking **"Developing A Multi-Threaded Kernel From Scratch"** by Daniel McCarthy (Dragon Zap, 861 pages).
+
+One commit per book chapter. Bugs surface in their natural order and get their own follow-up commit + a `docs/gotchas/Gxx.md` note. Every meaningful commit ships with an end-to-end test under `tests/`.
+
+Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
+
+---
+
+## Setup
+
+- [ ] Cross-toolchain confirmed (`i686-elf-gcc`, `x86_64-elf-gcc`, `nasm`, `qemu-system-x86_64`)
+- [ ] `bin/` and `build/` directories exist
+- [ ] `.gitignore` covers build artifacts
+- [ ] `tests/run.sh` harness in place
+
+## Part 1 - Introduction & Requirements
+
+- [ ] **Ch 1** - Introduction (prose)
+- [ ] **Ch 2** - Requirements (prose)
+- [ ] **Ch 3** - Who This Book Is For (prose)
+
+## Part 2 - The Basics
+
+- [ ] **Ch - What is Memory?** (prose)
+- [ ] **Ch - Memory Management & Virtual Memory** (prose)
+- [ ] **Ch 4** - The Boot Process (prose)
+
+## Part 3 - Tooling
+
+- [ ] **Ch - NASM, GCC, QEMU, GDB install**
+
+## Part 4 - Real Mode Development
+
+- [ ] **Ch 5** - Project setup (`boot.asm`)
+- [ ] **Ch - The Hello World Bootloader** - `org 0x7c00`, BIOS int 0x10, boot signature 0xAA55
+- [ ] **Ch - Compile the bootloader** - `nasm -f bin`, verify 512 bytes ending `55 AA`
+- [ ] **Ch - Run in QEMU**
+- [ ] **Ch 6** - Understanding Real Mode (prose)
+- [ ] **Ch 7** - Segmentation Memory Model (prose)
+- [ ] **Ch 8** - Refining Our Bootloader - `ORG 0`, explicit segments, `cli`/`sti`
+- [ ] **Ch 9** - Booting on Real Hardware (prose - staying on QEMU)
+- [ ] **Ch 10** - The Interrupt Vector Table (prose)
+- [ ] **Ch 11** - Implementing Our Own Interrupts in Real Mode
+- [ ] **Ch 13** - Exception Handling Using Interrupts
+- [ ] **Ch 14** - Disk Access and How It Works (prose)
+- [ ] **Ch 15** - A Bootloader That Reads From Disk
+- [ ] **Ch 16** - Master Boot Record (prose)
+- [ ] **Ch 17** - MBR Deeper Understanding (prose)
+- [ ] **Ch 18** - Summary of Real Mode (prose)
+
+## Part 5 - Protected Mode Development
+
+> Filled in as we read each chapter. Anchors: A20 line, GDT, 32-bit transition, paging, IDT, ATA PIO, FAT16, ELF, multitasking, syscalls, keyboard, shell.
+
+## Part 6 - Graphics, Windowing & Drivers
+
+> Filled in once we reach it. Anchors: framebuffer, mouse, window events, PCI, PATA, NVMe, sleep syscall.
+
+---
+
+## Gotchas log
+
+Each entry: short title + chapter where surfaced + link to the gotcha note.
+
+> None yet - first gotcha gets logged as it surfaces.
+
+---
