@@ -20,7 +20,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 
 - [x] **Ch 1** - Introduction (prose) → [Ch01.md](docs/chapters/Ch01.md)
 - [x] **Ch 2** - Requirements (prose) → [Ch02.md](docs/chapters/Ch02.md)
-- [ ] **Ch 3** - Who This Book Is For (prose)
+- [x] **Ch 3** - Who This Book Is For (prose) → [Ch03.md](docs/chapters/Ch03.md)
 
 ## Part 2 - The Basics
 
