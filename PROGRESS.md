@@ -24,7 +24,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 
 ## Part 2 - The Basics
 
-- [ ] **Ch - What is Memory?** (prose)
+- [x] **Ch - What is Memory?** (prose) → [Ch04-what-is-memory.md](docs/chapters/Ch04-what-is-memory.md)
 - [ ] **Ch - Memory Management & Virtual Memory** (prose)
 - [ ] **Ch 4** - The Boot Process (prose)
 
