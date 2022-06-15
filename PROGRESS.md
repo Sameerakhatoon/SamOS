@@ -11,7 +11,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 
 ## Setup
 
-- [ ] Cross-toolchain confirmed (`i686-elf-gcc`, `x86_64-elf-gcc`, `nasm`, `qemu-system-x86_64`)
+- [x] Cross-toolchain confirmed (`i686-elf-gcc`, `nasm`, `qemu-system-x86_64`, `gdb`) - `tests/01-tooling-installed.sh`
 - [x] `bin/` and `build/` directories exist
 - [x] `.gitignore` covers build artifacts
 - [x] `tests/run.sh` harness in place
@@ -30,7 +30,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 
 ## Part 3 - Tooling
 
-- [ ] **Ch - NASM, GCC, QEMU, GDB install**
+- [x] **Ch - NASM, GCC, QEMU, GDB install** → [Ch07-tooling.md](docs/chapters/Ch07-tooling.md) - test `tests/01-tooling-installed.sh`
 
 ## Part 4 - Real Mode Development
 
