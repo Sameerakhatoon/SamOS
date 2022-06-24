@@ -1,34 +1,47 @@
-; src/boot.asm - Hello World bootloader.
+; src/boot.asm - refined Hello World bootloader.
 ;
-; BIOS loads the first 512 bytes of the boot disk at physical 0x7c00 and
-; jumps there. We print "Hello, World!" using BIOS interrupt 0x10 then
-; spin forever.
+; Improvement over the previous version: instead of trusting BIOS to set the
+; segment registers, we set them up ourselves. Origin is now 0 (offsets are
+; relative to the segment, not to physical 0x7c00). We point DS and ES at
+; 0x07C0 so labels resolve to physical 0x7C00 + offset, and SS at 0 so the
+; stack is well-defined.
 
-ORG 0x7c00          ; tell NASM where in memory our code will run
-BITS 16             ; we're writing 16-bit code
+ORG 0
+BITS 16
 
 start:
-    mov si, message ; address of `message` into SI
+    cli                 ; disable interrupts during segment register setup
+
+    mov ax, 0x07C0
+    mov ds, ax          ; data segment at 0x07C0 (so [label] = 0x7C00+label)
+    mov es, ax          ; extra segment same as data segment
+
+    mov ax, 0x0000
+    mov ss, ax          ; stack segment at 0
+
+    sti                 ; re-enable interrupts
+
+    mov si, message
     call print
-    jmp $           ; spin here forever
+    jmp $
 
 print:
-    mov bx, 0       ; (unused; reserved by book listing)
+    mov bx, 0
 .loop:
-    lodsb           ; load byte at DS:SI into AL, increment SI
+    lodsb
     cmp al, 0
-    je .done        ; end of string → return
+    je .done
     call print_char
     jmp .loop
 .done:
     ret
 
 print_char:
-    mov ah, 0eh     ; BIOS teletype output service
-    int 0x10        ; print AL to screen
+    mov ah, 0x0E
+    int 0x10
     ret
 
 message: db 'Hello, World!', 0
 
-times 510-($-$$) db 0   ; pad to 510 bytes
-dw 0xAA55               ; boot signature in the last two bytes
+times 510-($-$$) db 0
+dw 0xAA55
