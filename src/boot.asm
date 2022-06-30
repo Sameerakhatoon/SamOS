@@ -1,8 +1,8 @@
-; src/boot.asm - register our own ISR at vector 0x80.
+; src/boot.asm - register an exception handler for divide-by-zero (#DE).
 ;
-; Sets up segment registers (same as Ch 8), then writes a new IVT entry at
-; offset 0x80 * 4 = 0x200, pointing to our `print` routine. After that we
-; load SI with the address of `message` and `int 0x80` triggers the handler.
+; Same idea as the previous chapter, but for vector 0 instead of 0x80.
+; Then we deliberately `div ax` with ax = 0 to trigger #DE and watch the
+; handler print "Divide by zero error!".
 
 ORG 0
 BITS 16
@@ -16,17 +16,22 @@ start:
     mov ss, ax
     sti
 
-    ; Install vector 0x80 in the IVT. IVT entry layout: offset (2B) then
-    ; segment (2B). SS = 0, so [ss:0x200] points at physical 0x200.
+    ; Install vector 0 (divide-by-zero) in the IVT.
     mov ax, 0x07C0
-    mov word [ss:0x202], ax     ; segment half
+    mov word [ss:0x02], ax              ; segment half
+    mov ax, div_zero_handler
+    mov word [ss:0x00], ax              ; offset half
 
-    lea ax, [print]
-    mov word [ss:0x200], ax     ; offset half
+    ; Deliberately divide by zero.
+    mov ax, 0
+    div ax
 
-    lea si, [message]
-    int 0x80
     jmp $
+
+div_zero_handler:
+    mov si, div_zero_message
+    call print
+    iret
 
 print:
     mov bx, 0
@@ -37,15 +42,14 @@ print:
     call print_char
     jmp .loop
 .done:
-    iret                        ; interrupt-return (NOT plain ret)
+    ret                                 ; plain ret (called from div_zero_handler, not from int)
 
 print_char:
     mov ah, 0x0E
     int 0x10
     ret
 
-message:     db 'Hello, World!', 0
-isr_message: db 'Interrupt Happened!', 0
+div_zero_message: db 'Divide by zero error!', 0
 
 times 510-($-$$) db 0
 dw 0xAA55

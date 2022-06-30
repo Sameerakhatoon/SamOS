@@ -45,7 +45,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 10** - What Are Interrupts? (prose) -> [Ch14-what-are-interrupts.md](docs/chapters/Ch14-what-are-interrupts.md)
 - [x] **Ch 11** - The Interrupt Vector Table Explained (prose) -> [Ch15-ivt.md](docs/chapters/Ch15-ivt.md)
 - [x] **Ch 12** - Implementing Our Own Interrupts in Real Mode -> [Ch16-our-own-interrupt.md](docs/chapters/Ch16-our-own-interrupt.md)
-- [ ] **Ch 13** - Exception Handling Using Interrupts
+- [x] **Ch 13** - Exception Handling Using Interrupts -> [Ch17-exception-handling.md](docs/chapters/Ch17-exception-handling.md)
 - [ ] **Ch 14** - Disk Access and How It Works (prose)
 - [ ] **Ch 15** - A Bootloader That Reads From Disk
 - [ ] **Ch 16** - Master Boot Record (prose)
