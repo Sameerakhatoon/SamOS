@@ -49,7 +49,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 14** - Disk Access and How It Works (prose) -> [Ch18-disk-access.md](docs/chapters/Ch18-disk-access.md)
 - [x] **Ch 15** - A Bootloader That Reads From Disk -> [Ch19-bootloader-reads-disk.md](docs/chapters/Ch19-bootloader-reads-disk.md)
 - [x] **Ch 16** - Master Boot Record (prose) -> [Ch20-mbr.md](docs/chapters/Ch20-mbr.md)
-- [ ] **Ch 17** - MBR Deeper Understanding (prose)
+- [x] **Ch 17** - MBR Deeper Understanding (prose) -> [Ch21-mbr-deeper.md](docs/chapters/Ch21-mbr-deeper.md)
 - [ ] **Ch 18** - Summary of Real Mode (prose)
 
 ## Part 5 - Protected Mode Development
