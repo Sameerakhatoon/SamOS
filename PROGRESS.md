@@ -54,7 +54,13 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 
 ## Part 5 - Protected Mode Development
 
-> Filled in as we read each chapter. Anchors: A20 line, GDT, 32-bit transition, paging, IDT, ATA PIO, FAT16, ELF, multitasking, syscalls, keyboard, shell.
+- [x] **Ch 19** - What Is Protected Mode? (prose) -> [Ch23-what-is-protected-mode.md](docs/chapters/Ch23-what-is-protected-mode.md)
+- [ ] **Ch 20** - Advantages of Protected Mode (prose)
+- [ ] **Ch 21** - Entering Protected Mode (prose)
+- [ ] **Ch 22** - Switching Our Kernel to Protected Mode (code: GDT, CR0.PE)
+- [ ] **Ch 23** - Stepping Through the Protected Mode Transition with GDB (procedure)
+
+> Remaining anchors filled in as we read: A20 line details, paging, IDT, ATA PIO, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
 ## Part 6 - Graphics, Windowing & Drivers
 
