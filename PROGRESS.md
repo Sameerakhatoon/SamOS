@@ -56,7 +56,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 
 - [x] **Ch 19** - What Is Protected Mode? (prose) -> [Ch23-what-is-protected-mode.md](docs/chapters/Ch23-what-is-protected-mode.md)
 - [x] **Ch 20** - Advantages of Protected Mode (prose) -> [Ch24-advantages-of-protected-mode.md](docs/chapters/Ch24-advantages-of-protected-mode.md)
-- [ ] **Ch 21** - Entering Protected Mode (prose)
+- [x] **Ch 21** - Entering Protected Mode (prose) -> [Ch25-entering-protected-mode.md](docs/chapters/Ch25-entering-protected-mode.md)
 - [ ] **Ch 22** - Switching Our Kernel to Protected Mode (code: GDT, CR0.PE)
 - [ ] **Ch 23** - Stepping Through the Protected Mode Transition with GDB (procedure)
 
