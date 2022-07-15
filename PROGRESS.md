@@ -59,8 +59,12 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 21** - Entering Protected Mode (prose) -> [Ch25-entering-protected-mode.md](docs/chapters/Ch25-entering-protected-mode.md)
 - [x] **Ch 22** - Switching Our Kernel to Protected Mode (GDT, CR0.PE, far jump to 32-bit) -> [Ch26-switching-to-protected-mode.md](docs/chapters/Ch26-switching-to-protected-mode.md)
 - [x] **Ch 23** - Stepping Through the Protected Mode Transition with GDB (procedure) -> [Ch27-gdb-walkthrough.md](docs/chapters/Ch27-gdb-walkthrough.md)
+- [x] **Ch 24** - Understanding the Global Descriptor Table (prose) -> [Ch28-understanding-gdt.md](docs/chapters/Ch28-understanding-gdt.md)
+- [ ] **Ch 25** - Restructuring Our Project (move boot.asm into src/boot/)
+- [ ] **Ch 26** - Automated Building with Makefiles
+- [ ] **Ch 27** - Enabling the A20 Line
 
-> Remaining anchors filled in as we read: A20 line details, paging, IDT, ATA PIO, FAT16, ELF, multitasking, syscalls, keyboard, shell.
+> Remaining anchors filled in as we read: paging, IDT, ATA PIO, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
 ## Part 6 - Graphics, Windowing & Drivers
 
