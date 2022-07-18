@@ -34,7 +34,7 @@ trap 'rm -f "$regs" "$cmd"' EXIT
 printf 'info registers\nquit\n' > "$cmd"
 
 ( sleep 2; cat "$cmd" ) | timeout 8 qemu-system-x86_64 \
-        -hda bin/os.bin \
+        -hda bin/boot.bin \
         -m 16 \
         -accel tcg \
         -display none \
