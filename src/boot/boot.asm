@@ -1,8 +1,8 @@
-; src/boot.asm - switch CPU into 32-bit Protected Mode.
+; src/boot/boot.asm - switch CPU into 32-bit Protected Mode, then enable A20.
 ;
 ; Real-mode setup, then load a GDT with null/code/data entries, flip CR0.PE,
 ; far-jump to 32-bit code, reload segment registers, set up the kernel stack,
-; spin.
+; enable the A20 line, spin.
 
 ORG 0x7C00
 BITS 16
@@ -79,6 +79,12 @@ load32:
     mov ss, ax
     mov ebp, 0x00200000
     mov esp, ebp
+
+    ; Enable the A20 line so addresses above 1 MiB no longer wrap.
+    in al, 0x92
+    or al, 2
+    out 0x92, al
+
     jmp $
 
 times 510-($-$$) db 0
