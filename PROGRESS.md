@@ -64,7 +64,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 26** - Automated Building with Makefiles -> [Ch30-makefile.md](docs/chapters/Ch30-makefile.md)
 - [x] **Ch 27** - Enabling the A20 Line -> [Ch31-a20-line.md](docs/chapters/Ch31-a20-line.md)
 - [x] **Ch 28** - Protection Rings in 32-bit Protected Mode (prose) -> [Ch32-protection-rings.md](docs/chapters/Ch32-protection-rings.md)
-- [ ] **Ch 29** - Creating a Cross Compiler so we can code in C
+- [x] **Ch 29** - Creating a Cross Compiler so we can code in C -> [Ch33-cross-compiler.md](docs/chapters/Ch33-cross-compiler.md)
 
 > Remaining anchors filled in as we read: paging, IDT, ATA PIO, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
