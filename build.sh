@@ -1,9 +1,13 @@
 #!/bin/bash
-# build.sh - thin wrapper that just runs `make`. The Makefile is the source
-# of truth for build commands.
+# build.sh - exports the cross-compiler PATH and runs `make all`.
 
 set -e
 cd "$(dirname "$0")"
+
+export PREFIX="$HOME/opt/cross"
+export TARGET=i686-elf
+export PATH="$PREFIX/bin:$PATH"
+
 mkdir -p bin build
 make all
-echo "build: bin/boot.bin ($(stat -c%s bin/boot.bin) bytes)"
+echo "build: bin/os.bin ($(stat -c%s bin/os.bin) bytes)"

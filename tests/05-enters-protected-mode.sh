@@ -15,13 +15,13 @@ cd "$(dirname "$0")/.."
 
 ./build.sh > /dev/null
 
-size=$(stat -c%s bin/boot.bin)
-if [ "$size" != "512" ]; then
-    echo "FAIL: bin/boot.bin = $size bytes, expected 512"
+boot_size=$(stat -c%s bin/boot.bin)
+if [ "$boot_size" != "512" ]; then
+    echo "FAIL: bin/boot.bin = $boot_size bytes, expected 512"
     exit 1
 fi
 
-sig=$(tail -c 2 bin/boot.bin | xxd -p)
+sig=$(head -c 512 bin/os.bin | tail -c 2 | xxd -p)
 if [ "$sig" != "55aa" ]; then
     echo "FAIL: boot signature = $sig, expected 55aa"
     exit 1
@@ -34,7 +34,7 @@ trap 'rm -f "$regs" "$cmd"' EXIT
 printf 'info registers\nquit\n' > "$cmd"
 
 ( sleep 2; cat "$cmd" ) | timeout 8 qemu-system-x86_64 \
-        -hda bin/boot.bin \
+        -hda bin/os.bin \
         -m 16 \
         -accel tcg \
         -display none \
