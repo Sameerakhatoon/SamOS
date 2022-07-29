@@ -68,6 +68,9 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 30** - Understanding ATA Drives (prose) -> [Ch34-understanding-ata.md](docs/chapters/Ch34-understanding-ata.md)
 - [x] **Ch 31** - LBA vs CHS (prose) -> [Ch35-lba-vs-chs.md](docs/chapters/Ch35-lba-vs-chs.md)
 - [x] **Ch 32** - Extending Our 32-Bit Kernel Across Multiple Sectors (ATA PIO, kernel.asm, linker.ld, Makefile rewrite) -> [Ch36-extending-kernel-multiple-sectors.md](docs/chapters/Ch36-extending-kernel-multiple-sectors.md)
+- [x] **Ch 33** - Debugging Your 32-Bit Kernel (procedure) -> [Ch37-debugging-32bit-kernel.md](docs/chapters/Ch37-debugging-32bit-kernel.md)
+- [ ] **Ch 34** - Improving Cleaning in the Makefile
+- [ ] **Ch 35** - Addressing Alignment Issues (linker.ld page-align sections)
 
 > Remaining anchors filled in as we read: paging, IDT, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
