@@ -73,7 +73,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 35** - Addressing Alignment Issues (linker.ld page-align sections) -> [Ch39-alignment.md](docs/chapters/Ch39-alignment.md)
 - [x] **Ch 36** - Transitioning to C (kernel.c + kernel.h, Makefile C rule, kernel.asm calls kernel_main) -> [Ch40-transitioning-to-c.md](docs/chapters/Ch40-transitioning-to-c.md)
 - [x] **Ch 37** - Understanding Text Mode in Protected Mode (prose) -> [Ch41-text-mode-protected.md](docs/chapters/Ch41-text-mode-protected.md)
-- [ ] **Ch 38** - Implementing Text Mode (VGA text driver in C)
+- [x] **Ch 38** - Implementing Text Mode (VGA text driver, prints "Hello world!") -> [Ch42-implementing-text-mode.md](docs/chapters/Ch42-implementing-text-mode.md)
 
 > Remaining anchors filled in as we read: paging, IDT, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
