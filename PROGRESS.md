@@ -78,6 +78,9 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 40** - Implementing the IDT (config.h, idt/, memory/, kernel hooks) -> [Ch44-implementing-idt.md](docs/chapters/Ch44-implementing-idt.md)
 - [x] **Ch 41** - Understanding IN and OUT in Protected Mode (prose) -> [Ch45-in-out-protected-mode.md](docs/chapters/Ch45-in-out-protected-mode.md)
 - [x] **Ch 42** - Implementing IN and OUT (src/io/io.asm) -> [Ch46-implementing-in-out.md](docs/chapters/Ch46-implementing-in-out.md)
+- [x] **Ch 43** - Programmable Interrupt Controller (PIC) (prose) -> [Ch47-pic.md](docs/chapters/Ch47-pic.md)
+- [ ] **Ch 44** - Mapping the Programmable Interrupt Controller (prose)
+- [ ] **Ch 45** - Implementing our PIC code (remap, IRQ1 keyboard handler)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
