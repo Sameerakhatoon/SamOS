@@ -1,8 +1,3 @@
-; src/kernel.asm - loaded at 0x100000 by the boot sector.
-;
-; Reloads segment selectors, sets up the kernel stack, re-enables the A20
-; line for completeness, then spins. Padded to a 512-byte sector boundary.
-
 [BITS 32]
 global _start
 extern kernel_main
@@ -24,6 +19,19 @@ _start:
     in al, 0x92
     or al, 2
     out 0x92, al
+
+    ; Remap the master PIC.
+    mov al, 00010001b           ; ICW1: init + ICW4 needed
+    out 0x20, al                ; master command port
+
+    mov al, 0x20                ; ICW2: master starts at vector 0x20
+    out 0x21, al
+
+    mov al, 00000001b           ; ICW4: 8086 mode
+    out 0x21, al
+
+    ; Enable interrupts.
+    sti
 
     call kernel_main
 
