@@ -36,13 +36,12 @@ chars=$(od -An -v -tx1 -w1 "$dump" \
 
 count=$(echo "$chars" | grep -o 'Keyboard pressed!' | wc -l)
 
-# QEMU's sendkey delivers both press and release scancodes which both fire
-# IRQ1 with the new drain, so we get at least 3 (key presses) and possibly
-# more. We require at least 3 to confirm multiple keys produce output.
-if [ "$count" -ge 3 ]; then
+# G02 filters key-release scancodes so each sendkey produces exactly one
+# print. 3 keys -> exactly 3 lines.
+if [ "$count" = "3" ]; then
     exit 0
 fi
 
-echo "FAIL: expected at least 3 'Keyboard pressed!' messages, got $count"
+echo "FAIL: expected exactly 3 'Keyboard pressed!' messages, got $count"
 echo "      first 400 chars: $(echo "$chars" | head -c 400)"
 exit 1

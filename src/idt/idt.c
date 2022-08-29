@@ -16,11 +16,21 @@ void idt_zero(){
 }
 
 void int21h_handler(){
-    print("Keyboard pressed!\n");
     // G01: drain the keyboard controller's data port. Without this read,
     // port 0x60 holds the previous scancode and the controller never raises
     // IRQ1 again, so only the first key produces output.
-    (void)insb(0x60);
+    unsigned char sc = insb(0x60);
+
+    // G02: only print on key DOWN, not key UP. The PS/2 keyboard sends one
+    // scancode on press (high bit clear) and another on release (high bit
+    // set). Filtering out the release halves the output so each key produces
+    // exactly one "Keyboard pressed!" line. Extended-prefix bytes (0xE0)
+    // are also filtered by this check because we read them on a separate
+    // IRQ and the next scancode comes on the IRQ after that.
+    if((sc & 0x80) == 0){
+        print("Keyboard pressed!\n");
+    }
+
     // Acknowledge the interrupt to the master PIC.
     outb(0x20, 0x20);
 }

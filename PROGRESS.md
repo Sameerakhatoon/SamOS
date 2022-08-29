@@ -95,5 +95,6 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 Each entry: short title + chapter where surfaced + link to the gotcha note.
 
 - [G01](docs/gotchas/G01-keyboard-drain.md) - keyboard handler must drain port 0x60 (surfaced in Ch 45)
+- [G02](docs/gotchas/G02-press-not-release.md) - filter key-release and 0xE0-prefix scancodes (surfaced after G01)
 
 ---
