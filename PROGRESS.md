@@ -83,7 +83,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 45** - Implementing our PIC code (remap, IRQ1 keyboard handler) -> [Ch49-implementing-pic.md](docs/chapters/Ch49-implementing-pic.md)
 - [x] **Ch 46** - Memory Allocation in Kernel Development (prose) -> [Ch50-memory-allocation.md](docs/chapters/Ch50-memory-allocation.md)
 - [x] **Ch 47** - Our Kernel Heap Design (prose) -> [Ch51-heap-design.md](docs/chapters/Ch51-heap-design.md)
-- [ ] **Ch 48+** - Implement the kernel heap (heap.h, heap.c, kheap.h, kheap.c, kmalloc/kfree)
+- [x] **Ch 48** - Implementing our Heap (heap.h, heap.c, kheap.h, kheap.c, kmalloc/kfree) -> [Ch52-implementing-heap.md](docs/chapters/Ch52-implementing-heap.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
