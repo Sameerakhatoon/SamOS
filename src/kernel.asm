@@ -30,8 +30,9 @@ _start:
     mov al, 00000001b           ; ICW4: 8086 mode
     out 0x21, al
 
-    ; Enable interrupts.
-    sti
+    ; Interrupts stay off until kernel_main's enable_interrupts() runs after
+    ; the IDT has been loaded. The old `sti` here would let IRQs land on an
+    ; uninitialized IDT and triple-fault.
 
     call kernel_main
 

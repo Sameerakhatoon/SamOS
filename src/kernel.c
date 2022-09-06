@@ -76,6 +76,7 @@ void kernel_main(){
 
     kheap_init();
     idt_init();
+    enable_interrupts();
 
     // kmalloc smoke probe: two distinct allocations and one free.
     void* p1 = kmalloc(100);
