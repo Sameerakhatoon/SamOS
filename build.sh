@@ -8,6 +8,6 @@ export PREFIX="$HOME/opt/cross"
 export TARGET=i686-elf
 export PATH="$PREFIX/bin:$PATH"
 
-mkdir -p bin build build/idt build/memory build/memory/heap build/io
+mkdir -p bin build build/idt build/memory build/memory/heap build/memory/paging build/io
 make all
 echo "build: bin/os.bin ($(stat -c%s bin/os.bin) bytes)"

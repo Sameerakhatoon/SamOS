@@ -16,11 +16,14 @@ cd "$(dirname "$0")/.."
 dump=$(mktemp)
 trap 'rm -f "$dump"' EXIT
 
-( sleep 2.5; printf 'sendkey a\n'; sleep 0.5; \
-  printf 'pmemsave 0xb8000 4096 "%s"\nquit\n' "$dump" ) \
-        | timeout 10 qemu-system-x86_64 \
+(
+    sleep 8
+    printf 'sendkey a\n'; sleep 1
+    printf 'pmemsave 0xb8000 4096 "%s"\nquit\n' "$dump"
+) \
+        | timeout 25 qemu-system-x86_64 \
         -hda bin/os.bin \
-        -m 16 \
+        -m 256 \
         -accel tcg \
         -display none \
         -vga std \

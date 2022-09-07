@@ -17,9 +17,9 @@ trap 'rm -f "$dump" "$cmd"' EXIT
 
 printf 'pmemsave 0xb8000 4096 "%s"\nquit\n' "$dump" > "$cmd"
 
-( sleep 2; cat "$cmd" ) | timeout 8 qemu-system-x86_64 \
+( sleep 7; cat "$cmd" ) | timeout 25 qemu-system-x86_64 \
         -hda bin/os.bin \
-        -m 16 \
+        -m 256 \
         -accel tcg \
         -display none \
         -vga std \
