@@ -87,6 +87,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 49** - Enable/disable interrupts from C -> [Ch53-enable-disable-interrupts.md](docs/chapters/Ch53-enable-disable-interrupts.md)
 - [x] **Ch 50** - Understanding paging in 32-bit protected mode (prose) -> [Ch54-paging.md](docs/chapters/Ch54-paging.md)
 - [x] **Ch 51** - Implement paging (paging.h, paging.c, paging.asm, identity-mapped 4 GiB, CR0.PG on) -> [Ch55-implementing-paging.md](docs/chapters/Ch55-implementing-paging.md) - test `tests/14-paging-enabled.sh`
+- [x] **Ch 52** - Build on paging (paging_is_aligned, paging_get_indexes, paging_set, virt 0x1000 remap demo) -> [Ch56-building-on-paging.md](docs/chapters/Ch56-building-on-paging.md) - test `tests/15-paging-remap.sh`
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
