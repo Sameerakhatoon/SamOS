@@ -89,6 +89,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 51** - Implement paging (paging.h, paging.c, paging.asm, identity-mapped 4 GiB, CR0.PG on) -> [Ch55-implementing-paging.md](docs/chapters/Ch55-implementing-paging.md) - test `tests/14-paging-enabled.sh`
 - [x] **Ch 52** - Build on paging (paging_is_aligned, paging_get_indexes, paging_set, virt 0x1000 remap demo) -> [Ch56-building-on-paging.md](docs/chapters/Ch56-building-on-paging.md) - test `tests/15-paging-remap.sh`
 - [x] **Ch 53** - PCI IDE controller (prose: master/slave, LBA-28, port map at 0x1F0..0x1F7) -> [Ch57-pci-ide-controller.md](docs/chapters/Ch57-pci-ide-controller.md)
+- [x] **Ch 54** - Implement disk driver in C (disk.h, disk.c, disk_read_sector via 0x1F0..0x1F7) -> [Ch58-implementing-disk-driver.md](docs/chapters/Ch58-implementing-disk-driver.md) - test `tests/16-disk-reads-sector.sh`
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
