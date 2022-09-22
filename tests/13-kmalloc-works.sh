@@ -37,13 +37,15 @@ chars=$(od -An -v -tx1 -w1 "$dump" \
 
 ok=1
 # After Ch 51 paging setup the kernel heap has used 1025 blocks for the
-# page directory (1) + page tables (1024). Ch 54 removed the Ch 52 demo
-# remap (which kzalloc'd one extra 4 KiB page), so block usage drops back
-# to 1025 before kernel_main's kmalloc smoke probe runs.
-# So km1 lands at 0x01000000 + 1025 * 0x1000 = 0x01402000.
-echo "$chars" | grep -q 'km1=01402000' || { echo "FAIL: km1 != 0x01402000"; ok=0; }
-echo "$chars" | grep -q 'km2=01403000' || { echo "FAIL: km2 != 0x01403000"; ok=0; }
-echo "$chars" | grep -q 'km3=01402000' || { echo "FAIL: km3 != 0x01402000 (free+realloc reuse)"; ok=0; }
+# page directory (1) + page tables (1024). Ch 59 then parses
+# "0:/bin/shell.exe" before kernel_main's kmalloc smoke probe, which
+# kzalloc's 6 more blocks (path_root + 2 path_part structs + 2 path-part
+# strings + 1 trailing get_path_part that returns empty), taking total
+# pre-probe usage to 1031 blocks.
+# So km1 lands at 0x01000000 + 1031 * 0x1000 = 0x01407000.
+echo "$chars" | grep -q 'km1=01407000' || { echo "FAIL: km1 != 0x01407000"; ok=0; }
+echo "$chars" | grep -q 'km2=01408000' || { echo "FAIL: km2 != 0x01408000"; ok=0; }
+echo "$chars" | grep -q 'km3=01407000' || { echo "FAIL: km3 != 0x01407000 (free+realloc reuse)"; ok=0; }
 
 if [ $ok -ne 1 ]; then
     echo "      first 600 chars: $(echo "$chars" | head -c 600)"
