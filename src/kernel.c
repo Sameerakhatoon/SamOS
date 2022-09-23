@@ -6,6 +6,7 @@
 #include "disk/disk.h"
 #include "string/string.h"
 #include "fs/pparser.h"
+#include "disk/streamer.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -95,19 +96,15 @@ void kernel_main(){
 
     enable_interrupts();
 
-    // Ch 59 smoke probe: parse "0:/bin/shell.exe" and print the drive
-    // number plus the first two parts of the linked list.
-    struct path_root* root_path = pathparser_parse("0:/bin/shell.exe", NULL);
-    print("\npp_drv=");
-    print_hex32(root_path ? (unsigned int)root_path->drive_no : 0xDEAD);
-    if(root_path && root_path->first){
-        print(" pp_p1=");
-        print(root_path->first->part);
-        if(root_path->first->next){
-            print(" pp_p2=");
-            print(root_path->first->next->part);
-        }
-    }
+    // Ch 60 smoke probe: stream 2 bytes from byte position 0x1FE (the
+    // last two bytes of sector 0, i.e. the boot signature 0x55 0xAA).
+    struct disk_stream* stream = diskstreamer_new(0);
+    diskstreamer_seek(stream, 0x1FE);
+    unsigned char ss[2] = { 0, 0 };
+    diskstreamer_read(stream, ss, 2);
+    diskstreamer_close(stream);
+    print("\nss=");
+    print_hex32(((unsigned int)ss[0] << 8) | (unsigned int)ss[1]);
 
     // kmalloc smoke probe: two distinct allocations and one free.
     void* p1 = kmalloc(100);
