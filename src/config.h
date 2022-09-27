@@ -14,4 +14,7 @@
 
 #define SAMOS_SECTOR_SIZE       512
 
+#define SAMOS_MAX_FILESYSTEMS        12
+#define SAMOS_MAX_FILE_DESCRIPTORS  512
+
 #endif
