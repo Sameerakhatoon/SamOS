@@ -96,6 +96,14 @@ void kernel_main(){
     print(" slen=");
     print_hex32(strnlen("hello", 100));
 
+    // Ch 64 smoke probe: strcpy must copy "hi" + null terminator,
+    // and the returned strlen must be 2.
+    char sbuf[8];
+    strcpy(sbuf, "hi");
+    print(" scp=");
+    print(sbuf);
+    print_hex32(strlen(sbuf));
+
     enable_interrupts();
 
     // Ch 60 smoke probe: stream 2 bytes from byte position 0x1FE (the
