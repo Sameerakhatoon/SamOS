@@ -121,6 +121,11 @@ void kernel_main(){
     print(" fopen=");
     print_hex32((unsigned int)fopen("0:/anything", "r"));
 
+    // Ch 65 smoke probe: FAT16 driver registered itself with the VFS,
+    // and disk.filesystem was filled in via fs_resolve. Print the name.
+    print(" fs=");
+    print(disk_get(0)->filesystem ? disk_get(0)->filesystem->name : "NONE");
+
     // kmalloc smoke probe: two distinct allocations and one free.
     void* p1 = kmalloc(100);
     void* p2 = kmalloc(8000);
