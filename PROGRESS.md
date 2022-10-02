@@ -101,6 +101,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 63** - VFS scaffolding (file.h/file.c, fs_init, fs_resolve, disk.filesystem; fopen stub) -> [Ch67-vfs-scaffolding.md](docs/chapters/Ch67-vfs-scaffolding.md) - test `tests/21-vfs-fopen-stub.sh`
 - [x] **Ch 64** - strcpy (string.h/string.c) -> [Ch68-strcpy.md](docs/chapters/Ch68-strcpy.md) - test `tests/22-strcpy.sh`
 - [x] **Ch 65** - FAT16 driver foundations (fat16.h, fat16.c registers with VFS via fs_static_load) -> [Ch69-fat16-stub.md](docs/chapters/Ch69-fat16-stub.md) - test `tests/23-fat16-registers.sh`
+- [x] **Ch 66** - FAT16 structures + constants (fat_header, fat_header_extended, fat_directory_item, fat_h, fat_directory, fat_item, fat_item_descriptor, fat_private) -> [Ch70-fat16-structures.md](docs/chapters/Ch70-fat16-structures.md) - test `tests/24-fat16-struct-sizes.sh`
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 

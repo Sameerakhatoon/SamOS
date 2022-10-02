@@ -8,6 +8,7 @@
 #include "fs/pparser.h"
 #include "disk/streamer.h"
 #include "fs/file.h"
+#include "fs/fat/fat16.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -125,6 +126,11 @@ void kernel_main(){
     // and disk.filesystem was filled in via fs_resolve. Print the name.
     print(" fs=");
     print(disk_get(0)->filesystem ? disk_get(0)->filesystem->name : "NONE");
+
+    // Ch 66 smoke probe: packed FAT16 structs must have the on-disk
+    // sizes the spec demands. Expect "fszs=00000001".
+    print(" fszs=");
+    print_hex32(fat16_check_sizes());
 
     // kmalloc smoke probe: two distinct allocations and one free.
     void* p1 = kmalloc(100);
