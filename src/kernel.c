@@ -132,6 +132,14 @@ void kernel_main(){
     print(" fszs=");
     print_hex32(fat16_check_sizes());
 
+    // Ch 67 smoke probe: disk.id was initialised to 0 in
+    // disk_search_and_init; disk.fs_private is still null because no
+    // driver has populated it yet. Print id then fs_private.
+    print(" did=");
+    print_hex32((unsigned int)disk_get(0)->id);
+    print(" priv=");
+    print_hex32((unsigned int)(uintptr_t)disk_get(0)->fs_private);
+
     // kmalloc smoke probe: two distinct allocations and one free.
     void* p1 = kmalloc(100);
     void* p2 = kmalloc(8000);

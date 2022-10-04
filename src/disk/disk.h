@@ -11,7 +11,9 @@ typedef unsigned int SAMOS_DISK_TYPE;
 struct disk {
     SAMOS_DISK_TYPE     type;
     int                 sector_size;
+    int                 id;
     struct filesystem*  filesystem;
+    void*               fs_private;
 };
 
 void         disk_search_and_init();
