@@ -105,6 +105,16 @@ void kernel_main(){
     print(sbuf);
     print_hex32(strlen(sbuf));
 
+    // Ch 69 smoke probes: case-insensitive compare matches, strict
+    // compare returns the byte difference, strnlen_terminator stops on
+    // the supplied terminator char.
+    print(" istr=");
+    print_hex32(istrncmp("AbC", "abc", 3) == 0 ? 1 : 0);
+    print(" scmp=");
+    print_hex32(strncmp("abc", "abd", 3) != 0 ? 1 : 0);
+    print(" sterm=");
+    print_hex32(strnlen_terminator("foo bar", 100, ' '));
+
     enable_interrupts();
 
     // Ch 60 smoke probe: stream 2 bytes from byte position 0x1FE (the

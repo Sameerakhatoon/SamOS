@@ -104,6 +104,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 66** - FAT16 structures + constants (fat_header, fat_header_extended, fat_directory_item, fat_h, fat_directory, fat_item, fat_item_descriptor, fat_private) -> [Ch70-fat16-structures.md](docs/chapters/Ch70-fat16-structures.md) - test `tests/24-fat16-struct-sizes.sh`
 - [x] **Ch 67** - disk.id and disk.fs_private fields (init id=0; fs_private stays null until a driver writes it) -> [Ch71-disk-id-and-private.md](docs/chapters/Ch71-disk-id-and-private.md) - test `tests/25-disk-id-and-fs-private.sh`
 - [x] **Ch 68** - FAT16 resolver + root directory walk + EFSNOTUS (reads BPB, validates 0x29 sig, allocates fat_private, walks root dir) -> [Ch72-fat16-resolver.md](docs/chapters/Ch72-fat16-resolver.md) - test `tests/26-fat16-resolver.sh`
+- [x] **Ch 69** - String comparison helpers (tolower, strncmp, istrncmp, strnlen_terminator) -> [Ch73-string-cmp.md](docs/chapters/Ch73-string-cmp.md) - test `tests/27-string-cmp.sh`
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
