@@ -105,6 +105,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 67** - disk.id and disk.fs_private fields (init id=0; fs_private stays null until a driver writes it) -> [Ch71-disk-id-and-private.md](docs/chapters/Ch71-disk-id-and-private.md) - test `tests/25-disk-id-and-fs-private.sh`
 - [x] **Ch 68** - FAT16 resolver + root directory walk + EFSNOTUS (reads BPB, validates 0x29 sig, allocates fat_private, walks root dir) -> [Ch72-fat16-resolver.md](docs/chapters/Ch72-fat16-resolver.md) - test `tests/26-fat16-resolver.sh`
 - [x] **Ch 69** - String comparison helpers (tolower, strncmp, istrncmp, strnlen_terminator) -> [Ch73-string-cmp.md](docs/chapters/Ch73-string-cmp.md) - test `tests/27-string-cmp.sh`
+- [x] **Ch 70** - VFS fopen real impl (ERROR/ERROR_I/ISERR macros, file_get_mode_by_string, path-parse + disk lookup + dispatch via disk-&gt;filesystem-&gt;open) -> [Ch74-vfs-fopen.md](docs/chapters/Ch74-vfs-fopen.md) - test `tests/28-vfs-fopen-dispatch.sh`
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
