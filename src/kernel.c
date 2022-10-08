@@ -2,6 +2,7 @@
 #include "idt/idt.h"
 #include "io/io.h"
 #include "memory/heap/kheap.h"
+#include "memory/memory.h"
 #include "memory/paging/paging.h"
 #include "disk/disk.h"
 #include "string/string.h"
@@ -114,6 +115,13 @@ void kernel_main(){
     print_hex32(strncmp("abc", "abd", 3) != 0 ? 1 : 0);
     print(" sterm=");
     print_hex32(strnlen_terminator("foo bar", 100, ' '));
+
+    // Ch 71 smoke probe: memcpy copies "abc" then strlen of the dest
+    // is 3. (mbuf is zeroed by declaration of a static-ish stack var.)
+    char mbuf[8] = {0};
+    memcpy(mbuf, "abc", 3);
+    print(" mcp=");
+    print_hex32(strlen(mbuf));
 
     enable_interrupts();
 
