@@ -40,20 +40,17 @@ ok=1
 # Ch 68 fat16_resolve adds: fat_private (1) + 3 streams (3) + root-dir
 # items buffer (1) + temp resolver stream (1, then closed). Slot 1031
 # becomes free.
-# Ch 70 then runs three fopen probes before kmalloc smoke:
-#   #1 "0:/anything", "r":  path_root + segment string + path_part +
-#                           trailing-string (freed) + descriptor.
-#                           Slots 1031..1033 + 1034 (trailing freed and
-#                           reused for descriptor).
-#   #2 "notapath", "r":     rejected by path parser before any alloc.
-#   #3 "0:/anything", "z":  path_root + segment string + path_part +
-#                           trailing-string (freed). Slots 1035..1037
-#                           taken, slot 1038 freed.
-# km1's first-fit walk picks slot 1038:
-#   0x01000000 + 1038 * 0x1000 = 0x0140E000
-echo "$chars" | grep -q 'km1=0140E000' || { echo "FAIL: km1 != 0x0140E000"; ok=0; }
-echo "$chars" | grep -q 'km2=0140F000' || { echo "FAIL: km2 != 0x0140F000"; ok=0; }
-echo "$chars" | grep -q 'km3=0140E000' || { echo "FAIL: km3 != 0x0140E000 (free+realloc reuse)"; ok=0; }
+# Ch 72 runs one fopen("0:/hello.txt", "r") probe before kmalloc smoke:
+#   - pathparser_parse: path_root (1031), segment string (1032),
+#                       path_part struct (1033), trailing string (1034 freed).
+#   - fat16_open: kzalloc fat_file_descriptor -> 1034 (reuses freed).
+#     Then directory miss returns ERROR(-EIO) without freeing the
+#     descriptor (book-bug leak), so the descriptor stays.
+# Slot 1035 is the first free slot when the kmalloc smoke runs:
+#   0x01000000 + 1035 * 0x1000 = 0x0140B000
+echo "$chars" | grep -q 'km1=0140B000' || { echo "FAIL: km1 != 0x0140B000"; ok=0; }
+echo "$chars" | grep -q 'km2=0140C000' || { echo "FAIL: km2 != 0x0140C000"; ok=0; }
+echo "$chars" | grep -q 'km3=0140B000' || { echo "FAIL: km3 != 0x0140B000 (free+realloc reuse)"; ok=0; }
 
 if [ $ok -ne 1 ]; then
     echo "      first 600 chars: $(echo "$chars" | head -c 600)"

@@ -135,17 +135,11 @@ void kernel_main(){
     print("\nss=");
     print_hex32(((unsigned int)ss[0] << 8) | (unsigned int)ss[1]);
 
-    // Ch 70 smoke probes: fopen now dispatches through the VFS.
-    //   fop_ok  = fopen of a well-formed path returns descriptor index 1
-    //             (fat16_open is still a stub returning null).
-    //   fop_bad = fopen with a malformed path returns 0.
-    //   fop_mod = fopen with an unknown mode returns 0.
-    print(" fop_ok=");
-    print_hex32((unsigned int)fopen("0:/anything", "r"));
-    print(" fop_bad=");
-    print_hex32((unsigned int)fopen("notapath", "r"));
-    print(" fop_mod=");
-    print_hex32((unsigned int)fopen("0:/anything", "z"));
+    // Ch 72 smoke probe: fat16_open now walks the root directory and
+    // returns ERROR(-EIO) if the file isn't found. fopen translates
+    // that to 0. The 16 MiB volume is empty, so any path misses.
+    print(" fop_miss=");
+    print_hex32((unsigned int)fopen("0:/hello.txt", "r"));
 
     // Ch 65 smoke probe: FAT16 driver registered itself with the VFS,
     // and disk.filesystem was filled in via fs_resolve. Print the name.
