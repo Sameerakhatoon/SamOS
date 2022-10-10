@@ -108,6 +108,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 70** - VFS fopen real impl (ERROR/ERROR_I/ISERR macros, file_get_mode_by_string, path-parse + disk lookup + dispatch via disk-&gt;filesystem-&gt;open) -> [Ch74-vfs-fopen.md](docs/chapters/Ch74-vfs-fopen.md) - test `tests/28-vfs-fopen-dispatch.sh`
 - [x] **Ch 71** - memcpy (memory.h/memory.c) -> [Ch75-memcpy.md](docs/chapters/Ch75-memcpy.md) - test `tests/29-memcpy.sh`
 - [x] **Ch 72** - Real fat16_open (16 helpers: directory walk, FAT chain traversal, item cloning; ERDONLY status; fopen of non-existent path returns 0) -> [Ch76-fat16-open.md](docs/chapters/Ch76-fat16-open.md) - test `tests/30-fat16-open-miss.sh`
+- [x] **Ch 73** - VFS fread (FS_READ_FUNCTION typedef, struct filesystem.read, fread dispatch with EINVARG short-circuits) -> [Ch77-vfs-fread.md](docs/chapters/Ch77-vfs-fread.md) - test `tests/31-vfs-fread.sh`
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
@@ -123,5 +124,6 @@ Each entry: short title + chapter where surfaced + link to the gotcha note.
 
 - [G01](docs/gotchas/G01-keyboard-drain.md) - keyboard handler must drain port 0x60 (surfaced in Ch 45)
 - [G02](docs/gotchas/G02-press-not-release.md) - filter key-release and 0xE0-prefix scancodes (surfaced after G01)
+- [G03](docs/gotchas/G03-stale-objects-on-header-edit.md) - struct layout edits in headers silently desync .o files (surfaced in Ch 73)
 
 ---
