@@ -109,6 +109,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 71** - memcpy (memory.h/memory.c) -> [Ch75-memcpy.md](docs/chapters/Ch75-memcpy.md) - test `tests/29-memcpy.sh`
 - [x] **Ch 72** - Real fat16_open (16 helpers: directory walk, FAT chain traversal, item cloning; ERDONLY status; fopen of non-existent path returns 0) -> [Ch76-fat16-open.md](docs/chapters/Ch76-fat16-open.md) - test `tests/30-fat16-open-miss.sh`
 - [x] **Ch 73** - VFS fread (FS_READ_FUNCTION typedef, struct filesystem.read, fread dispatch with EINVARG short-circuits) -> [Ch77-vfs-fread.md](docs/chapters/Ch77-vfs-fread.md) - test `tests/31-vfs-fread.sh`
+- [x] **Ch 74** - Refine FAT16 init (book corrects Ch 72 `*` to `+` in starting_pos; we already shipped `+`) -> [Ch78-fat16-read-init-fix.md](docs/chapters/Ch78-fat16-read-init-fix.md) (no-op code)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
