@@ -7,6 +7,8 @@ all: ./bin/boot.bin ./bin/kernel.bin
 	dd if=./bin/boot.bin >> ./bin/os.bin
 	dd if=./bin/kernel.bin >> ./bin/os.bin
 	dd if=/dev/zero bs=1048576 count=16 >> ./bin/os.bin
+	mformat -k -R 200 -c 4 -r 64 -i ./bin/os.bin > /dev/null
+	mcopy -i ./bin/os.bin ./hello.txt ::/hello.txt > /dev/null
 
 ./bin/kernel.bin: $(FILES)
 	i686-elf-ld -g -relocatable $(FILES) -o ./build/kernelfull.o

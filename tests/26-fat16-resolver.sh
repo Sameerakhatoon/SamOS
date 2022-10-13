@@ -21,7 +21,7 @@ trap 'rm -f "$dump" "$cmd"' EXIT
 
 printf 'pmemsave 0xb8000 4096 "%s"\nquit\n' "$dump" > "$cmd"
 
-( sleep 7; cat "$cmd" ) | timeout 25 qemu-system-x86_64 \
+( sleep 10; cat "$cmd" ) | timeout 25 qemu-system-x86_64 \
         -hda bin/os.bin \
         -m 256 \
         -accel tcg \
@@ -38,7 +38,7 @@ chars=$(od -An -v -tx1 -w1 "$dump" \
 
 ok=1
 echo "$chars" | grep -q 'pnz=00000001'  || { echo "FAIL: pnz != 1 (resolver did not retain fs_private)"; ok=0; }
-echo "$chars" | grep -q 'rdt=00000000'  || { echo "FAIL: rdt != 0 (root directory total)"; ok=0; }
+echo "$chars" | grep -q 'rdt=00000001'  || { echo "FAIL: rdt != 1 (expected hello.txt entry)"; ok=0; }
 
 if [ $ok -ne 1 ]; then
     echo "      first 900 chars: $(echo "$chars" | head -c 900)"

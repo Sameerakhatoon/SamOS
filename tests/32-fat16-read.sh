@@ -1,10 +1,11 @@
 #!/bin/bash
-# tests/31-vfs-fread.sh
+# tests/32-fat16-read.sh
 #
-# Ch 73 - fread is wired in the VFS layer. With fd=0 (which is always
-# invalid because descriptors start at 1) fread short-circuits to
-# -EINVARG. -EINVARG is -2; cast to unsigned that is FFFFFFFE.
-# kernel_main prints "frd=FFFFFFFE".
+# Ch 75 - the FAT16 driver's read function is wired into the VFS, and
+# the Makefile now mformats the volume + mcopies hello.txt into it.
+# kernel_main opens /hello.txt, freads 13 bytes, and prints them.
+# The file content is "Hello world!\n", so the VGA buffer should
+# contain "h=Hello world!".
 
 set -e
 cd "$(dirname "$0")/.."
@@ -32,10 +33,10 @@ chars=$(od -An -v -tx1 -w1 "$dump" \
             | xxd -r -p \
             | tr '\0' ' ')
 
-if echo "$chars" | grep -q 'frd=FFFFFFFE'; then
+if echo "$chars" | grep -q 'h=Hello world!'; then
     exit 0
 fi
 
-echo "FAIL: VGA buffer did not contain 'frd=FFFFFFFE'"
-echo "      first 1000 chars: $(echo "$chars" | head -c 1000)"
+echo "FAIL: VGA buffer did not contain 'h=Hello world!'"
+echo "      first 1200 chars: $(echo "$chars" | head -c 1200)"
 exit 1
