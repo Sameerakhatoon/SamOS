@@ -152,6 +152,13 @@ void kernel_main(){
         hbuf[11] = 0x00;
         print("\nhs=");
         print(hbuf);
+
+        // Ch 79 smoke probe: fstat the same descriptor. hello.txt is
+        // 13 bytes, not read-only -> filesize=13, flags=0.
+        struct file_stat s = { 0 };
+        fstat(fd, &s);
+        print(" fz=");   print_hex32(s.filesize);
+        print(" ffl=");  print_hex32(s.flags);
     } else {
         print("\nhs=NOPEN");
     }
