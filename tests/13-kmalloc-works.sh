@@ -36,15 +36,16 @@ chars=$(od -An -v -tx1 -w1 "$dump" \
             | tr '\0' ' ')
 
 ok=1
-# After Ch 51 paging: 1025 blocks (1 directory + 1024 page tables).
-# Ch 75 now mformats the volume so the root directory has 512 entries
-# (16384 bytes -> 4 heap blocks instead of 1) and fopen actually
-# succeeds, allocating more. By the time kmalloc smoke runs, slot 1045
-# is the first free slot:
-#   0x01000000 + 1045 * 0x1000 = 0x01415000
-echo "$chars" | grep -q 'km1=01415000' || { echo "FAIL: km1 != 0x01415000"; ok=0; }
-echo "$chars" | grep -q 'km2=01416000' || { echo "FAIL: km2 != 0x01416000"; ok=0; }
-echo "$chars" | grep -q 'km3=01415000' || { echo "FAIL: km3 != 0x01415000 (free+realloc reuse)"; ok=0; }
+# After Ch 51 paging: 1025 blocks (1 dir + 1024 tables).
+# Ch 75 added fat16_resolve (9 persistent blocks for the bigger root dir
+# and streams) and the fopen/fread chain.
+# Ch 81 now calls fclose which releases 4 blocks (fat_item, cloned dir
+# item, fat_file_descriptor, the VFS file_descriptor).
+# First free slot when kmalloc smoke runs is 1037:
+#   0x01000000 + 1037 * 0x1000 = 0x0140D000
+echo "$chars" | grep -q 'km1=01411000' || { echo "FAIL: km1 != 0x01411000"; ok=0; }
+echo "$chars" | grep -q 'km2=01412000' || { echo "FAIL: km2 != 0x01412000"; ok=0; }
+echo "$chars" | grep -q 'km3=01411000' || { echo "FAIL: km3 != 0x01411000 (free+realloc reuse)"; ok=0; }
 
 if [ $ok -ne 1 ]; then
     echo "      first 600 chars: $(echo "$chars" | head -c 600)"
