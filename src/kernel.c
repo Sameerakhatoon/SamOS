@@ -10,10 +10,19 @@
 #include "disk/streamer.h"
 #include "fs/file.h"
 #include "fs/fat/fat16.h"
+#include "gdt/gdt.h"
+#include "config.h"
 #include <stddef.h>
 #include <stdint.h>
 
 static struct paging_4gb_chunk* kernel_chunk = 0;
+
+struct gdt gdt_real[SAMOS_TOTAL_GDT_SEGMENTS];
+struct gdt_structured gdt_structured[SAMOS_TOTAL_GDT_SEGMENTS] = {
+    { .base = 0x00, .limit = 0x00,        .type = 0x00 }, // NULL segment
+    { .base = 0x00, .limit = 0xFFFFFFFF,  .type = 0x9A }, // Kernel code segment
+    { .base = 0x00, .limit = 0xFFFFFFFF,  .type = 0x92 }  // Kernel data segment
+};
 
 uint16_t* video_mem = 0;
 uint16_t  terminal_row = 0;
@@ -80,6 +89,14 @@ static void print_hex32(unsigned int v){
 void kernel_main(){
     terminal_initialize();
     print("Hello world!\ntest");
+
+    // Ch 89: reload the GDT from C so future user code/data + TSS
+    // descriptors can be added without touching boot.asm. The new
+    // GDT mirrors the bootloader's null/kernel-code/kernel-data
+    // entries so existing segment-register values stay valid.
+    memset(gdt_real, 0x00, sizeof(gdt_real));
+    gdt_structured_to_gdt(gdt_real, gdt_structured, SAMOS_TOTAL_GDT_SEGMENTS);
+    gdt_load(gdt_real, sizeof(gdt_real));
 
     kheap_init();
     fs_init();

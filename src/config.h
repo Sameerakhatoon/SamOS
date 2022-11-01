@@ -17,4 +17,6 @@
 #define SAMOS_MAX_FILESYSTEMS        12
 #define SAMOS_MAX_FILE_DESCRIPTORS  512
 
+#define SAMOS_TOTAL_GDT_SEGMENTS     3
+
 #endif
