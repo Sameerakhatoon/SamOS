@@ -123,6 +123,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 87** - Role of the TSS in our kernel (prose: single TSS, esp0 set-once for single-task design) -> [Ch89-tss-role.md](docs/chapters/Ch89-tss-role.md)
 - [x] **Ch 88** - int 0x80 walkthrough (prose: hardware vs kernel responsibilities during a ring-3 -> ring-0 trap) -> [Ch90-int80-walkthrough.md](docs/chapters/Ch90-int80-walkthrough.md)
 - [x] **Ch 89** - Kernel GDT in C (gdt.{h,c,asm}, encodeGdtEntry, gdt_structured_to_gdt, gdt_real + gdt_structured arrays loaded from kernel_main) -> [Ch91-gdt-in-c.md](docs/chapters/Ch91-gdt-in-c.md)
+- [x] **Ch 90** - TSS implementation (struct tss, tss_load asm, GDT expanded to 6 entries with user code/data + TSS at 0x28, esp0=0x600000) -> [Ch92-tss-impl.md](docs/chapters/Ch92-tss-impl.md) - test `tests/35-tss-loaded.sh`
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
