@@ -1,10 +1,11 @@
 #include "task.h"
+#include "process.h"
 #include "kernel.h"
 #include "status.h"
 #include "memory/heap/kheap.h"
 #include "memory/memory.h"
 
-static int  task_init(struct task* task);
+static int  task_init(struct task* task, struct process* process);
 static void task_list_remove(struct task* task);
 
 // Current task that is running.
@@ -18,7 +19,7 @@ struct task* task_current(){
     return current_task;
 }
 
-struct task* task_new(){
+struct task* task_new(struct process* process){
     int res = 0;
     struct task* task = kzalloc(sizeof(struct task));
     if(!task){
@@ -26,7 +27,7 @@ struct task* task_new(){
         goto out;
     }
 
-    res = task_init(task);
+    res = task_init(task, process);
     if(res != SAMOS_ALL_OK){
         goto out;
     }
@@ -81,7 +82,7 @@ int task_free(struct task* task){
     return 0;
 }
 
-static int task_init(struct task* task){
+static int task_init(struct task* task, struct process* process){
     memset(task, 0, sizeof(struct task));
 
     // Each task gets its own identity-mapped 4 GiB page directory.
@@ -96,6 +97,7 @@ static int task_init(struct task* task){
     task->registers.ip  = SAMOS_PROGRAM_VIRTUAL_ADDRESS;
     task->registers.ss  = USER_DATA_SEGMENT;
     task->registers.esp = SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START;
+    task->process       = process;
 
     return 0;
 }
