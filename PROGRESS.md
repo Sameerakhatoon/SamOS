@@ -127,6 +127,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 91** - Task foundations (struct task, registers save area, task_new/free/init, paging_free_4gb destructor, task linked list) -> [Ch93-task-foundations.md](docs/chapters/Ch93-task-foundations.md)
 - [x] **Ch 92+93** - Process abstraction (struct process, process_load_for_slot, paging_map/_to/_range/_align, strncpy, task<->process pointer) -> [Ch94-processes.md](docs/chapters/Ch94-processes.md)
 - [x] **Ch 94** - Packed GDT struct (book one-liner; we already shipped packed in Ch 89) -> noted inline in [Ch94-processes.md](docs/chapters/Ch94-processes.md) (no separate commit)
+- [x] **Ch 95+96+97** - Userland transition prologue (task.asm user_registers/restore_gpr/task_return + C task_switch/run_first_ever/task_page; first user program `programs/blank/blank.bin`; book Ch 97 asm fixes shipped inline) -> [Ch95-userland-prologue.md](docs/chapters/Ch95-userland-prologue.md) - test `tests/36-userland-prologue.sh`
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
