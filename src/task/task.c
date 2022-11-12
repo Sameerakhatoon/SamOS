@@ -33,8 +33,9 @@ struct task* task_new(struct process* process){
     }
 
     if(task_head == 0){
-        task_head = task;
-        task_tail = task;
+        task_head    = task;
+        task_tail    = task;
+        current_task = task;
         goto out;
     }
 
