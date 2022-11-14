@@ -117,6 +117,7 @@ static int task_init(struct task* task, struct process* process){
     }
 
     task->registers.ip  = SAMOS_PROGRAM_VIRTUAL_ADDRESS;
+    task->registers.cs  = USER_CODE_SEGMENT;
     task->registers.ss  = USER_DATA_SEGMENT;
     task->registers.esp = SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START;
     task->process       = process;

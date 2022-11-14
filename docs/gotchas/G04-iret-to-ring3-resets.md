@@ -1,121 +1,91 @@
-# G04 - iret to ring 3 appears to triple-fault
+# G04 - iret to ring 3 appears to triple-fault [FIXED]
 
 ## Symptom
 
-Ch 98 adds `process_load("0:/blank.bin") + task_run_first_ever_task()`
-to `kernel_main`. The kernel reaches the launch point (`entering
-userland...` shows on the VGA buffer), no panic fires, then... QEMU
-monitor's `info registers` 12 seconds later reports `CS=0x0008` and
-`EIP` somewhere outside the kernel image (e.g. `0x001cf4bd`).
+Ch 98 added `process_load("0:/blank.bin") + task_run_first_ever_task()`
+to `kernel_main`. The kernel reached the launch point (`entering
+userland...` showed on the VGA buffer), no panic fired, but QEMU
+monitor's `info registers` reported `CS=0x0008` and `EIP` somewhere
+outside the kernel image (e.g. `0x10002c`, sometimes BIOS shadow at
+`0xef39a` after a reset). The expected ring-3 state - `CS=0x001B`,
+`EIP=0x00400000`, `CPL=3` - never materialised.
 
-Expected once `task_return`'s `iretd` succeeds:
-- `CS = 0x001B` (user code selector | RPL=3)
-- `EIP = 0x00400000` (blank.bin's `jmp $`)
+## Root cause
 
-Actual: kernel-mode CS, garbage EIP. The CPU appears to be
-crash-looping (bootloader -> kernel boot -> iret -> fault -> reset).
+`task_init` was missing the line that sets the task's saved
+**code segment register**. The book's Ch 98 explicitly says:
 
-## What's known to work
+> // ADD THIS
+> task->registers.cs = USER_CODE_SEGMENT;
 
-- `process_load` runs to completion (no panic, `entering userland...`
-  is the last text printed).
-- The synthetic interrupt frame layout matches the book.
-- The Ch 95 task.asm code linked correctly (test 36).
-- Test 37 (this test) just checks the launch point is reached.
+That assignment somehow didn't land in `src/task/task.c` (the
+ss/esp/ip lines did, but cs was left at zero from the `memset`).
+Consequence: when `task_return` ran, it pushed `[ebx+32]` =
+`registers.cs` = `0` onto the synthetic interrupt frame.
 
-## What's likely broken
+`iretd` then popped `CS = 0`, which is the NULL selector. That's an
+immediate #GP. The kernel's `no_interrupt` handler iret'd back to
+`task_return`'s iretd, which #GP'd again. Eventually a stack
+overflow / nested-exception cascade triple-faulted the CPU and
+QEMU reset. After reset, the bootloader ran again, kernel loaded,
+crashed, repeat.
 
-Suspects we need to investigate when we come back to this:
+The trace showed the CPU at `EIP=0x10002c` (kernel.asm `jmp $`)
+because between resets we'd sometimes catch a fresh kernel that had
+just returned from `kernel_main` and was spinning, but with the
+launch live the kernel never reaches that line on the first boot -
+the second `EIP=0xef39a` etc. observations confirmed CR0.PG=0
+(post-reset, before the new boot enabled paging again).
 
-1. **CR0.WP and writable PTEs.** The task page directory is allocated
-   with `paging_new_4gb(PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL)`
-   - no `PAGING_IS_WRITEABLE`. CR0.WP defaults to 0 so ring 0 ignores
-   write bits, but the ring-3 user stack at `0x3FF000` would page
-   fault on any push. blank.bin doesn't push... but an incoming IRQ
-   would force a stack switch via TSS `esp0` (`0x600000`) which is
-   also non-writable in the task PD. If IF=1 in the iret EFLAGS and
-   PIT IRQ0 is unmasked, the very first timer tick after `iretd`
-   double-faults trying to push the user state.
-2. **GDT user code descriptor type byte.** Book uses `0xF8` which is
-   present + DPL=3 + S=1 + code, non-conforming, *non-readable*. Most
-   tutorials use `0xFA` (readable code). x86 doesn't require code
-   readability for fetch, but if any segment register load uses CS as
-   a source it'd #GP.
-3. **TSS `esp0` page protection.** We point esp0 at `0x600000` but
-   never explicitly map the kernel stack range with writable PTEs in
-   the task's address space.
-4. **`restore_general_purpose_registers` interaction with EBP**. The
-   Ch 97 fix patched the trailing `pop esp` to `pop ebp`, but the
-   call site immediately precedes `iretd` - if anything stomps EBP
-   between them the `iretd` could iret with the wrong frame.
+## Fix
 
-The book itself has a debugging chapter (Ch 99) that recommends GDB
-to inspect this point - which suggests the author may have had to
-debug something similar during development.
+One line in `src/task/task.c::task_init`:
 
-## Workaround for now
+```c
+task->registers.cs = USER_CODE_SEGMENT;
+```
 
-Test 37 just asserts the launch point is reached (i.e. that Ch 98
-plumbing is wired without panicking). The full "CPU is in ring 3"
-assertion is deferred until we resolve the root cause.
+added right next to the existing `task->registers.ss` /
+`registers.esp` / `registers.ip` assignments.
 
-## Debugging session 1 findings
+After the fix, QEMU monitor reports exactly the expected post-iret
+state:
 
-A first pass with QEMU `-d int,cpu_reset` and `info registers`
-inside the monitor produced:
+```
+EIP=00400000 EFL=00000216 [----AP-] CPL=3
+CS =001b 00000000 ffffffff 00cff800 DPL=3 CS32 [---]
+CR0=80000011 CR2=00000000 CR3=01XXX000 CR4=00000000
+```
 
-- After enabling the launch, the CPU ends at `CPL=0`,
-  `EIP=0x10002c` which is exactly the `jmp $` at the end of
-  `kernel.asm` (confirmed via `objdump -D bin/kernel.bin`). The
-  kernel is spinning post-`kernel_main`.
-- `CR0=0x80000011` (PE+MP+PG enabled), `CR3=0x01004000` (task's
-  page directory) - so the `paging_switch` to the task's PD did
-  work. We're stuck post-`task_return` though, not in user code.
-- After 12 seconds of QEMU run, `info registers` sometimes catches
-  CR0.PG=0 with CS=0x08 EIP somewhere in the 0xef000 BIOS shadow
-  range. That signature is the bootloader running again - the CPU
-  has triple-faulted, reset, and is rebooting. The "kernel returns
-  to jmp $" version above is what we see when we catch it during a
-  successful boot cycle.
-- The QEMU int trace shows: vector 0x20 (PIT IRQ0) fires while
-  kernel is at `0x10072a` (somewhere inside `kernel_main`), then
-  a v=0x76 event (still unidentified - possibly an SMI or QEMU
-  internal), then v=0x20 repeats at `0x10002c` (the `jmp $`).
-  The 0x20 firing is *before* `paging_switch` and `task_return`;
-  the `no_interrupt` handler at IDT[0x20] handles it cleanly. The
-  surprise is the kernel reaching `0x10002c` (i.e. `kernel_main`
-  returning) at all - if `task_return` ever transitioned to ring
-  3, the `jmp $` infinite loop in blank.bin would prevent return.
+CPL=3, CS=0x1B (user code | RPL=3), EIP=0x00400000 (blank.bin's
+`jmp $`), paging on, CR3 pointing at the task's page directory.
 
-So `task_return`'s `iretd` is *not* taking us to ring 3.
+## Tests retasked
 
-## Things we tried that did not help
+- `tests/37-ring3-reached.sh` flipped from asserting the
+  deferred-launch marker to asserting CPL=3, CS=0x001B,
+  EIP=0040000x via QEMU monitor.
+- `tests/05-enters-protected-mode.sh`, `tests/08-kernel-loaded.sh`,
+  `tests/09-kernel-main-runs.sh` now accept either kernel-mode
+  state (CS=0x08, EIP in kernel.bin range) *or* ring-3 user state
+  (CS=0x1B, EIP=0x400000). They asserted only the kernel state
+  before; with the launch live the kernel hands off to ring 3
+  before the 10-12 s sample fires.
 
-- Adding `PAGING_IS_WRITEABLE` to the task page directory creation
-  flags (`paging_new_4gb`). Reasoned this would allow the TSS
-  `esp0` stack to be written. No effect.
-- Changing the user code GDT type from `0xF8` (execute-only) to
-  `0xFA` (readable code). Modern x86 lets you fetch from
-  execute-only segments; this is more conservative. No effect.
+## Things we tried that did not help (left in the historical record below)
 
-## Things to try next
+- Adding `PAGING_IS_WRITEABLE` to the task page directory.
+- Changing the user code GDT type from `0xF8` to `0xFA`.
+- Adding `__attribute__((packed))` to `struct registers`.
 
-- Verify the struct registers offsets match what task.asm assumes.
-  Possible: GCC could pad/align the struct in a way that shifts
-  `cs`/`ip`/`ss`/`esp` away from where task.asm reads them. Quick
-  check: add `__attribute__((packed))` to `struct registers` and
-  see if behavior changes.
-- Trace the exact stack contents right before `iretd`. Add an
-  `int3` instruction two instructions before `iretd` and run with
-  QEMU monitor's `info registers` to peek at `ESP+0..16`.
-- Try a simpler `iretd` test: hardcode `cs=0x08`, `ip=0x10002c`,
-  `ss=0x10`, `esp=0x200000` in a temporary copy of task_return,
-  so we iret to *kernel* mode at the kernel `jmp $`. This isolates
-  whether `iretd` works at all vs. whether the privilege transition
-  is the problem. Successful iret to same ring proves the rest of
-  the setup is sane; failure means there's a more fundamental
-  issue.
-- Inspect the kernel image's `.asm` section is being linked at the
-  expected base address. The `R` (rodata) tag on task_return in
-  `nm` output is suspicious - though execution does work for the
-  other asm functions, so probably not the issue.
+All three were ruled out by the same wedge: `iretd` was popping a
+NULL CS regardless of writability, readability, or struct padding.
+Only setting `registers.cs` to a valid user code selector mattered.
+
+## Lesson
+
+Trust QEMU's `info registers` more aggressively. The diagnostic
+that finally cracked this was a `grep "registers.cs"` on
+`src/task/task.c` showing no match - meaning the field literally
+wasn't being initialised. We'd been chasing iret semantics for
+half an hour while the fix was a single missing C statement.
