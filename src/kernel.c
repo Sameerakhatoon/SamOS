@@ -121,7 +121,7 @@ void kernel_main(){
     // Set up identity-mapped paging for the entire 4 GiB virtual space.
     kernel_chunk = paging_new_4gb(
         PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
-    paging_switch(paging_4gb_chunk_get_directory(kernel_chunk));
+    paging_switch(kernel_chunk);
     enable_paging();
 
     // Ch 55 smoke probe: read sector 0 via the new disk_read_block
