@@ -22,6 +22,10 @@ struct interrupt_frame {
     uint32_t ss;
 } __attribute__((packed));
 
+typedef void* (*ISR80H_COMMAND)(struct interrupt_frame* frame);
+
+void  isr80h_register_command(int command_id, ISR80H_COMMAND command);
+
 struct idt_desc {
     uint16_t offset_1;     // bits 0..15 of handler address
     uint16_t selector;     // GDT selector for the handler's code segment

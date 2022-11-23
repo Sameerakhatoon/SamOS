@@ -132,6 +132,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 100** - Paging API refactor: paging_switch/map/_range/_to now take struct paging_4gb_chunk* instead of raw uint32_t* -> [Ch97-paging-refactor.md](docs/chapters/Ch97-paging-refactor.md)
 - [x] **Ch 101** - Communication with the kernel from user land (prose: int 0x80, EAX command number, user-pointer translation via user CR3) -> [Ch98-userland-kernel-comms.md](docs/chapters/Ch98-userland-kernel-comms.md)
 - [x] **Ch 102** - int 0x80 handler wiring: kernel_registers asm + kernel_page C, struct interrupt_frame, task_save_state/current_save_state, isr80h_handler + isr80h_wrapper (IDT gate binding deferred to Ch 103) -> [Ch99-int80-handler.md](docs/chapters/Ch99-int80-handler.md)
+- [x] **Ch 103+104** - Syscall dispatch table + first command (idt_set(0x80, isr80h_wrapper), isr80h_register_command(s), src/isr80h/{misc,isr80h}.{h,c}, blank.bin fires `int 0x80` and continues) -> [Ch100-syscall-dispatch.md](docs/chapters/Ch100-syscall-dispatch.md) - test `tests/38-syscall-roundtrip.sh`
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
