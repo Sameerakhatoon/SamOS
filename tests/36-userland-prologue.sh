@@ -32,15 +32,16 @@ echo "$nm_out" | grep -q ' user_registers$'                    || { echo "FAIL: 
 echo "$nm_out" | grep -q ' restore_general_purpose_registers$' || { echo "FAIL: restore_general_purpose_registers symbol missing"; ok=0; }
 echo "$nm_out" | grep -q ' task_run_first_ever_task$'          || { echo "FAIL: task_run_first_ever_task symbol missing"; ok=0; }
 
-# blank.bin entry sequence (Ch 103+104):
-#   mov eax, 0   ; B8 00 00 00 00
-#   int 0x80     ; CD 80
-#   jmp $        ; EB FE
-first7=$(od -An -tx1 -N 7 programs/blank/blank.bin | tr -d ' \n')
-[ "$first7" = "b800000000cd80" ] || { echo "FAIL: blank.bin first 7 bytes = $first7 (expected mov eax,0; int 0x80)"; ok=0; }
-# Trailing jmp short $.
-last2=$(od -An -tx1 -j 7 programs/blank/blank.bin | tr -d ' \n')
-[ "$last2" = "ebfe" ] || { echo "FAIL: blank.bin tail bytes = $last2 (expected ebfe)"; ok=0; }
+# blank.bin entry sequence (Ch 107):
+#   push 20        ; 6A 14
+#   push 30        ; 6A 1E
+#   mov eax, 0     ; B8 00 00 00 00
+#   int 0x80       ; CD 80
+#   add esp, 8     ; 83 C4 08
+#   jmp $          ; EB FE
+expected="6a146a1eb800000000cd8083c408ebfe"
+got=$(od -An -tx1 -N 16 programs/blank/blank.bin | tr -d ' \n')
+[ "$got" = "$expected" ] || { echo "FAIL: blank.bin first 16 bytes = $got (expected $expected)"; ok=0; }
 
 [ $ok -eq 1 ] || exit 1
 exit 0

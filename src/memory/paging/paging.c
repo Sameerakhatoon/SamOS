@@ -5,7 +5,7 @@
 
 void paging_load_directory(uint32_t* directory);
 
-static int  paging_get_indexes(void* virtual_address, uint32_t* directory_index_out, uint32_t* table_index_out);
+int paging_get_indexes(void* virtual_address, uint32_t* directory_index_out, uint32_t* table_index_out);
 
 static uint32_t* current_directory = 0;
 
@@ -39,7 +39,7 @@ bool paging_is_aligned(void* addr){
     return ((uint32_t)addr % PAGING_PAGE_SIZE) == 0;
 }
 
-static int paging_get_indexes(void* virtual_address, uint32_t* directory_index_out, uint32_t* table_index_out){
+int paging_get_indexes(void* virtual_address, uint32_t* directory_index_out, uint32_t* table_index_out){
     int res = 0;
     if(!paging_is_aligned(virtual_address)){
         res = -EINVARG;
@@ -115,6 +115,16 @@ void paging_free_4gb(struct paging_4gb_chunk* chunk){
     }
     kfree(chunk->directory_entry);
     kfree(chunk);
+}
+
+uint32_t paging_get(uint32_t* directory, void* virt){
+    uint32_t directory_index = 0;
+    uint32_t table_index = 0;
+    paging_get_indexes(virt, &directory_index, &table_index);
+
+    uint32_t  entry = directory[directory_index];
+    uint32_t* table = (uint32_t*)(entry & 0xfffff000);
+    return table[table_index];
 }
 
 int paging_set(uint32_t* directory, void* virt, uint32_t val){
