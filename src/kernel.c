@@ -15,6 +15,7 @@
 #include "task/task.h"
 #include "task/process.h"
 #include "isr80h/isr80h.h"
+#include "keyboard/keyboard.h"
 #include "config.h"
 #include "status.h"
 #include <stddef.h>
@@ -131,6 +132,7 @@ void kernel_main(){
     enable_paging();
 
     isr80h_register_commands();
+    keyboard_init();
 
     // Ch 55 smoke probe: read sector 0 via the new disk_read_block
     // abstraction. The last two bytes must be 55 AA (boot signature).

@@ -134,6 +134,9 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 102** - int 0x80 handler wiring: kernel_registers asm + kernel_page C, struct interrupt_frame, task_save_state/current_save_state, isr80h_handler + isr80h_wrapper (IDT gate binding deferred to Ch 103) -> [Ch99-int80-handler.md](docs/chapters/Ch99-int80-handler.md)
 - [x] **Ch 103+104** - Syscall dispatch table + first command (idt_set(0x80, isr80h_wrapper), isr80h_register_command(s), src/isr80h/{misc,isr80h}.{h,c}, blank.bin fires `int 0x80` and continues) -> [Ch100-syscall-dispatch.md](docs/chapters/Ch100-syscall-dispatch.md) - test `tests/38-syscall-roundtrip.sh`
 - [x] **Ch 105+106+107** - Reach into user-task memory (paging_get, task_page_task, task_get_stack_item, copy_string_from_task; map user stack; real sum returns 50) -> [Ch101-syscall-args.md](docs/chapters/Ch101-syscall-args.md) - test `tests/38-syscall-roundtrip.sh`
+- [x] **Ch 108** - Print syscall (cmd 1): src/isr80h/io.{h,c}, isr80h_command1_print uses task_get_stack_item + copy_string_from_task, blank.bin pushes "I can talk with the kernel!" and triggers int 0x80 -> [Ch102-syscall-print.md](docs/chapters/Ch102-syscall-print.md) - test `tests/39-syscall-print.sh`
+- [x] **Ch 109** - Understanding keyboard access in protected mode (prose) -> [Ch103-keyboard-overview.md](docs/chapters/Ch103-keyboard-overview.md)
+- [x] **Ch 110** - Virtual keyboard layer (struct keyboard driver chain, per-process keyboard_buffer in struct process, keyboard_init/insert/push/pop/backspace; book keyboard_pop ships with flipped condition, preserved verbatim) -> [Ch104-virtual-keyboard-layer.md](docs/chapters/Ch104-virtual-keyboard-layer.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
