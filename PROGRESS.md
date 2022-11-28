@@ -137,6 +137,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 108** - Print syscall (cmd 1): src/isr80h/io.{h,c}, isr80h_command1_print uses task_get_stack_item + copy_string_from_task, blank.bin pushes "I can talk with the kernel!" and triggers int 0x80 -> [Ch102-syscall-print.md](docs/chapters/Ch102-syscall-print.md) - test `tests/39-syscall-print.sh`
 - [x] **Ch 109** - Understanding keyboard access in protected mode (prose) -> [Ch103-keyboard-overview.md](docs/chapters/Ch103-keyboard-overview.md)
 - [x] **Ch 110** - Virtual keyboard layer (struct keyboard driver chain, per-process keyboard_buffer in struct process, keyboard_init/insert/push/pop/backspace; book keyboard_pop ships with flipped condition, preserved verbatim) -> [Ch104-virtual-keyboard-layer.md](docs/chapters/Ch104-virtual-keyboard-layer.md)
+- [x] **Ch 111** - PS/2 classic keyboard driver part 1 (classic.{h,c} with scan_set_one table, classic_keyboard_init outb 0x64,0xAE, scancode_to_char, classic_init; keyboard_init registers Classic; IRQ1 wiring deferred to Ch 113) -> [Ch105-ps2-classic-driver.md](docs/chapters/Ch105-ps2-classic-driver.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 

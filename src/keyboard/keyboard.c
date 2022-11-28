@@ -1,4 +1,5 @@
 #include "keyboard.h"
+#include "classic.h"
 #include "status.h"
 #include "kernel.h"
 #include "task/process.h"
@@ -12,7 +13,7 @@ static int keyboard_get_tail_index(struct process* process){
 }
 
 void keyboard_init(){
-    // Real keyboard drivers register themselves here in Ch 111.
+    keyboard_insert(classic_init());
 }
 
 int keyboard_insert(struct keyboard* keyboard){
