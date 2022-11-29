@@ -138,6 +138,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 109** - Understanding keyboard access in protected mode (prose) -> [Ch103-keyboard-overview.md](docs/chapters/Ch103-keyboard-overview.md)
 - [x] **Ch 110** - Virtual keyboard layer (struct keyboard driver chain, per-process keyboard_buffer in struct process, keyboard_init/insert/push/pop/backspace; book keyboard_pop ships with flipped condition, preserved verbatim) -> [Ch104-virtual-keyboard-layer.md](docs/chapters/Ch104-virtual-keyboard-layer.md)
 - [x] **Ch 111** - PS/2 classic keyboard driver part 1 (classic.{h,c} with scan_set_one table, classic_keyboard_init outb 0x64,0xAE, scancode_to_char, classic_init; keyboard_init registers Classic; IRQ1 wiring deferred to Ch 113) -> [Ch105-ps2-classic-driver.md](docs/chapters/Ch105-ps2-classic-driver.md)
+- [x] **Ch 112** - IDT macro refactor (NASM macros mass-generate int0..int511 stubs + interrupt_pointer_table; idt_init loop walks the table; generic interrupt_handler stub EOIs PIC; int21h/int21h_handler removed; tests 11+12 retargeted) -> [Ch106-idt-macro-refactor.md](docs/chapters/Ch106-idt-macro-refactor.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 

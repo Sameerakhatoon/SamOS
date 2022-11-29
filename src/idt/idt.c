@@ -4,14 +4,15 @@
 #include "memory/memory.h"
 #include "io/io.h"
 #include "task/task.h"
+#include "status.h"
 
 struct idt_desc  idt_descriptors[SAMOS_TOTAL_INTERRUPTS];
 struct idtr_desc idtr_descriptor;
 
-extern void idt_load(struct idtr_desc* ptr);
-extern void int21h();
-extern void no_interrupt();
-extern void isr80h_wrapper();
+extern void  idt_load(struct idtr_desc* ptr);
+extern void  no_interrupt();
+extern void  isr80h_wrapper();
+extern void* interrupt_pointer_table[SAMOS_TOTAL_INTERRUPTS];
 
 static ISR80H_COMMAND isr80h_commands[SAMOS_MAX_ISR80H_COMMANDS];
 
@@ -19,28 +20,15 @@ void idt_zero(){
     print("Divide by zero error\n");
 }
 
-void int21h_handler(){
-    // G01: drain the keyboard controller's data port. Without this read,
-    // port 0x60 holds the previous scancode and the controller never raises
-    // IRQ1 again, so only the first key produces output.
-    unsigned char sc = insb(0x60);
-
-    // G02: only print on key DOWN, not key UP. The PS/2 keyboard sends one
-    // scancode on press (high bit clear) and another on release (high bit
-    // set). Filtering out the release halves the output so each key produces
-    // exactly one "Keyboard pressed!" line. Extended-prefix bytes (0xE0)
-    // are also filtered by this check because we read them on a separate
-    // IRQ and the next scancode comes on the IRQ after that.
-    if((sc & 0x80) == 0){
-        print("Keyboard pressed!\n");
-    }
-
+void no_interrupt_handler(){
     // Acknowledge the interrupt to the master PIC.
     outb(0x20, 0x20);
 }
 
-void no_interrupt_handler(){
-    // Acknowledge the interrupt to the master PIC.
+void interrupt_handler(int interrupt, struct interrupt_frame* frame){
+    // Ch 112: catch-all C handler. Real per-interrupt dispatch lands
+    // in Ch 113 with interrupt_callbacks + idt_register_interrupt_callback.
+    // For now just ack the master PIC so the line doesn't latch.
     outb(0x20, 0x20);
 }
 
@@ -90,13 +78,12 @@ void idt_init(){
     idtr_descriptor.limit = sizeof(idt_descriptors) - 1;
     idtr_descriptor.base  = (uint32_t)idt_descriptors;
 
-    // Point every vector at the no-op handler to start with.
+    // Ch 112: every IDT vector now points at its macro-generated asm stub.
     for(int i = 0; i < SAMOS_TOTAL_INTERRUPTS; i++){
-        idt_set(i, no_interrupt);
+        idt_set(i, interrupt_pointer_table[i]);
     }
 
     idt_set(0, idt_zero);
-    idt_set(0x21, int21h);
     idt_set(0x80, isr80h_wrapper);
 
     idt_load(&idtr_descriptor);
