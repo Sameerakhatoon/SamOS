@@ -32,7 +32,13 @@ void interrupt_handler(int interrupt, struct interrupt_frame* frame){
         task_current_save_state(frame);
         interrupt_callbacks[interrupt](frame);
     }
-    task_page();
+    // G05: book code calls task_page() unconditionally; that's task_switch(
+    // current_task=NULL) when any IRQ fires before task_run_first_ever_task,
+    // which triple-faults the kernel. Only swap back to user paging if a
+    // task actually exists.
+    if(task_current()){
+        task_page();
+    }
     outb(0x20, 0x20);
 }
 
