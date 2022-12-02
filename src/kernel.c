@@ -261,7 +261,7 @@ void kernel_main(){
     // un-commented and test 37 starts asserting CS=0x1b, EIP=0x400000.
     print("\nentering userland... (deferred, G04)");
     struct process* process = 0;
-    if(process_load("0:/blank.bin", &process) != SAMOS_ALL_OK){
+    if(process_load_switch("0:/blank.bin", &process) != SAMOS_ALL_OK){
         panic("Failed to load blank.bin\n");
     }
     task_run_first_ever_task();

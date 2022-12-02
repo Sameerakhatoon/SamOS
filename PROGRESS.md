@@ -140,6 +140,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 111** - PS/2 classic keyboard driver part 1 (classic.{h,c} with scan_set_one table, classic_keyboard_init outb 0x64,0xAE, scancode_to_char, classic_init; keyboard_init registers Classic; IRQ1 wiring deferred to Ch 113) -> [Ch105-ps2-classic-driver.md](docs/chapters/Ch105-ps2-classic-driver.md)
 - [x] **Ch 112** - IDT macro refactor (NASM macros mass-generate int0..int511 stubs + interrupt_pointer_table; idt_init loop walks the table; generic interrupt_handler stub EOIs PIC; int21h/int21h_handler removed; tests 11+12 retargeted) -> [Ch106-idt-macro-refactor.md](docs/chapters/Ch106-idt-macro-refactor.md)
 - [x] **Ch 113** - Generic interrupt_handler with callback table (INTERRUPT_CALLBACK_FUNCTION typedef, interrupt_callbacks[], idt_register_interrupt_callback; ships book-verbatim, all tests red until G05 lands the null-task guard on task_page()) -> [Ch107-generic-interrupt-handler.md](docs/chapters/Ch107-generic-interrupt-handler.md)
+- [x] **Ch 114** - process_switch + process_load_switch (sets current_process; kernel_main now uses process_load_switch so process_current() returns the blank process before task_run_first_ever_task) -> [Ch108-process-switch.md](docs/chapters/Ch108-process-switch.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
