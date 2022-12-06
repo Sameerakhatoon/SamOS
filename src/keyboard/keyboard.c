@@ -55,12 +55,11 @@ void keyboard_push(char c){
 }
 
 char keyboard_pop(){
-    // Book ships this with a flipped condition (returns 0 when a
-    // task exists). Preserved verbatim per project convention; a
-    // future gxx fixes it. With no task this returns 0; with a task
-    // we never reach the rest of the function -> getkey() always
-    // returns 0 until the gotcha lands.
-    if(task_current()){
+    // G06: book ships `if (task_current()) return 0;` which is inverted.
+    // The early-return is meant to bail when there is NO task; the body
+    // below dereferences task_current()->process so the guard must be
+    // !task_current().
+    if(!task_current()){
         return 0;
     }
     struct process* process = task_current()->process;

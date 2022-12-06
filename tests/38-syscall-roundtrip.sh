@@ -18,19 +18,24 @@ cd "$(dirname "$0")/.."
 ./build.sh > /dev/null
 
 regs=$(mktemp)
-cmd=$(mktemp)
-trap 'rm -f "$regs" "$cmd"' EXIT
+trap 'rm -f "$regs"' EXIT
 
-printf 'info registers\nquit\n' > "$cmd"
-
-( sleep 12; cat "$cmd" ) | timeout 30 qemu-system-x86_64 \
+# Ch 116: blank.bin now blocks on `call getkey` before reaching print/sum.
+# Send a key, give it a beat to propagate through IRQ1 -> keyboard_pop, then
+# sample registers.
+(
+    sleep 12
+    printf 'sendkey a\n'
+    sleep 1
+    printf 'info registers\nquit\n'
+) | timeout 30 qemu-system-x86_64 \
         -hda bin/os.bin \
         -m 256 \
         -accel tcg \
         -display none \
         -monitor stdio \
         -no-reboot \
-        > "$regs" 2>&1
+        > "$regs" 2>&1 || true
 
 eip=$(grep -oE 'EIP=[0-9a-fA-F]+' "$regs" | head -1 | cut -d= -f2)
 cs=$(grep -oE 'CS =[0-9a-fA-F]+' "$regs" | head -1 | cut -d= -f2 | tr -d ' ')
