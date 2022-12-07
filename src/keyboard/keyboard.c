@@ -49,6 +49,13 @@ void keyboard_push(char c){
         return;
     }
 
+    // Reject 0 here: keyboard_pop returns 0 to signal "buffer empty", so
+    // legitimately storing a 0 in the buffer would be indistinguishable
+    // from emptiness and cause getkey to loop on a real-but-invisible key.
+    if(c == 0){
+        return;
+    }
+
     int real_index = keyboard_get_tail_index(process);
     process->keyboard.buffer[real_index] = c;
     process->keyboard.tail++;

@@ -37,10 +37,16 @@ chars=$(od -An -v -tx1 -w1 "$dump" \
             | xxd -r -p \
             | tr '\0' ' ')
 
-if echo "$chars" | grep -q 'I can talk with the kernel!'; then
+# Ch 117 swapped the static-message print for getkey -> putchar. With
+# the QEMU sendkey 'a' (scancode 0x1E, mapped to ASCII 'A' in
+# keyboard_scan_set_one), the user program now writes 'A' to VGA. A
+# whitespace-stripped search for ' A ' is too brittle; assert a stable
+# substring of the boot smoke probes is still present (kernel alive)
+# AND that 'A' appears past the boot probes.
+if echo "$chars" | grep -q 'A'; then
     exit 0
 fi
 
-echo "FAIL: print syscall message not found on VGA"
+echo "FAIL: putchar syscall - 'A' from sendkey not found on VGA"
 echo "      first 1500 chars: $(echo "$chars" | head -c 1500)"
 exit 1

@@ -32,14 +32,12 @@ echo "$nm_out" | grep -q ' user_registers$'                    || { echo "FAIL: 
 echo "$nm_out" | grep -q ' restore_general_purpose_registers$' || { echo "FAIL: restore_general_purpose_registers symbol missing"; ok=0; }
 echo "$nm_out" | grep -q ' task_run_first_ever_task$'          || { echo "FAIL: task_run_first_ever_task symbol missing"; ok=0; }
 
-# blank.bin must at least exist and contain `jmp $` (EB FE) somewhere
-# in the .asm section. Exact opcodes + offsets evolve every chapter;
-# Ch 108 also brings a .data section after the code so a strict tail
-# check stops being reliable.
+# blank.bin must at least exist and be non-trivial. Ch 117 turned the
+# `jmp $` tail into a full getkey -> putchar loop so the EB FE sentinel
+# disappeared; the test now just checks the artifact is present and
+# non-empty. End-to-end behavior checks live in tests 37+38+39.
 size=$(stat -c%s programs/blank/blank.bin)
-[ "$size" -gt 0 ] || { echo "FAIL: blank.bin is empty"; ok=0; }
-od -An -tx1 programs/blank/blank.bin | tr -d ' \n' | grep -q 'ebfe' \
-    || { echo "FAIL: blank.bin missing 'jmp $' opcodes (eb fe)"; ok=0; }
+[ "$size" -gt 32 ] || { echo "FAIL: blank.bin too small ($size bytes)"; ok=0; }
 
 [ $ok -eq 1 ] || exit 1
 exit 0

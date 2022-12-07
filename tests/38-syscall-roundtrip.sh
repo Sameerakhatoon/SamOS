@@ -58,11 +58,9 @@ if [ "$eip_dec" -lt $((16#400000)) ] || [ "$eip_dec" -gt $((16#400100)) ]; then
     ok=0
 fi
 
-# Sum command returns 20 + 30 = 50 = 0x32; wrapper plumbs that into EAX.
-case "$eax" in
-    00000032) ;;
-    *) echo "FAIL: EAX=$eax (expected 00000032, sum(20,30))"; ok=0; ;;
-esac
+# Ch 117 dropped the sum syscall from blank.asm; the program now loops on
+# getkey -> putchar and never invokes cmd 0 again. We no longer pin EAX
+# to a specific value here - just the CPL/CS/EIP-in-binary assertions.
 
 if [ $ok -ne 1 ]; then
     sed -n '1,40p' "$regs"
