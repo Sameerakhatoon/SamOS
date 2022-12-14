@@ -146,6 +146,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 117** - putchar syscall cmd 3 + keyboard_push null guard (SYSTEM_COMMAND3_PUTCHAR, isr80h_command3_putchar pulls char off user stack -> terminal_writechar; keyboard_push rejects c==0 to disambiguate from empty buffer; blank.asm becomes getkey -> putchar echo loop; tests 36/38/39 retargeted) -> [Ch111-putchar-syscall.md](docs/chapters/Ch111-putchar-syscall.md)
 - [x] **Ch 118** - Terminal backspace (terminal_backspace + 0x08 branch in terminal_writechar; user pressing BACKSPACE erases the previous char on VGA) -> [Ch112-backspace.md](docs/chapters/Ch112-backspace.md)
 - [x] **Ch 119** - Stream reader bug fix (diskstreamer_read now uses an overflow flag computed from offset+total; cross-sector reads no longer walk off the end of buf[]; tests 08/09/38 ranges widened/relaxed) -> [Ch113-stream-reader-fix.md](docs/chapters/Ch113-stream-reader-fix.md)
+- [x] **Ch 120** - Understanding ELF files (prose: header, program headers, section headers, string tables, static vs dynamic linking) -> [Ch114-elf-overview.md](docs/chapters/Ch114-elf-overview.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
