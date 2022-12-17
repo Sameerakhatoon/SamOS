@@ -10,6 +10,7 @@ all: ./bin/boot.bin ./bin/kernel.bin user_programs
 	mformat -k -R 200 -c 4 -r 64 -i ./bin/os.bin > /dev/null
 	mcopy -i ./bin/os.bin ./hello.txt ::/hello.txt > /dev/null
 	mcopy -i ./bin/os.bin ./programs/blank/blank.bin ::/blank.bin > /dev/null
+	mcopy -i ./bin/os.bin ./programs/blank/blank.elf ::/blank.elf > /dev/null
 
 user_programs:
 	cd ./programs/blank && $(MAKE) all
