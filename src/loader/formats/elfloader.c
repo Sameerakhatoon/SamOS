@@ -81,7 +81,7 @@ int elf_validate_loaded(struct elf_header* header){
             && elf_valid_encoding(header)
             && elf_has_program_header(header))
                 ? SAMOS_ALL_OK
-                : -EINVARG;
+                : -EINFORMAT;
 }
 
 void* elf_virtual_base(struct elf_file* file){
