@@ -13,9 +13,11 @@ all: ./bin/boot.bin ./bin/kernel.bin user_programs
 	mcopy -i ./bin/os.bin ./programs/blank/blank.elf ::/blank.elf > /dev/null
 
 user_programs:
+	cd ./programs/stdlib && $(MAKE) all
 	cd ./programs/blank && $(MAKE) all
 
 user_programs_clean:
+	cd ./programs/stdlib && $(MAKE) clean
 	cd ./programs/blank && $(MAKE) clean
 
 ./bin/kernel.bin: $(FILES)
