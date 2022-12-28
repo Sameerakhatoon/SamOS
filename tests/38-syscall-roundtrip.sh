@@ -56,7 +56,9 @@ in_kern=0
 if [ "$cpl" = "3" ]; then
     case "$cs" in
         001b|001B)
-            [ "$eip_dec" -ge $((16#400000)) ] && [ "$eip_dec" -le $((16#400100)) ] && in_user=1
+            # Ch 129: user binary now spans [0x400000, ~0x402000] after stdlib linkage
+            # (main + _start + samos.asm print/getkey routines).
+            [ "$eip_dec" -ge $((16#400000)) ] && [ "$eip_dec" -le $((16#402000)) ] && in_user=1
             ;;
     esac
 fi

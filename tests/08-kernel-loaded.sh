@@ -51,7 +51,7 @@ in_user=0
 # Ch 112's interrupt-table macro swelled the kernel binary; widen the
 # range to a generous 1 MiB headroom.
 [ "$eip_dec" -ge 1048576 ] && [ "$eip_dec" -le 2097152 ] && in_kernel=1
-[ "$eip_dec" -ge 4194304 ] && [ "$eip_dec" -le 4198400 ] && in_user=1
+[ "$eip_dec" -ge 4194304 ] && [ "$eip_dec" -le 4210688 ] && in_user=1
 if [ $in_kernel -eq 0 ] && [ $in_user -eq 0 ]; then
     echo "FAIL: EIP=$eip ($eip_dec dec) outside [0x100000,0x200000] U [0x400000,0x401000]"
     sed -n '1,40p' "$regs"
