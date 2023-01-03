@@ -9,6 +9,7 @@
 #include "fs/file.h"
 #include "loader/formats/elfloader.h"
 #include "kernel.h"
+#include <stdbool.h>
 
 // The current process that is running.
 struct process* current_process = 0;
@@ -243,6 +244,31 @@ void* process_malloc(struct process* process, size_t size){
 
     process->allocations[index] = ptr;
     return ptr;
+}
+
+static bool process_is_process_pointer(struct process* process, void* ptr){
+    for(int i = 0; i < SAMOS_MAX_PROGRAM_ALLOCATIONS; i++){
+        if(process->allocations[i] == ptr){
+            return true;
+        }
+    }
+    return false;
+}
+
+static void process_allocation_unjoin(struct process* process, void* ptr){
+    for(int i = 0; i < SAMOS_MAX_PROGRAM_ALLOCATIONS; i++){
+        if(process->allocations[i] == ptr){
+            process->allocations[i] = 0x00;
+        }
+    }
+}
+
+void process_free(struct process* process, void* ptr){
+    if(!process_is_process_pointer(process, ptr)){
+        return;
+    }
+    process_allocation_unjoin(process, ptr);
+    kfree(ptr);
 }
 
 int process_load(const char* filename, struct process** process){
