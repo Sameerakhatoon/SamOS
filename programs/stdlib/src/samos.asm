@@ -3,7 +3,7 @@
 section .asm
 
 global print:function
-global getkey:function
+global samos_getkey:function
 global samos_malloc:function
 global samos_free:function
 global samos_putchar:function
@@ -19,8 +19,8 @@ print:
     pop  ebp
     ret
 
-; int getkey()
-getkey:
+; int samos_getkey()
+samos_getkey:
     push ebp
     mov  ebp, esp
     mov  eax, 2            ; SYSTEM_COMMAND2_GETKEY
