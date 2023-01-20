@@ -38,9 +38,9 @@ chars=$(od -An -v -tx1 -w1 "$dump" \
 
 ok=1
 echo "$chars" | grep -q 'pnz=00000001'  || { echo "FAIL: pnz != 1 (resolver did not retain fs_private)"; ok=0; }
-# Ch 123 added blank.elf alongside blank.bin in the FAT volume; root dir
-# entry count went from 2 to 3.
-echo "$chars" | grep -q 'rdt=00000003'  || { echo "FAIL: rdt != 3 (expected hello.txt + blank.bin + blank.elf)"; ok=0; }
+# Ch 137 added shell.elf alongside hello.txt + blank.bin + blank.elf;
+# root dir is now 4.
+echo "$chars" | grep -q 'rdt=00000004'  || { echo "FAIL: rdt != 4 (expected hello.txt + blank.bin + blank.elf + shell.elf)"; ok=0; }
 
 if [ $ok -ne 1 ]; then
     echo "      first 900 chars: $(echo "$chars" | head -c 900)"
