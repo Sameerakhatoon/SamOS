@@ -10,6 +10,7 @@ void  samos_putchar(char c);
 int   samos_getkey();
 int   samos_getkeyblock();
 void  samos_terminal_readline(char* out, int max, bool output_while_typing);
+void  samos_process_load_start(const char* filename);
 void  print(const char* msg);
 
 #endif
