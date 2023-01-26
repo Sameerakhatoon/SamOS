@@ -4,12 +4,9 @@
 #include "string.h"
 
 int main(int argc, char** argv){
-    char words[] = "hello how are you";
-    char* token = strtok(words, " ");
-    while(token){
-        printf("%s\n", token);
-        token = strtok(0, " ");
-    }
+    char* ptr = malloc(20);
+    strcpy(ptr, "hello world");
+    print(ptr);
     while(1){}
     return 0;
 }

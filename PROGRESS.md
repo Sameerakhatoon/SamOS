@@ -166,6 +166,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 137** - Shell program (programs/shell/{src/shell.{c,h},linker.ld,Makefile}; kernel loads shell.elf instead of blank.elf; shell prints banner + read-line loop; blank.c trimmed to printf+while(1); FAT root grows to 4 entries) -> [Ch131-shell.md](docs/chapters/Ch131-shell.md)
 - [x] **Ch 138** - Load programs from shell (cmd 6 SYSTEM_COMMAND6_PROCESS_LOAD_START; isr80h_command6_process_load_start does copy_string_from_task + process_load_switch + task_switch + task_return; samos_process_load_start asm wrapper; shell calls it after readline) -> [Ch132-load-from-shell.md](docs/chapters/Ch132-load-from-shell.md)
 - [x] **Ch 139** - stdlib memory + string (memory.{h,c} memset/memcmp/memcpy; string.{h,c} tolower/strlen/strnlen/strnlen_terminator/istrncmp/strncmp/strcpy/strncpy/isdigit/tonumericdigit/strtok; blank.c demos strtok) -> [Ch133-stdlib-memory-string.md](docs/chapters/Ch133-stdlib-memory-string.md)
+- [x] **Ch 140** - Memory-map malloc'd pages into user PT (process_malloc now paging_map_to's the kzalloc'd ptr into process->task->page_directory with W|P|U; out_err kfrees on partial-success rollback; blank.c writes "hello world" into malloc'd buffer) -> [Ch134-mmap-malloc.md](docs/chapters/Ch134-mmap-malloc.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
