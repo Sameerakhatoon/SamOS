@@ -15,11 +15,16 @@ typedef unsigned char PROCESS_FILETYPE;
 
 struct elf_file;
 
+struct process_allocation {
+    void*  ptr;
+    size_t size;
+};
+
 struct process {
     uint16_t           id;
     char               filename[SAMOS_MAX_PATH];
     struct task*       task;
-    void*              allocations[SAMOS_MAX_PROGRAM_ALLOCATIONS];
+    struct process_allocation allocations[SAMOS_MAX_PROGRAM_ALLOCATIONS];
 
     PROCESS_FILETYPE   filetype;
     union {
