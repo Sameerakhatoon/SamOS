@@ -11,6 +11,13 @@ int   samos_getkey();
 int   samos_getkeyblock();
 void  samos_terminal_readline(char* out, int max, bool output_while_typing);
 void  samos_process_load_start(const char* filename);
+
+struct command_argument {
+    char argument[512];
+    struct command_argument* next;
+};
+
+struct command_argument* samos_parse_command(const char* command, int max);
 void  print(const char* msg);
 
 #endif
