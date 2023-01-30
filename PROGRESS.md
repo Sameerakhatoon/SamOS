@@ -169,6 +169,7 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 140** - Memory-map malloc'd pages into user PT (process_malloc now paging_map_to's the kzalloc'd ptr into process->task->page_directory with W|P|U; out_err kfrees on partial-success rollback; blank.c writes "hello world" into malloc'd buffer) -> [Ch134-mmap-malloc.md](docs/chapters/Ch134-mmap-malloc.md)
 - [x] **Ch 141** - Unmap memory on free + struct process_allocation (allocations[] now {ptr,size}; process_get_allocation_by_addr; process_free paging_map_to(flags=0) strips PRESENT/W/U before kfree; blank.c writes post-free to trigger page fault) -> [Ch135-unmap-on-free.md](docs/chapters/Ch135-unmap-on-free.md)
 - [x] **Ch 142** - Parse command arguments part 1 (user side) (struct command_argument linked list; samos_parse_command tokenizes via strtok and samos_malloc's each node) -> [Ch136-parse-command-args.md](docs/chapters/Ch136-parse-command-args.md)
+- [x] **Ch 143** - Process command arguments part 2 (kernel side) (paging_get_physical_address; task_virtual_address_to_physical; struct command_argument + struct process_arguments in process.h; process_get_arguments + process_inject_arguments; SYSTEM_COMMAND7 placeholder + SYSTEM_COMMAND8_GET_PROGRAM_ARGUMENTS; kernel.c injects "Testing!" into blank.elf) -> [Ch137-process-args-kernel.md](docs/chapters/Ch137-process-args-kernel.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 

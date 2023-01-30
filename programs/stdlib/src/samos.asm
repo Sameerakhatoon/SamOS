@@ -8,6 +8,7 @@ global samos_malloc:function
 global samos_free:function
 global samos_putchar:function
 global samos_process_load_start:function
+global samos_process_get_arguments:function
 
 ; void print(const char* msg)
 print:
@@ -67,6 +68,17 @@ samos_process_load_start:
     push ebp
     mov  ebp, esp
     mov  eax, 6            ; SYSTEM_COMMAND6_PROCESS_LOAD_START
+    push dword [ebp+8]
+    int  0x80
+    add  esp, 4
+    pop  ebp
+    ret
+
+; void samos_process_get_arguments(struct process_arguments* arguments)
+samos_process_get_arguments:
+    push ebp
+    mov  ebp, esp
+    mov  eax, 8            ; SYSTEM_COMMAND8_GET_PROGRAM_ARGUMENTS
     push dword [ebp+8]
     int  0x80
     add  esp, 4

@@ -4,12 +4,9 @@
 #include "string.h"
 
 int main(int argc, char** argv){
-    char* ptr = malloc(20);
-    strcpy(ptr, "hello world");
-    print(ptr);
-    free(ptr);
-    ptr[0] = 'B';
-    print("abc\n");
+    struct process_arguments arguments;
+    samos_process_get_arguments(&arguments);
+    printf("%i %s\n", arguments.argc, arguments.argv[0]);
     while(1){}
     return 0;
 }
