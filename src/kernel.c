@@ -279,17 +279,8 @@ void kernel_main(){
     // un-commented and test 37 starts asserting CS=0x1b, EIP=0x400000.
     print("\nentering userland... (deferred, G04)");
     struct process* process = 0;
-    if(process_load_switch("0:/blank.elf", &process) != SAMOS_ALL_OK){
-        panic("Failed to load blank.elf\n");
+    if(process_load_switch("0:/shell.elf", &process) != SAMOS_ALL_OK){
+        panic("Failed to load shell.elf\n");
     }
-
-    // Ch 143 test injection - the spawned process can read "Testing!" from argv[0].
-    // Ch 145 reverts kernel back to launching shell.elf and the shell takes
-    // over responsibility for injecting commands.
-    struct command_argument argument;
-    strcpy(argument.argument, "Testing!");
-    argument.next = 0x00;
-    process_inject_arguments(process, &argument);
-
     task_run_first_ever_task();
 }

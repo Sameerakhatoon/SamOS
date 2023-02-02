@@ -9,9 +9,19 @@ int samos_getkeyblock(){
     return val;
 }
 
+int samos_system_run(const char* command){
+    char buf[1024];
+    strncpy(buf, command, sizeof(buf));
+    struct command_argument* root_command_argument = samos_parse_command(buf, sizeof(buf));
+    if(!root_command_argument){
+        return -1;
+    }
+    return samos_system(root_command_argument);
+}
+
 struct command_argument* samos_parse_command(const char* command, int max){
     struct command_argument* root_command = 0;
-    char scommand[1024];
+    char scommand[1025];
     if(max >= (int)sizeof(scommand)){
         return 0;
     }
