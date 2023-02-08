@@ -7,4 +7,5 @@ void c_start(){
     samos_process_get_arguments(&arguments);
     int res = main(arguments.argc, arguments.argv);
     (void)res;
+    samos_exit();
 }
