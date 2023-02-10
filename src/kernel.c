@@ -279,8 +279,26 @@ void kernel_main(){
     // un-commented and test 37 starts asserting CS=0x1b, EIP=0x400000.
     print("\nentering userland... (deferred, G04)");
     struct process* process = 0;
-    if(process_load_switch("0:/shell.elf", &process) != SAMOS_ALL_OK){
-        panic("Failed to load shell.elf\n");
+
+    // Ch 150 grand finale demo: load TWO blank.elf instances with different
+    // argv. The timer-driven round-robin will print "Testing!" and "Abc!"
+    // interleaved on VGA, proving multitasking works.
+    int res = process_load_switch("0:/blank.elf", &process);
+    if(res != SAMOS_ALL_OK){
+        panic("Failed to load blank.elf\n");
     }
+    struct command_argument argument;
+    strcpy(argument.argument, "Testing!");
+    argument.next = 0x00;
+    process_inject_arguments(process, &argument);
+
+    res = process_load_switch("0:/blank.elf", &process);
+    if(res != SAMOS_ALL_OK){
+        panic("Failed to load blank.elf\n");
+    }
+    strcpy(argument.argument, "Abc!");
+    argument.next = 0x00;
+    process_inject_arguments(process, &argument);
+
     task_run_first_ever_task();
 }
