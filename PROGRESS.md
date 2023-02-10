@@ -174,6 +174,8 @@ Book source: `D:\kernel_project\kernel-md\kernel.md` (page-anchored).
 - [x] **Ch 145** - 'system' command - real cmd 7 (isr80h_command7_invoke_system_command does VA->PA translate + program load + inject_arguments + task_switch; samos_system asm wrapper + samos_system_run C wrapper that parses+invokes; kernel back to shell.elf; shell uses samos_system_run; blank.c prints argv loop) -> [Ch139-system-command.md](docs/chapters/Ch139-system-command.md)
 - [x] **Ch 146** - Process termination (process_terminate composes process_terminate_allocations + process_free_program_data + kfree stack + task_free + process_unlink; process_switch_to_any fallback; book typo "too\n" preserved; no caller yet - wired in Ch 147) -> [Ch140-process-termination.md](docs/chapters/Ch140-process-termination.md)
 - [x] **Ch 147** - Handle program crashes (idt_handle_exception calls process_terminate + task_next; task_next picks via task_get_next; idt_init registers handler for every CPU exception vector 0..0x1F) -> [Ch141-handle-crashes.md](docs/chapters/Ch141-handle-crashes.md)
+- [x] **Ch 148** - exit syscall (cmd 9) (SYSTEM_COMMAND9_EXIT; isr80h_command9_exit = process_terminate + task_next; samos_exit asm wrapper; c_start calls samos_exit after main; blank drops trailing while(1)) -> [Ch142-exit-syscall.md](docs/chapters/Ch142-exit-syscall.md)
+- [x] **Ch 149** - Caps lock + case-correct input (KEYBOARD_CAPS_LOCK_* states + capslock_state field on struct keyboard; keyboard_set/get_capslock; classic driver lowercases A-Z when caps off; CAPSLOCK scancode 0x3A toggles) -> [Ch143-caps-lock.md](docs/chapters/Ch143-caps-lock.md)
 
 > Remaining anchors filled in as we read: paging, FAT16, ELF, multitasking, syscalls, keyboard, shell.
 
