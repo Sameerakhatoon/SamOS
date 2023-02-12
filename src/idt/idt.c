@@ -40,8 +40,15 @@ void no_interrupt_handler(){
 void interrupt_handler(int interrupt, struct interrupt_frame* frame){
     kernel_page();
     if(interrupt_callbacks[interrupt] != 0){
-        task_current_save_state(frame);
-        interrupt_callbacks[interrupt](frame);
+        // G07: book unconditionally calls task_current_save_state which panics
+        // on null current_task. With idt_clock registered for IRQ0 (Ch 150)
+        // PIT IRQs that fire between enable_interrupts and the first
+        // task_run_first_ever_task hit that panic. Skip the save (and the
+        // callback) when there's no task to switch.
+        if(task_current()){
+            task_current_save_state(frame);
+            interrupt_callbacks[interrupt](frame);
+        }
     }
     // G05: book code calls task_page() unconditionally; that's task_switch(
     // current_task=NULL) when any IRQ fires before task_run_first_ever_task,
