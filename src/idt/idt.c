@@ -38,23 +38,26 @@ void no_interrupt_handler(){
 }
 
 void interrupt_handler(int interrupt, struct interrupt_frame* frame){
-    kernel_page();
+    int from_user = ((frame->cs & 0x3) == 0x3);
+
+    // G05+G07+G08: only swap segments / save state / restore paging when the
+    // trap came FROM user mode. For kernel-mode interrupts the segments and
+    // CR3 are already kernel-side, and frame->ss / frame->esp are random
+    // stack bytes (CPU only pushes them on a privilege-level change), so
+    // writing them into task->registers corrupts the user task's selectors
+    // and the subsequent task_return iretd #GPs on `mov ds, ax`.
+    if(from_user){
+        kernel_page();
+    }
     if(interrupt_callbacks[interrupt] != 0){
-        // G07: book unconditionally calls task_current_save_state which panics
-        // on null current_task. With idt_clock registered for IRQ0 (Ch 150)
-        // PIT IRQs that fire between enable_interrupts and the first
-        // task_run_first_ever_task hit that panic. Skip the save (and the
-        // callback) when there's no task to switch.
         if(task_current()){
-            task_current_save_state(frame);
+            if(from_user){
+                task_current_save_state(frame);
+            }
             interrupt_callbacks[interrupt](frame);
         }
     }
-    // G05: book code calls task_page() unconditionally; that's task_switch(
-    // current_task=NULL) when any IRQ fires before task_run_first_ever_task,
-    // which triple-faults the kernel. Only swap back to user paging if a
-    // task actually exists.
-    if(task_current()){
+    if(from_user && task_current()){
         task_page();
     }
     outb(0x20, 0x20);
