@@ -283,6 +283,14 @@ void kernel_main(){
     // Ch 150 grand finale demo: load TWO blank.elf instances with different
     // argv. The timer-driven round-robin will print "Testing!" and "Abc!"
     // interleaved on VGA, proving multitasking works.
+    //
+    // G09: disable interrupts across the dual-load. Once the first task
+    // exists and process_load_switch sets it as current_process, the very
+    // next PIT IRQ runs idt_clock -> task_next, which iretds into task 1
+    // and never returns to finish loading task 2. Re-enabled by task_return
+    // setting IF=1 in the user EFLAGS image.
+    disable_interrupts();
+
     int res = process_load_switch("0:/blank.elf", &process);
     if(res != SAMOS_ALL_OK){
         panic("Failed to load blank.elf\n");
