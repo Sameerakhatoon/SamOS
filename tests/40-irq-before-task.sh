@@ -12,29 +12,16 @@
 
 set -e
 cd "$(dirname "$0")/.."
+source tests/_lib.sh
 
 ./build.sh > /dev/null
 
-dump=$(mktemp)
-trap 'rm -f "$dump"' EXIT
+log=$(mktemp)
+trap 'rm -f "$log"' EXIT
 
-(
-    sleep 8
-    printf 'pmemsave 0xb8000 4096 "%s"\nquit\n' "$dump"
-) | timeout 25 qemu-system-x86_64 \
-        -hda bin/os.bin \
-        -m 256 \
-        -accel tcg \
-        -display none \
-        -vga std \
-        -monitor stdio \
-        -no-reboot \
-        > /dev/null 2>&1
+run_kernel_capture "$log"
 
-chars=$(od -An -v -tx1 -w1 "$dump" \
-            | awk 'NR%2==1 {printf "%s\n", $1}' \
-            | xxd -r -p \
-            | tr '\0' ' ')
+chars=$(cat "$log")
 
 if echo "$chars" | grep -q 'bootsig=000055AA'; then
     exit 0
