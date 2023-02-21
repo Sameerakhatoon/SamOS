@@ -22,7 +22,7 @@ regs=$(mktemp)
 log=$(mktemp)
 trap 'rm -f "$regs" "$log"' EXIT
 
-run_kernel_inspect "$regs" "$log" 'info registers'
+run_kernel_inspect "$regs" "$log" 'entering userland' '' 'info registers'
 
 eip=$(grep -oE 'EIP=[0-9a-fA-F]+' "$regs" | head -1 | cut -d= -f2)
 if [ -z "$eip" ]; then

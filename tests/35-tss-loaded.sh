@@ -16,7 +16,7 @@ regs=$(mktemp)
 log=$(mktemp)
 trap 'rm -f "$regs" "$log"' EXIT
 
-run_kernel_inspect "$regs" "$log" 'info registers'
+run_kernel_inspect "$regs" "$log" 'entering userland' '' 'info registers'
 
 grep -q 'TSS_OK' "$log" || { echo "FAIL: kernel never printed TSS_OK (tss_load path broken?)"; exit 1; }
 

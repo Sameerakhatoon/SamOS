@@ -361,5 +361,36 @@ void kernel_main(){
     argument.next = 0x00;
     process_inject_arguments(process, &argument);
 
+    // Behavioural-coverage tasks. Each blank.elf instance dispatches
+    // on argv[0] and exercises one Ch 145-149 user-visible path; the
+    // surviving Testing!/Abc! pair keeps the scheduler scrolling once
+    // the transients have died.
+    //   CRASH -> idt_handle_exception (Ch 147) on a user fault
+    //   EXIT  -> samos_exit / cmd 9    (Ch 148)
+    //   BS    -> terminal_backspace    (Ch 118) via "BS-ABC\b\b\bXYZ"
+    res = process_load_switch("0:/blank.elf", &process);
+    if(res != SAMOS_ALL_OK){
+        panic("Failed to load blank.elf\n");
+    }
+    strcpy(argument.argument, "CRASH");
+    argument.next = 0x00;
+    process_inject_arguments(process, &argument);
+
+    res = process_load_switch("0:/blank.elf", &process);
+    if(res != SAMOS_ALL_OK){
+        panic("Failed to load blank.elf\n");
+    }
+    strcpy(argument.argument, "EXIT");
+    argument.next = 0x00;
+    process_inject_arguments(process, &argument);
+
+    res = process_load_switch("0:/blank.elf", &process);
+    if(res != SAMOS_ALL_OK){
+        panic("Failed to load blank.elf\n");
+    }
+    strcpy(argument.argument, "BS");
+    argument.next = 0x00;
+    process_inject_arguments(process, &argument);
+
     task_run_first_ever_task();
 }
