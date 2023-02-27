@@ -53,6 +53,11 @@ blank_syms=(
     print
     samos_exit
     samos_process_get_arguments
+    samos_malloc
+    samos_free
+    samos_putchar
+    samos_getkey
+    samos_getkeyblock
     printf
 )
 
@@ -63,6 +68,8 @@ shell_syms=(
     print
     samos_terminal_readline
     samos_system_run
+    samos_process_load_start
+    samos_parse_command
     strncpy
 )
 

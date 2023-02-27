@@ -74,7 +74,15 @@ void terminal_scroll(){
     terminal_row = VGA_HEIGHT - 1;
 }
 
+static void serial_putchar(char c);
+
 void terminal_writechar(char c, char colour){
+    // Mirror every char that hits the terminal (VGA-bound or routed
+    // through terminal_backspace) to COM1 so tests get a deterministic
+    // log that contains exactly what the user saw, including putchar
+    // (cmd 3) bytes that bypass print().
+    serial_putchar(c);
+
     if(terminal_row >= VGA_HEIGHT){
         terminal_scroll();
     }
@@ -137,7 +145,6 @@ void print(const char* str){
     int len = strlen(str);
     for(int i = 0; i < len; i++){
         terminal_writechar(str[i], 15);
-        serial_putchar(str[i]);
     }
 }
 
@@ -389,6 +396,22 @@ void kernel_main(){
         panic("Failed to load blank.elf\n");
     }
     strcpy(argument.argument, "BS");
+    argument.next = 0x00;
+    process_inject_arguments(process, &argument);
+
+    res = process_load_switch("0:/blank.elf", &process);
+    if(res != SAMOS_ALL_OK){
+        panic("Failed to load blank.elf\n");
+    }
+    strcpy(argument.argument, "MF");
+    argument.next = 0x00;
+    process_inject_arguments(process, &argument);
+
+    res = process_load_switch("0:/blank.elf", &process);
+    if(res != SAMOS_ALL_OK){
+        panic("Failed to load blank.elf\n");
+    }
+    strcpy(argument.argument, "PC");
     argument.next = 0x00;
     process_inject_arguments(process, &argument);
 

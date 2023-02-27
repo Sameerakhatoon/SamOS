@@ -31,17 +31,16 @@ trap 'rm -f "$log" "$vga"' EXIT
 
 run_kernel_capture "$log" 'BS-ABC' 'Abc!'
 
-# 0x08 is the backspace byte. xxd -p gives an unbroken hex stream we
-# can grep for the literal "BS-ABC<3xBS>XYZ" delivery.
-if ! xxd -p "$log" | tr -d '\n' | grep -q '42532d414243080808585a59\|42532d4142430808085859'; then
-    # Try both 5859 (Y first) and 595a (no Z) just in case row wrap
-    # split the print; what we really want is BS-ABC + 3 backspaces +
-    # at least the first two of XYZ.
-    if ! xxd -p "$log" | tr -d '\n' | grep -qE '42532d414243(08){3}(58|59|5a)'; then
-        echo "FAIL: serial mirror missing 'BS-ABC<3xBS>X|Y|Z' raw byte sequence"
-        echo "      log head:"; head -c 400 "$log"
-        exit 1
-    fi
+# 0x08 is the backspace byte. terminal_writechar now mirrors every char
+# (including the backspace AND the substitute space that terminal_back-
+# space writes over the deleted cell) to COM1. So the expected stream
+# after "BS-ABC" (42 53 2d 41 42 43) is three pairs of 08 20 (backspace,
+# then the space the backspace handler writes), then X Y Z (58 59 5a).
+hex=$(xxd -p "$log" | tr -d '\n')
+if ! echo "$hex" | grep -qE '42532d414243(0820){3}58595a'; then
+    echo "FAIL: serial mirror missing 'BS-ABC' + 3x(BS+space) + 'XYZ' raw byte sequence"
+    echo "      log head:"; head -c 400 "$log"
+    exit 1
 fi
 
 # Phase 2: confirm the visible row reads "BS-XYZ" (terminal_backspace
