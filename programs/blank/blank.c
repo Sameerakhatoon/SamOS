@@ -59,6 +59,52 @@ int main(int argc, char** argv){
         samos_putchar('\n');
         return 0;
     }
+    if(strncmp(argv[0], "SH", 2) == 0){
+        // Ch 145: cmd 7 SYSTEM_COMMAND7_INVOKE_SYSTEM_COMMAND parses
+        // the user-supplied command into argument structs, loads the
+        // named program, and task_returns into it with argv injected.
+        // We invoke "blank.elf SHRAN" so the new task gets argv[0]=
+        // "blank.elf", falls through blank.c's branch ladder, and ends
+        // up in the default `print(argv[0])` loop printing "blank.elf"
+        // forever on serial.
+        print("SH-CALL\n");
+        samos_system_run("blank.elf SHRAN");
+        print("SH-RETURN\n");
+        while(1){}
+        return 0;
+    }
+    if(strncmp(argv[0], "LD", 2) == 0){
+        // Ch 138: cmd 6 SYSTEM_COMMAND6_PROCESS_LOAD_START loads a new
+        // ELF and switches to it. Print "LD-CALL" so the test knows we
+        // got this far, then ask the kernel to load blank.elf again
+        // (which will land in the NO-ARGV branch and print "NO-ARGV").
+        // After the call returns (it returns immediately in our impl)
+        // print "LD-RETURN" so test 51 can confirm the syscall didn't
+        // crash either side.
+        print("LD-CALL\n");
+        samos_process_load_start("0:/blank.elf");
+        print("LD-RETURN\n");
+        while(1){}
+        return 0;
+    }
+    if(strncmp(argv[0], "KEY", 3) == 0){
+        // Ch 116/149: forever-read keys via samos_getkeyblock (cmd 2
+        // wrapped in a wait loop) and echo each one as "K:<c>". This
+        // task lets test 50 verify caps-lock case toggling end-to-end:
+        // the classic keyboard driver's caps_lock state is global, so
+        // ANY key after caps_lock arrives uppercase, even if it lands
+        // in another task's buffer.
+        char buf[4] = { 'K', ':', 0, '\n' };
+        while(1){
+            int c = samos_getkeyblock();
+            buf[2] = (char)c;
+            samos_putchar(buf[0]);
+            samos_putchar(buf[1]);
+            samos_putchar(buf[2]);
+            samos_putchar(buf[3]);
+        }
+        return 0;
+    }
     while(1){
         print(argv[0]);
     }

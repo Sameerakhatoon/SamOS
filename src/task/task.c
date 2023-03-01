@@ -93,6 +93,13 @@ int task_free(struct task* task){
 int task_switch(struct task* task){
     current_task = task;
     paging_switch(task->page_directory);
+    // G11: keep current_process in lockstep with current_task so the
+    // keyboard IRQ delivers chars to the user task that is actually
+    // running. Without this current_process stays at "whatever was
+    // last process_load_switch'd at boot" and ignores PIT preemption.
+    if(task && task->process){
+        process_switch(task->process);
+    }
     return 0;
 }
 
