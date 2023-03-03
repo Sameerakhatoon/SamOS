@@ -28,7 +28,7 @@
 #define USER_CODE_SEGMENT       0x1B
 
 #define SAMOS_MAX_PROGRAM_ALLOCATIONS    1024
-#define SAMOS_MAX_PROCESSES              12
+#define SAMOS_MAX_PROCESSES              16
 
 #define SAMOS_MAX_ISR80H_COMMANDS        1024
 

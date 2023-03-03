@@ -59,6 +59,37 @@ int main(int argc, char** argv){
         samos_putchar('\n');
         return 0;
     }
+    if(strncmp(argv[0], "IT", 2) == 0){
+        // Ch 133: stdlib itoa renders an integer in decimal ASCII.
+        // The book's signature is `char* itoa(int)` returning a
+        // pointer to an internal buffer. Print as "IT:8763\n" so
+        // test 53 can grep the result.
+        print("IT:");
+        print(itoa(8763));
+        print("\n");
+        return 0;
+    }
+    if(strncmp(argv[0], "PF", 2) == 0){
+        // Ch 135: stdlib printf with %i and %s. Test 54 greps the
+        // resulting "PF:42=42 hi" on serial.
+        printf("PF:%i=%i %s\n", 42, 42, "hi");
+        return 0;
+    }
+    if(strncmp(argv[0], "RL", 2) == 0){
+        // Ch 136: stdlib samos_terminal_readline reads chars via
+        // samos_getkeyblock until '\n' or buf is full. With
+        // output_while_typing=true it putchars each accepted char so
+        // tests can see input arriving even if the line never
+        // terminates (test 55 watches for the echoed bytes).
+        print("RL-START\n");
+        char buf[8] = { 0 };
+        samos_terminal_readline(buf, 7, true);
+        print("\nRL-DONE:");
+        print(buf);
+        print("\n");
+        while(1){}
+        return 0;
+    }
     if(strncmp(argv[0], "SH", 2) == 0){
         // Ch 145: cmd 7 SYSTEM_COMMAND7_INVOKE_SYSTEM_COMMAND parses
         // the user-supplied command into argument structs, loads the
