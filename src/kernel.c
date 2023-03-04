@@ -463,5 +463,13 @@ void kernel_main(){
     argument.next = 0x00;
     process_inject_arguments(process, &argument);
 
+    // Ch 137: real shell.elf - main loops print("> ") + readline +
+    // samos_system_run, so its presence on serial ("SamOs v1.0.0",
+    // "> ") proves the shell binary actually boots end-to-end.
+    res = process_load_switch("0:/shell.elf", &process);
+    if(res != SAMOS_ALL_OK){
+        panic("Failed to load shell.elf\n");
+    }
+
     task_run_first_ever_task();
 }
