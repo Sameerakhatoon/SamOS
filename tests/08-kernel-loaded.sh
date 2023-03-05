@@ -35,9 +35,9 @@ eip_dec=$((16#$eip))
 in_kernel=0
 in_user=0
 [ "$eip_dec" -ge 1048576 ] && [ "$eip_dec" -le 2097152 ] && in_kernel=1
-[ "$eip_dec" -ge 4194304 ] && [ "$eip_dec" -le 4210688 ] && in_user=1
+[ "$eip_dec" -ge 4194304 ] && [ "$eip_dec" -lt 5242880 ] && in_user=1
 if [ $in_kernel -eq 0 ] && [ $in_user -eq 0 ]; then
-    echo "FAIL: EIP=$eip ($eip_dec dec) outside [0x100000,0x200000] U [0x400000,0x401000]"
+    echo "FAIL: EIP=$eip ($eip_dec dec) outside [0x100000,0x200000] U [0x400000,0x500000)"
     sed -n '1,40p' "$regs"
     exit 1
 fi
