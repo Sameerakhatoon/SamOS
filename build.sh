@@ -14,5 +14,5 @@ mkdir -p bin build build/idt build/memory build/memory/heap build/memory/paging 
 # dependencies, so any header edit (struct layout, prototype change)
 # would otherwise leak stale .o files into the link.
 make clean > /dev/null 2>&1 || true
-make all
+make all EXTRA_CFLAGS="$EXTRA_CFLAGS"
 echo "build: bin/os.bin ($(stat -c%s bin/os.bin) bytes)"
