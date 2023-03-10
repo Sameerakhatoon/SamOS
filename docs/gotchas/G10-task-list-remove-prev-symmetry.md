@@ -1,4 +1,8 @@
-# G10: task_list_remove missing next->prev symmetry
+# G10 - task_list_remove missing next->prev symmetry
+
+**Surfaced during:** post-Ch 150, while extending the multi-task demo from 2 to 5 tasks to add behavioural tests 45/46/47 (CRASH, EXIT, BS).
+**Fix:** add the symmetric `task->next->prev = task->prev` patch in `task_list_remove` (`src/task/task.c`).
+**Regression test:** `tests/45-exception-handler.sh` and `tests/46-exit-syscall.sh` exercise mid-list removal; the prev-symmetry fix is what lets them keep printing after CRASH/EXIT die.
 
 ## Symptom
 

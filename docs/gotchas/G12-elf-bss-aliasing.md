@@ -1,4 +1,8 @@
-# G12: .bss-only PHDR aliases the start of the ELF buffer
+# G12 - .bss-only PHDR aliases the start of the ELF buffer
+
+**Surfaced during:** post-Ch 137, while writing test 57 (BSS behavioural) which `static int bss_counter; bss_counter++;` from a user task.
+**Fix:** detour PHDRs with `p_filesz < p_memsz` through a fresh `kzalloc(p_memsz)` buffer in `process_map_elf` (`src/task/process.c`); copy `p_filesz` bytes of file content into the front, map THAT buffer instead of `elf_buffer + p_offset`.
+**Regression test:** `tests/57-bss-init.sh` asserts `BSS-OK` (counter incremented from 0 to 1) AND `BSS-FAIL` absent (counter did NOT start at the ELF magic 0x464C457F).
 
 ## Symptom
 
