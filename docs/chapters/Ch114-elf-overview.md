@@ -17,3 +17,19 @@ Today our `blank.bin` is a raw "code at virtual 0x400000" blob. ELF gives us per
 ## Reference
 
 ELF spec from the Linux Foundation: https://refspecs.linuxfoundation.org/elf/elf.pdf
+
+## Why this chapter exists
+
+Prose primer for the ELF chapters about to start.
+
+## How the change lands
+
+Verbatim summary of e_ident / PHDRs / SHDRs.
+
+## Regression test
+
+tests/42 (ELF format) and tests/43 (elf_load symbol) verify the loader covers the basics described here.
+
+## Commit
+
+Original landing: ch120 ELF overview (prose) (see `git log --oneline` for the actual hash on your branch).

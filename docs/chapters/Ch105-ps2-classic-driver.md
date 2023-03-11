@@ -17,3 +17,19 @@ The book ships the table OCR-mangled in print and points readers at the PeachOS 
 - `src/keyboard/classic.{h,c}` - new
 - `src/keyboard/keyboard.c` - include + insert call
 - `Makefile` - new FILES entry + build target
+
+## Why this chapter exists
+
+First real keyboard driver, registers with the driver chain.
+
+## How the change lands
+
+src/keyboard/classic.{h,c} + keyboard_insert wiring.
+
+## Regression test
+
+tests/11 + tests/50 exercise the IRQ1->classic_keyboard_handle_interrupt->keyboard_push path.
+
+## Commit
+
+Original landing: ch111 PS/2 classic driver part 1 (see `git log --oneline` for the actual hash on your branch).

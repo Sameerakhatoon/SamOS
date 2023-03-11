@@ -12,3 +12,19 @@ The fix: use `p_memsz` instead. That's the runtime memory footprint the ELF expe
 ## Test impact
 
 None visible - blank.elf currently has no `.bss`-only segment, so this is a forward-looking fix. The change matters as soon as a user program declares uninitialized globals.
+
+## Why this chapter exists
+
+Use p_memsz instead of p_filesz so .bss-only PHDRs map enough pages.
+
+## How the change lands
+
+One-line diff in process_map_elf.
+
+## Regression test
+
+tests/57 (the G12 behavioural test) - without ch132 + G12, BSS-FAIL prints instead of BSS-OK.
+
+## Commit
+
+Original landing: ch132 p_filesz -> p_memsz (see `git log --oneline` for the actual hash on your branch).

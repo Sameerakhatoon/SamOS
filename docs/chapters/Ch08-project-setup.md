@@ -15,3 +15,19 @@
 - `build.sh` - top-level build script. Currently a stub; the next chapter wires `nasm` into it.
 
 Why `src/` instead of repo root: SamOs uses `src/` to separate kernel sources from user programs (`programs/`) and tests (`tests/`). The book repo flattens everything at the root; we don't.
+
+## Why this chapter exists
+
+Bootstraps the project directory layout.
+
+## How the change lands
+
+mkdir + .gitkeep stubs in src/, bin/, build/.
+
+## Regression test
+
+build itself running proves layout works.
+
+## Commit
+
+Original landing: ch5 project setup (see `git log --oneline` for the actual hash on your branch).

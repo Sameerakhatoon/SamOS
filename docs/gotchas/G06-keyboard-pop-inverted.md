@@ -1,5 +1,9 @@
 # G06 - keyboard_pop's flipped early-return makes getkey block forever
 
+**Surfaced during:** Ch 116 (getkey syscall, cmd 2), the first time a user task actually called `samos_getkey()` to read a keystroke. The book ships `if (task_current()) return 0;` which is exactly inverted - it bails when there IS a task, not when there isn't.
+**Fix:** flip the condition in `src/keyboard/keyboard.c::keyboard_pop` to `if (!task_current()) return 0;`. With the fix, `getkey` returns the pushed char and userland's read loop unblocks.
+**Regression test:** `tests/50-caps-lock.sh` - needs cmd 2 (getkeyblock) to return real characters; without G06 the KEY task blocks forever and no K:* tokens appear on serial.
+
 ## Where it lives
 
 `src/keyboard/keyboard.c::keyboard_pop`.

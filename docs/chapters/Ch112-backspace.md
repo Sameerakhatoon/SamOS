@@ -12,3 +12,19 @@ Nothing else changes. The user-land putchar pipeline already routes whatever cha
 ## Edge case
 
 If both `terminal_row` and `terminal_col` are 0 the function bails out - we treat that as "screen is empty, nothing to erase". This matches the book.
+
+## Why this chapter exists
+
+0x08 byte routes to terminal_backspace rewriting the cell behind the cursor.
+
+## How the change lands
+
+terminal_writechar branch + new terminal_backspace helper in src/kernel.c.
+
+## Regression test
+
+tests/47 asserts the raw 08 20 byte pairs AND VGA BS-XYZ render.
+
+## Commit
+
+Original landing: ch118 terminal backspace (see `git log --oneline` for the actual hash on your branch).

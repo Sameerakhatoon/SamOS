@@ -1,5 +1,9 @@
 # G04 - iret to ring 3 appears to triple-fault [FIXED]
 
+**Surfaced during:** Ch 98 (ring-3 launch wiring), when `task_run_first_ever_task()` started iretd'ing into user mode for the first time.
+**Fix:** Deferred per book; the apparent triple-fault turned out to be a cascade of G05 (`task_page()` null deref on the immediate IRQ after iretd), G07 (panic on null `current_task` between `enable_interrupts()` and the first user task), and G08 (kernel-segment reload + state-save on kernel-mode IRQs). With G05+G07+G08 in place the iretd actually lands in ring 3.
+**Regression test:** `tests/37-ring3-reached.sh` and `tests/41-multitasking.sh` (the latter would never get the second task off the ground without all three sub-fixes).
+
 ## Symptom
 
 Ch 98 added `process_load("0:/blank.bin") + task_run_first_ever_task()`
