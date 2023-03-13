@@ -1,10 +1,29 @@
+; Lecture 7 - rewrite kernel.asm to drop into 64-bit long mode.
+;
+; boot.asm loads us at 0x100000 in 32-bit protected mode (CS=0x08,
+; DS=0x10 from the bootloader's tiny GDT). We then:
+;   1. Reload data segs with our own DS=0x10 (still 32-bit DS).
+;   2. Park the stack at 0x200000.
+;   3. Install a richer GDT with a 64-bit code segment at 0x18.
+;   4. Turn on PAE (CR4 bit 5) - required by 4-level paging that long
+;      mode uses.
+;   5. Point CR3 at PML4_Table - an identity-mapping skeleton that
+;      covers the first 4 MiB via two 2-MiB pages.
+;   6. Set IA32_EFER.LME (MSR 0xC000_0080 bit 8) to arm long mode.
+;   7. Enable paging in CR0 (bit 31). The instruction AFTER this
+;      mov is the moment the CPU latches long-mode-compatible state.
+;   8. Far-jump to the 64-bit code segment selector (0x18). That's
+;      the actual transition into 64-bit mode; the CPU widens
+;      registers and switches to 64-bit instruction decoding.
+;   9. [BITS 64] long_mode_entry just spins on `jmp $` for now -
+;      Lecture 8 brings kernel.c back online from here.
+
 [BITS 32]
 global _start
-global kernel_registers
-extern kernel_main
 
 CODE_SEG equ 0x08
 DATA_SEG equ 0x10
+LONG_MODE_CODE_SEG equ 0x18
 
 _start:
     mov ax, DATA_SEG
@@ -13,41 +32,104 @@ _start:
     mov fs, ax
     mov gs, ax
     mov ss, ax
+
     mov ebp, 0x00200000
     mov esp, ebp
 
-    ; Enable the A20 line.
-    in al, 0x92
-    or al, 2
-    out 0x92, al
+    lgdt [gdt_descriptor]
 
-    ; Remap the master PIC.
-    mov al, 00010001b           ; ICW1: init + ICW4 needed
-    out 0x20, al                ; master command port
+    ; CR4.PAE - Physical Address Extension. With PAE off, the CPU
+    ; will refuse the long-mode transition with a #GP.
+    mov eax, cr4
+    or eax, 1 << 5
+    mov cr4, eax
 
-    mov al, 0x20                ; ICW2: master starts at vector 0x20
-    out 0x21, al
+    ; Point CR3 at the PML4 we link below.
+    mov eax, PML4_Table
+    mov cr3, eax
 
-    mov al, 00000001b           ; ICW4: 8086 mode
-    out 0x21, al
+    ; IA32_EFER MSR - set LME (Long Mode Enable, bit 8). At this
+    ; point the CPU is still in protected mode; LME is only ARMED.
+    ; Long mode activates when paging gets turned on next.
+    mov ecx, 0xC0000080
+    rdmsr
+    or eax, 0x100
+    wrmsr
 
-    ; Interrupts stay off until kernel_main's enable_interrupts() runs after
-    ; the IDT has been loaded. The old `sti` here would let IRQs land on an
-    ; uninitialized IDT and triple-fault.
+    ; CR0.PG = 1 - this is the moment the CPU completes the long-
+    ; mode transition (PAE + LME + PG all set).
+    mov eax, cr0
+    or eax, 1 << 31
+    mov cr0, eax
 
-    call kernel_main
+    ; Far jump to the 64-bit code segment. The CPU swaps to 64-bit
+    ; decoding here.
+    jmp LONG_MODE_CODE_SEG:long_mode_entry
 
+[BITS 64]
+long_mode_entry:
+    ; Park - Lecture 8 will route us into a 64-bit kernel_main.
     jmp $
 
-; Ch 102: kernel_registers - reload DS/ES/FS/GS with the kernel data
-; selector. Mirror of user_registers from Ch 95, called at the top of
-; every syscall handler (via kernel_page).
-kernel_registers:
-    mov ax, 0x10
-    mov ds, ax
-    mov es, ax
-    mov gs, ax
-    mov fs, ax
-    ret
 
-times 512-($-$$) db 0
+; ------------------------------------------------------------------
+; Global descriptor table (GDT)
+; ------------------------------------------------------------------
+align 8
+gdt:
+    dq 0x0000000000000000           ; Null descriptor
+
+    ; 32-bit code segment (selector 0x08) - we entered protected
+    ; mode in this and are still using it for the long-mode setup.
+    dw 0xffff                       ; Limit 0-15
+    dw 0                            ; Base 0-15
+    db 0                            ; Base 16-23
+    db 0x9a                         ; Access (P=1 DPL=00 S=1 E=1 RW=1 A=0)
+    db 11001111b                    ; G=1 D=1 L=0 AVL=0 + Limit 16-19
+    db 0                            ; Base 24-31
+
+    ; 32-bit data segment (selector 0x10) - DS/ES/SS used in the
+    ; lgdt and CR* setup above.
+    dw 0xffff
+    dw 0
+    db 0
+    db 0x92                         ; Access (P=1 DPL=00 S=1 E=0 RW=1 A=0)
+    db 11001111b
+    db 0
+
+    ; 64-bit code segment (selector 0x18) - far-jump target.
+    ; In long mode the limit and base of code segments are ignored;
+    ; what matters is L=1 (the "long mode" bit) in the flags byte.
+    dw 0x0000
+    dw 0x0000
+    db 0x00
+    db 0x9A                         ; Access (P=1 DPL=00 S=1 E=1 RW=1)
+    db 0x20                         ; L=1 (long mode segment), D=0 mandatory
+    db 0x00
+gdt_end:
+
+gdt_descriptor:
+    dw gdt_end - gdt - 1            ; Limit
+    dd gdt                          ; Base (32-bit lidg form)
+
+; ------------------------------------------------------------------
+; 4-level page-table skeleton: PML4 -> PDPT -> PD with 2-MiB pages.
+; Identity-maps the first 4 MiB of physical memory at virtual
+; addresses 0..0x3FFFFF. PS (bit 7) in the PD entries makes them
+; 2-MiB leaves; we don't need a per-4-KiB page table yet.
+; ------------------------------------------------------------------
+align 4096
+PML4_Table:
+    dq PDPT_TABLE + 0x03            ; Present + RW. Points at PDPT.
+    times 511 dq 0
+
+align 4096
+PDPT_TABLE:
+    dq PD_Table + 0x03              ; Present + RW. Points at PD.
+    times 511 dq 0
+
+align 4096
+PD_Table:
+    dq 0x0000000000000083           ; 0x00000000 .. 0x001FFFFF, PS=1 RW=1 P=1
+    dq 0x0000000000200083           ; 0x00200000 .. 0x003FFFFF
+    times 510 dq 0
