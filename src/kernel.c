@@ -15,6 +15,8 @@
 #include "kernel.h"
 #include <stddef.h>
 #include <stdint.h>
+#include "memory/heap/kheap.h"
+#include "memory/memory.h"
 #include "string/string.h"
 #include "config.h"
 #include "status.h"
@@ -102,6 +104,17 @@ void kernel_main(void)
 {
     terminal_initialize();
     print("Hello 64-bit!\n");
+
+    // Lecture 10: bring the kheap online and prove it works by
+    // allocating a 50-byte buffer, writing "ABC" into it, and
+    // printing it back through the terminal.
+    kheap_init();
+    char* data = kmalloc(50);
+    data[0] = 'A';
+    data[1] = 'B';
+    data[2] = 'C';
+    data[3] = 0x00;
+    print(data);
 
     while (1)
     {

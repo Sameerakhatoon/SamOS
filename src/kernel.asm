@@ -163,9 +163,18 @@ PDPT_TABLE:
     dq PD_Table + 0x03              ; Present + RW. Points at PD.
     times 511 dq 0
 
+; Lecture 10: grow the PD to cover the kheap range. SAMOS_HEAP_ADDRESS
+; sits at 0x01000000 (16 MiB) and its 100 MiB body extends past 0x07000000.
+; We generate 65 entries with NASM's %rep macro to identity-map
+; 0..0x82FFFFF (130 MiB) - well past anything the kernel will touch.
+%define PS_FLAG 0x83                    ; Present | RW | PageSize (2 MiB leaf)
+%define PAGE_INCREMENT 0x200000         ; 2 MiB stride
+
 align 4096
 PD_Table:
-    dq 0x0000000000000083           ; 0x00000000 .. 0x001FFFFF, PS=1 RW=1 P=1
-    dq 0x0000000000200083           ; 0x00200000 .. 0x003FFFFF
-    dq 0x0000000000400083           ; 0x00400000 .. 0x005FFFFF (kernel_main lives here once C link enters)
-    times 509 dq 0
+    %assign addr 0x00000000
+    %rep 65
+        dq addr + PS_FLAG
+        %assign addr addr + PAGE_INCREMENT
+    %endrep
+    times 447 dq 0
