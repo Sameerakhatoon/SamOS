@@ -91,10 +91,15 @@ load32:
     or al, 2
     out 0x92, al
 
-    ; Load kernel: 100 sectors starting at LBA 1 (sector 0 is this boot sector)
-    ; into 0x100000.
+    ; Load kernel: 250 sectors starting at LBA 1 (sector 0 is this
+    ; boot sector) into 0x100000. PeachOS64 ships this exact bump
+    ; at L34; we land it at L12 because PT_Table holds 51200 statically-
+    ; initialised entries (~400 KiB of .text). The ATA-1 LBA28 sector-
+    ; count register is only 8 bits, capping any one command at 255.
+    ; 250 sectors = 128 KiB - we shrink PT_Table to fit by trading
+    ; PD %rep 100 for %rep 30 (60 MiB coverage instead of 200 MiB).
     mov eax, 1                  ; starting LBA
-    mov ecx, 100                ; sectors to read
+    mov ecx, 250                ; sectors to read
     mov edi, 0x0100000          ; destination buffer
     call ata_lba_read
 
@@ -103,7 +108,7 @@ load32:
     jmp CODE_SEG:0x0100000
 
 ; ---- ata_lba_read -----------------------------------------------------------
-; in:  eax = LBA, ecx = sector count, edi = dest buffer
+; in:  eax = LBA, ecx = sector count (<= 255), edi = dest buffer
 ; clobbers: eax, ebx, ecx, edx
 ata_lba_read:
     mov ebx, eax                ; backup the LBA
