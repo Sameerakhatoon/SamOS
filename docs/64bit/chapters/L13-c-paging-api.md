@@ -22,7 +22,7 @@ kernel_main exercises the whole chain end-to-end as a smoke test
 
 `paging_desc_new(PAGING_MAP_LEVEL_4)`:
 1. `kzalloc(struct paging_desc)` - the small header (pml pointer + level).
-2. `paging_pml4_entries_new()` → `kzalloc(struct paging_pml_entries)` - a 4 KiB block of 512 zero entries.
+2. `paging_pml4_entries_new()` -> `kzalloc(struct paging_pml_entries)` - a 4 KiB block of 512 zero entries.
 3. Wire the header to the table; return.
 
 The result is a valid empty PML4. CR3 cannot be loaded with it yet
@@ -120,12 +120,12 @@ If the new PML4 doesn't map an address that the very next
 instruction needs (e.g. RIP itself, or the stack), the CPU
 `#PF`s and we lose. That's why L13's `kernel_main` does
 `paging_map_range(desc, 0, 0, 102400, RW|P)` - identity-maps the
-first 100 × 1024 × 4 KiB ≈ 400 MiB before the switch.
+first 100 x 1024 x 4 KiB ≈ 400 MiB before the switch.
 
 ### 5. `invlpg` and the TLB
 
 x86_64's TLB (Translation Lookaside Buffer) caches recent
-virtual→physical translations per core. If we overwrite a PT
+virtual->physical translations per core. If we overwrite a PT
 entry that's been touched, the next load through the old virtual
 address could still return the cached physical mapping.
 
