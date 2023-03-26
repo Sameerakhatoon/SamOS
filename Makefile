@@ -61,3 +61,8 @@ clean:
 	rm -rf ./bin/os.bin
 	rm -rf ${FILES}
 	rm -rf ./build/kernelfull.o
+	# Lecture 14 safety net: wipe every .o under build/.
+	# A module dropped from FILES still leaves its .o behind; the next
+	# link would happily pull stale code in if anything else dragged
+	# it in. Force them gone every clean.
+	find build -type f -name "*.o" -print -delete 2>/dev/null || true
