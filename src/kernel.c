@@ -16,6 +16,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "memory/heap/kheap.h"
+#include "memory/heap/heap.h"
 #include "memory/memory.h"
 #include "memory/paging/paging.h"
 #include "string/string.h"
@@ -137,7 +138,10 @@ void kernel_main(void)
 
     // L10 kheap probe: kernel.asm's PD is 2-MiB PS=1 leaves covering
     // 1 GiB, well past the kheap at 16 MiB.
-    kheap_init();
+    // L16 - kheap_init now takes the heap size. Pass the legacy
+    // config-defined value for now; multi-heap (L20+) will compute
+    // this per region from E820.
+    kheap_init(SAMOS_HEAP_SIZE_BYTES);
     char* data = kmalloc(50);
     data[0] = 'A';
     data[1] = 'B';
@@ -166,6 +170,18 @@ void kernel_main(void)
     kernel_page();
     data[0] = 'K';
     print(data);
+
+    // Lecture 16 - print live heap accounting using the new
+    // heap_total_* helpers and itoa. The "Total heap size" line
+    // doubles as a smoke test that itoa survives a >1 MiB input.
+    struct heap* kh = kheap_get();
+    print("\nheap size: ");
+    print(itoa((int)heap_total_size(kh)));
+    print("\nheap used: ");
+    print(itoa((int)heap_total_used(kh)));
+    print("\nheap free: ");
+    print(itoa((int)heap_total_available(kh)));
+    print("\n");
 
     while (1)
     {

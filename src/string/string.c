@@ -96,3 +96,39 @@ int strnlen_terminator(const char* str, int max, char terminator){
     }
     return i;
 }
+
+// Lecture 16 - int -> decimal string.
+//
+// The trick: flip a positive input to its negative twin and
+// generate digits while looping toward zero from the negative
+// side. That handles INT_MIN cleanly (its positive twin does not
+// fit in a signed int; the negative one does).
+//
+// Digit extraction uses ('0' - (i % 10)) because i is negative
+// for the entire loop body. In C, for negative i, i%10 is also
+// negative (well-defined since C99), so '0' - (-d) = '0' + d.
+//
+// Returns a pointer into a static buffer - NOT reentrant, do not
+// nest calls or capture across calls. itoa(123) followed by
+// itoa(456) clobbers the first result.
+char* itoa(int i){
+    static char text[12];
+    int loc = 11;
+    text[11] = 0;
+    char neg = 1;
+    if(i >= 0){
+        neg = 0;
+        i = -i;
+    }
+    while(i){
+        text[--loc] = '0' - (i % 10);
+        i /= 10;
+    }
+    if(loc == 11){
+        text[--loc] = '0';
+    }
+    if(neg){
+        text[--loc] = '-';
+    }
+    return &text[loc];
+}
