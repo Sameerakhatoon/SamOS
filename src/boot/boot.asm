@@ -43,7 +43,25 @@ step2:
     mov ds, ax
     mov es, ax
     mov ss, ax
+    mov fs, ax
+
+    ; Lecture 18 - enable A20 early. BIOS int 0x15 / e820 itself
+    ; does not need A20 (we read into 0x7E00, well below 1 MiB)
+    ; but moving A20 out of the 32-bit path lets us drop it from
+    ; load32 and matches the PeachOS64 boot layout.
+    in al, 0x92
+    or al, 2
+    out 0x92, al
+
     mov sp, 0x7C00
+
+    ; Lecture 18 - query the BIOS for the E820 memory map and
+    ; stash it at 0x7E00. Must happen in real mode (int 0x15).
+    ; The count goes into the last two bytes of the boot sector
+    ; (0x7DFE), overwriting the 0xAA55 boot signature now that
+    ; the BIOS has already validated and loaded us.
+    call load_memory_map
+
     sti
 
 .load_protected:
@@ -83,14 +101,52 @@ gdt_descriptor:
     dw gdt_end - gdt_start - 1
     dd gdt_start
 
+; ---- Real-mode helper: BIOS int 0x15 / e820 memory map ---------------------
+; Lecture 18 - walks the BIOS-provided E820 memory map and stores
+; the entries at 0x7E00. Each entry is 24 bytes (legacy size):
+;   uint64_t base_addr
+;   uint64_t length
+;   uint32_t type           (1 = usable)
+;   uint32_t extended_attr
+; The count of entries written is stored as a uint16_t at 0x7DFE
+; (the last two bytes of the boot sector - overwrites the 0xAA55
+; signature now that the BIOS has finished with it).
+;
+; Calling convention (BIOS):
+;   AX=0xE820, EDX='SMAP', ECX=24, ES:DI=dest, EBX=continuation token.
+;   First call: EBX=0. Each successful return updates EBX; final
+;   call returns CF=1 or EBX=0.
+load_memory_map:
+    mov word [total_memory_map_entries], 0
+    mov di, 0x7E00              ; buffer base
+    mov cx, 24                  ; bytes per entry
+    xor bx, bx                  ; first-call token
+
+    ; o32 prefix forces 32-bit operand size in 16-bit mode: the
+    ; E820 magic numbers do not fit in 16 bits.
+    o32 mov eax, 0xE820
+    o32 mov edx, 0x534D4150     ; 'SMAP'
+.get_e820_entry:
+    int 0x15
+    jc .done                    ; CF set = error / end of list
+
+    o32 cmp eax, 0x534D4150     ; BIOS sets EAX='SMAP' on success
+    jne .done
+
+    inc word [total_memory_map_entries]
+
+    o32 mov eax, 0xE820         ; reload magic for next iteration
+    mov cx, 24
+    add di, cx                  ; advance buffer pointer
+
+    test bx, bx                 ; EBX=0 from BIOS means last entry
+    jnz .get_e820_entry
+.done:
+    ret
+
 ; ---- 32-bit code ------------------------------------------------------------
 [BITS 32]
 load32:
-    ; Enable the A20 line.
-    in al, 0x92
-    or al, 2
-    out 0x92, al
-
     ; Load kernel: 250 sectors starting at LBA 1 (sector 0 is this
     ; boot sector) into 0x100000. Bumped from 100 at L12 (when
     ; PT_Table got static %rep 20 entries) and kept here at L13
@@ -164,4 +220,9 @@ ata_lba_read:
     ret
 
 times 510-($-$$) db 0
+; Lecture 18 - the label sits ON TOP of the 0xAA55 boot signature
+; word. The BIOS reads 0xAA55 at boot time to validate the MBR
+; then never looks at this location again. load_memory_map writes
+; the entry count here at runtime, repurposing the two bytes.
+total_memory_map_entries:
 dw 0xAA55

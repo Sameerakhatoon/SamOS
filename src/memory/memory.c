@@ -1,4 +1,39 @@
 #include "memory.h"
+#include "config.h"
+
+// Lecture 18 - E820 readers. boot.asm puts the entries at
+// SAMOS_MEMORY_MAP_LOCATION (0x7E00) and the count at
+// SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION (0x7DFE - reused boot
+// signature). Both readers are read-only and safe to call before
+// kheap_init; after kheap_init runs they return garbage because
+// the heap bitmap lives at the same address.
+
+size_t e820_total_accessible_memory(void){
+    size_t total_entries        = *((uint16_t*)SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION);
+    struct e820_entry* entries  = (struct e820_entry*)SAMOS_MEMORY_MAP_LOCATION;
+    size_t total = 0;
+    for(size_t i = 0; i < total_entries; i++){
+        if(entries[i].type == 1){ // usable
+            total += entries[i].length;
+        }
+    }
+    return total;
+}
+
+struct e820_entry* e820_largest_free_entry(void){
+    size_t total_entries        = *((uint16_t*)SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION);
+    struct e820_entry* entries  = (struct e820_entry*)SAMOS_MEMORY_MAP_LOCATION;
+    struct e820_entry* chosen   = NULL;
+    for(size_t i = 0; i < total_entries; i++){
+        if(entries[i].type != 1){
+            continue;
+        }
+        if(!chosen || entries[i].length > chosen->length){
+            chosen = &entries[i];
+        }
+    }
+    return chosen;
+}
 
 void* memset(void* ptr, int c, size_t size){
     char* c_ptr = (char*)ptr;
