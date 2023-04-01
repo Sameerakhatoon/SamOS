@@ -145,52 +145,20 @@ void kernel_main(void)
     print(itoa((int)e820_total_accessible_memory()));
     print("\n");
 
-    // L10 kheap probe: kernel.asm's PD is 2-MiB PS=1 leaves covering
-    // 1 GiB, well past the kheap at 16 MiB.
-    // L16 - kheap_init now takes the heap size. Pass the legacy
-    // config-defined value for now; multi-heap (L20+) will compute
-    // this per region from E820.
-    kheap_init(SAMOS_HEAP_SIZE_BYTES);
+    // Lecture 20 - kheap_init now no-args and routes through the
+    // multiheap. The kernel_paging_desc / paging_switch dance and
+    // the heap accounting prints from L13/L15/L16 go away here -
+    // upstream PeachOS64 comments them out at this point. SamOs
+    // follows: the early probes did their job in their lectures
+    // and now multi-heap setup is the only thing happening before
+    // the wait loop.
+    kheap_init();
     char* data = kmalloc(50);
     data[0] = 'A';
     data[1] = 'B';
     data[2] = 'C';
     data[3] = 0x00;
     print(data);
-
-    // Lecture 15 - the kernel paging descriptor is now a global
-    // owned by the kernel. Build it here, identity-map enough to
-    // cover the heap + code, switch to it. The old local-pointer
-    // variant from L13 is gone.
-    kernel_paging_desc = paging_desc_new(PAGING_MAP_LEVEL_4);
-    paging_map_range(kernel_paging_desc,
-                     (void*)0x00000000, (void*)0x00000000,
-                     1024 * 100,
-                     PAGING_IS_WRITEABLE | PAGING_IS_PRESENT);
-    paging_switch(kernel_paging_desc);
-    data[0] = 'M';
-    print(data);
-
-    // Sanity: kernel_page() should be a no-op here (we're already
-    // on kernel_paging_desc and on the kernel data selectors), but
-    // calling it exercises both halves of the abstraction. After
-    // this returns we'd expect to keep running normally; if the
-    // segreg reload were wrong we'd #GP immediately.
-    kernel_page();
-    data[0] = 'K';
-    print(data);
-
-    // Lecture 16 - print live heap accounting using the new
-    // heap_total_* helpers and itoa. The "Total heap size" line
-    // doubles as a smoke test that itoa survives a >1 MiB input.
-    struct heap* kh = kheap_get();
-    print("\nheap size: ");
-    print(itoa((int)heap_total_size(kh)));
-    print("\nheap used: ");
-    print(itoa((int)heap_total_used(kh)));
-    print("\nheap free: ");
-    print(itoa((int)heap_total_available(kh)));
-    print("\n");
 
     while (1)
     {

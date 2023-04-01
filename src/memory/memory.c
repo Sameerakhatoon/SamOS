@@ -8,6 +8,20 @@
 // kheap_init; after kheap_init runs they return garbage because
 // the heap bitmap lives at the same address.
 
+// Lecture 20 - typed helpers for multiheap to iterate E820.
+
+size_t e820_total_entries(void){
+    return *((uint16_t*)SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION);
+}
+
+struct e820_entry* e820_entry(size_t index){
+    if(index >= e820_total_entries()){
+        return NULL;
+    }
+    struct e820_entry* entries = (struct e820_entry*)SAMOS_MEMORY_MAP_LOCATION;
+    return &entries[index];
+}
+
 size_t e820_total_accessible_memory(void){
     size_t total_entries        = *((uint16_t*)SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION);
     struct e820_entry* entries  = (struct e820_entry*)SAMOS_MEMORY_MAP_LOCATION;
