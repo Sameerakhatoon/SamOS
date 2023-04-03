@@ -160,6 +160,34 @@ void kernel_main(void)
     data[3] = 0x00;
     print(data);
 
+    // Lecture 21 - build a kernel paging descriptor and identity-map
+    // every E820 usable region into it.
+    //
+    // SAFETY: paging_desc_new uses kzalloc internally. L20 stubbed
+    // kzalloc to return NULL pending the L22+ multiheap_zalloc, so
+    // this WILL return NULL here. We guard the call so the kernel
+    // does not deref NULL and #PF. Once kzalloc starts returning
+    // real memory the guard is harmless and the mapping fires.
+    // Upstream PeachOS64 commits this code unguarded - documented
+    // in docs/64bit/chapters/L21-paging-map-e820.md as a deferred
+    // bug they accept until L22 lands.
+    kernel_paging_desc = paging_desc_new(PAGING_MAP_LEVEL_4);
+    if (kernel_paging_desc)
+    {
+        paging_map_e820_memory_regions(kernel_paging_desc);
+        // Note: no paging_switch here. Upstream commented it out
+        // too - the new descriptor is built and populated, but we
+        // do not yet trust it (and paging_desc_new returns NULL
+        // anyway). L22+ wires the switch back in.
+        print("L21 paging map built\n");
+    }
+    else
+    {
+        // Expected at L21 because kzalloc is stubbed. Print so the
+        // test can assert the deferred-bug behavior.
+        print("L21 paging desc NULL (kzalloc stub)\n");
+    }
+
     while (1)
     {
     }
