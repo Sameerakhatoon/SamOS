@@ -3,17 +3,20 @@
 #include "status.h"
 #include "memory/memory.h"
 #include <stdbool.h>
+#include <stdint.h>
 
-static int      heap_validate_table(void* ptr, void* end, struct heap_table* table);
-static bool     heap_validate_alignment(void* ptr);
-static uint32_t heap_align_value_to_upper(uint32_t val);
-static int      heap_get_entry_type(HEAP_BLOCK_TABLE_ENTRY entry);
-static int      heap_get_start_block(struct heap* heap, uint32_t total_blocks);
-static void*    heap_block_to_address(struct heap* heap, int block);
-static void     heap_mark_blocks_taken(struct heap* heap, int start_block, int total_blocks);
-static void     heap_mark_blocks_free(struct heap* heap, int starting_block);
-static int      heap_address_to_block(struct heap* heap, void* address);
-static void*    heap_malloc_blocks(struct heap* heap, uint32_t total_blocks);
+// L23 - block-index types widened from int to int64_t. Forward
+// declarations updated to match.
+static int       heap_validate_table(void* ptr, void* end, struct heap_table* table);
+static bool      heap_validate_alignment(void* ptr);
+static uintptr_t heap_align_value_to_upper(uintptr_t val);
+static int       heap_get_entry_type(HEAP_BLOCK_TABLE_ENTRY entry);
+static int64_t   heap_get_start_block(struct heap* heap, uintptr_t total_blocks);
+static void*     heap_block_to_address(struct heap* heap, int64_t block);
+static void      heap_mark_blocks_taken(struct heap* heap, int64_t start_block, int64_t total_blocks);
+static void      heap_mark_blocks_free(struct heap* heap, int64_t starting_block);
+static int64_t   heap_address_to_block(struct heap* heap, void* address);
+static void*     heap_malloc_blocks(struct heap* heap, uintptr_t total_blocks);
 
 static int heap_validate_table(void* ptr, void* end, struct heap_table* table){
     int res = 0;
@@ -62,7 +65,7 @@ out:
     return res;
 }
 
-static uint32_t heap_align_value_to_upper(uint32_t val){
+static uintptr_t heap_align_value_to_upper(uintptr_t val){
     if((val % SAMOS_HEAP_BLOCK_SIZE) == 0){
         return val;
     }
@@ -75,10 +78,24 @@ static int heap_get_entry_type(HEAP_BLOCK_TABLE_ENTRY entry){
     return entry & 0x0F;
 }
 
-static int heap_get_start_block(struct heap* heap, uint32_t total_blocks){
+// Lecture 23 - promote heap-block-index types from int (32-bit)
+// to int64_t so heaps larger than ~8 TiB at 4-KiB blocks don't
+// overflow the index space. Also fix two latent bugs:
+//   1) heap_get_start_block returned `bs` whenever bs != -1, but
+//      bs could be set for a PARTIAL run at the end of the table
+//      that never reached total_blocks. Check `bc != total_blocks`
+//      instead.
+//   2) heap_mark_blocks_taken set HAS_NEXT on every block where
+//      `i != end_block - 1`, i.e. it dropped HAS_NEXT one block
+//      too early. The last in-range block was marked terminal
+//      but the SECOND-TO-LAST was missing HAS_NEXT too - so a
+//      heap_free would stop one block short of the allocation.
+//      Correct condition is `i != end_block` (only the very last
+//      block lacks HAS_NEXT).
+static int64_t heap_get_start_block(struct heap* heap, uintptr_t total_blocks){
     struct heap_table* table = heap->table;
-    int bc = 0;
-    int bs = -1;
+    int64_t bc = 0;
+    int64_t bs = -1;
 
     for(size_t i = 0; i < table->total; i++){
         if(heap_get_entry_type(table->entries[i]) != HEAP_BLOCK_TABLE_ENTRY_FREE){
@@ -90,42 +107,45 @@ static int heap_get_start_block(struct heap* heap, uint32_t total_blocks){
             bs = i;
         }
         bc++;
-        if(bc == (int)total_blocks){
+        if(bc == (int64_t)total_blocks){
             break;
         }
     }
 
-    if(bs == -1){
+    // L23 fix: previously checked `bs == -1`, which missed the
+    // case of a partial run at the end of the table.
+    if(bc != (int64_t)total_blocks){
         return -ENOMEM;
     }
     return bs;
 }
 
-static void* heap_block_to_address(struct heap* heap, int block){
+static void* heap_block_to_address(struct heap* heap, int64_t block){
     return heap->saddr + (block * SAMOS_HEAP_BLOCK_SIZE);
 }
 
-static void heap_mark_blocks_taken(struct heap* heap, int start_block, int total_blocks){
-    int end_block = (start_block + total_blocks) - 1;
+static void heap_mark_blocks_taken(struct heap* heap, int64_t start_block, int64_t total_blocks){
+    int64_t end_block = (start_block + total_blocks) - 1;
 
     HEAP_BLOCK_TABLE_ENTRY entry = HEAP_BLOCK_TABLE_ENTRY_TAKEN | HEAP_BLOCK_IS_FIRST;
     if(total_blocks > 1){
         entry |= HEAP_BLOCK_HAS_NEXT;
     }
 
-    for(int i = start_block; i <= end_block; i++){
+    for(int64_t i = start_block; i <= end_block; i++){
         heap->table->entries[i] = entry;
         entry = HEAP_BLOCK_TABLE_ENTRY_TAKEN;
-        if(i != end_block - 1){
+        // L23 fix: was `i != end_block - 1`, off by one.
+        if(i != end_block){
             entry |= HEAP_BLOCK_HAS_NEXT;
         }
     }
 }
 
-static void* heap_malloc_blocks(struct heap* heap, uint32_t total_blocks){
+static void* heap_malloc_blocks(struct heap* heap, uintptr_t total_blocks){
     void* address = 0;
 
-    int start_block = heap_get_start_block(heap, total_blocks);
+    int64_t start_block = heap_get_start_block(heap, total_blocks);
     if(start_block < 0){
         goto out;
     }
@@ -138,9 +158,9 @@ out:
     return address;
 }
 
-static void heap_mark_blocks_free(struct heap* heap, int starting_block){
+static void heap_mark_blocks_free(struct heap* heap, int64_t starting_block){
     struct heap_table* table = heap->table;
-    for(int i = starting_block; i < (int)table->total; i++){
+    for(int64_t i = starting_block; i < (int64_t)table->total; i++){
         HEAP_BLOCK_TABLE_ENTRY entry = table->entries[i];
         table->entries[i] = HEAP_BLOCK_TABLE_ENTRY_FREE;
         if(!(entry & HEAP_BLOCK_HAS_NEXT)){
@@ -149,13 +169,13 @@ static void heap_mark_blocks_free(struct heap* heap, int starting_block){
     }
 }
 
-static int heap_address_to_block(struct heap* heap, void* address){
-    return ((int)(address - heap->saddr)) / SAMOS_HEAP_BLOCK_SIZE;
+static int64_t heap_address_to_block(struct heap* heap, void* address){
+    return ((int64_t)(address - heap->saddr)) / SAMOS_HEAP_BLOCK_SIZE;
 }
 
 void* heap_malloc(struct heap* heap, size_t size){
-    size_t   aligned_size = heap_align_value_to_upper(size);
-    uint32_t total_blocks = aligned_size / SAMOS_HEAP_BLOCK_SIZE;
+    size_t  aligned_size = heap_align_value_to_upper(size);
+    int64_t total_blocks = aligned_size / SAMOS_HEAP_BLOCK_SIZE;
     return heap_malloc_blocks(heap, total_blocks);
 }
 

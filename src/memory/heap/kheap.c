@@ -49,14 +49,19 @@ void kheap_init(void){
     // Clamp the heap-table address up to SAMOS_MINIMAL_HEAP_TABLE_ADDRESS
     // so the bitmap never lands on top of the kernel image (loaded
     // at 1 MiB) or on top of the E820 buffer at 0x7E00.
-    void* address = (void*)(uintptr_t)entry->base_addr;
+    void* address     = (void*)(uintptr_t)entry->base_addr;
+    void* end_address = (void*)(uintptr_t)(entry->base_addr + entry->length);
     void* heap_table_address = address;
     if(heap_table_address < (void*)SAMOS_MINIMAL_HEAP_TABLE_ADDRESS){
         heap_table_address = (void*)SAMOS_MINIMAL_HEAP_TABLE_ADDRESS;
     }
 
-    void* heap_address     = (char*)heap_table_address + SAMOS_MINIMAL_HEAP_TABLE_SIZE;
-    void* heap_end_address = (char*)heap_address + SAMOS_HEAP_SIZE_BYTES;
+    void* heap_address = (char*)heap_table_address + SAMOS_MINIMAL_HEAP_TABLE_SIZE;
+    // L23 - minimal heap now spans the WHOLE chosen E820 region
+    // (was capped to SAMOS_HEAP_SIZE_BYTES). Sub-heaps then take
+    // any other E820 type-1 regions, clamped above the minimal
+    // heap so they don't overlap.
+    void* heap_end_address = end_address;
 
     // L22 - the heap region has to be page-aligned at both ends so
     // a future paging-defragment second pass can map/remap whole
@@ -105,17 +110,26 @@ void kheap_init(void){
             end_addr = paging_align_to_lower_page(end_addr);
         }
 
+        // L23 - skip any portion that would overlap the minimal
+        // heap. Clamp base UP to MINIMAL_HEAP_ADDRESS; if the
+        // region ends below that, drop it entirely.
+        if(base_addr < (void*)SAMOS_MINIMAL_HEAP_ADDRESS){
+            base_addr = (void*)SAMOS_MINIMAL_HEAP_ADDRESS;
+        }
+        if(end_addr <= base_addr){
+            continue;
+        }
+
         multiheap_add(kernel_multiheap, base_addr, end_addr,
                       MULTIHEAP_HEAP_FLAG_DEFRAGMENT_WITH_PAGING);
     }
 }
 
 void* kmalloc(size_t size){
-    void* ptr = multiheap_alloc(kernel_multiheap, size);
-    if(!ptr){
-        panic("Failed to allocate memory\n");
-    }
-    return ptr;
+    // L23 - drop the panic-on-null. Callers that NEED non-null
+    // can check, and the OOM-drain demo in kernel_main relies
+    // on kmalloc returning NULL when the multiheap is exhausted.
+    return multiheap_alloc(kernel_multiheap, size);
 }
 
 // Lecture 22 - kzalloc unstubbed. Goes through the same

@@ -172,21 +172,39 @@ void kernel_main(void)
     // in docs/64bit/chapters/L21-paging-map-e820.md as a deferred
     // bug they accept until L22 lands.
     kernel_paging_desc = paging_desc_new(PAGING_MAP_LEVEL_4);
-    if (kernel_paging_desc)
+    if (!kernel_paging_desc)
     {
-        paging_map_e820_memory_regions(kernel_paging_desc);
-        // Note: no paging_switch here. Upstream commented it out
-        // too - the new descriptor is built and populated, but we
-        // do not yet trust it (and paging_desc_new returns NULL
-        // anyway). L22+ wires the switch back in.
-        print("L21 paging map built\n");
+        panic("Failed to create kernel paging descriptor\n");
     }
-    else
+    paging_map_e820_memory_regions(kernel_paging_desc);
+
+    // Lecture 23 - now that the new PML4 maps every E820 usable
+    // region AND the first 1 MiB (BIOS / VGA / boot / kernel),
+    // switch CR3 to it. The L21 marker print is gone; if we got
+    // here without faulting, paging_switch worked.
+    paging_switch(kernel_paging_desc);
+
+    // Lecture 23 - drain the multiheap as a smoke test. kmalloc
+    // no longer panics on NULL (L23 change), so this loop ends
+    // when the last allocation fails.
+    //
+    // SamOs deviation: upstream uses kmalloc(4096) and exits
+    // when the very last 4-KiB block is gone. That walk takes
+    // 60k+ allocations under QEMU, each doing a linear scan over
+    // an ever-fuller table - tens of seconds wall-clock in TCG,
+    // which makes the automated test painful. We allocate 1 MiB
+    // at a time so the loop terminates in ~240 iterations on
+    // the same heap, demonstrating the same property (kmalloc
+    // returns NULL when no contiguous run exists) in well under
+    // a second.
+    for (;;)
     {
-        // Expected at L21 because kzalloc is stubbed. Print so the
-        // test can assert the deferred-bug behavior.
-        print("L21 paging desc NULL (kzalloc stub)\n");
+        if (!kmalloc(1024 * 1024))
+        {
+            break;
+        }
     }
+    print("Memory wasted\n");
 
     while (1)
     {
