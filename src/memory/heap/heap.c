@@ -9,7 +9,8 @@
 // declarations updated to match.
 static int       heap_validate_table(void* ptr, void* end, struct heap_table* table);
 static bool      heap_validate_alignment(void* ptr);
-static uintptr_t heap_align_value_to_upper(uintptr_t val);
+// L24 - un-staticed and exposed via heap.h.
+uintptr_t heap_align_value_to_upper(uintptr_t val);
 static int       heap_get_entry_type(HEAP_BLOCK_TABLE_ENTRY entry);
 static int64_t   heap_get_start_block(struct heap* heap, uintptr_t total_blocks);
 static void*     heap_block_to_address(struct heap* heap, int64_t block);
@@ -65,12 +66,23 @@ out:
     return res;
 }
 
-static uintptr_t heap_align_value_to_upper(uintptr_t val){
+uintptr_t heap_align_value_to_upper(uintptr_t val){
     if((val % SAMOS_HEAP_BLOCK_SIZE) == 0){
         return val;
     }
     val = (val - (val % SAMOS_HEAP_BLOCK_SIZE));
     val += SAMOS_HEAP_BLOCK_SIZE;
+    return val;
+}
+
+// Lecture 24 - round DOWN to the previous block boundary.
+// Symmetric counterpart to heap_align_value_to_upper. Used by
+// the multiheap-defragment code in later lectures.
+uintptr_t heap_align_value_to_lower(uintptr_t val){
+    if((val % SAMOS_HEAP_BLOCK_SIZE) == 0){
+        return val;
+    }
+    val = val - (val % SAMOS_HEAP_BLOCK_SIZE);
     return val;
 }
 

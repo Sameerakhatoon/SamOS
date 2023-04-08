@@ -33,7 +33,8 @@ static struct e820_entry* kheap_get_allowable_region_for_minimal_heap(void){
     size_t total = e820_total_entries();
     for(size_t i = 0; i < total; i++){
         struct e820_entry* cur = e820_entry(i);
-        if(cur->type == 1 && cur->length > SAMOS_HEAP_SIZE_BYTES){
+        // L24 - the threshold is now a MINIMUM, not a fixed size.
+        if(cur->type == 1 && cur->length > SAMOS_HEAP_MINIMUM_SIZE_BYTES){
             return cur;
         }
     }
@@ -56,11 +57,28 @@ void kheap_init(void){
         heap_table_address = (void*)SAMOS_MINIMAL_HEAP_TABLE_ADDRESS;
     }
 
-    void* heap_address = (char*)heap_table_address + SAMOS_MINIMAL_HEAP_TABLE_SIZE;
-    // L23 - minimal heap now spans the WHOLE chosen E820 region
-    // (was capped to SAMOS_HEAP_SIZE_BYTES). Sub-heaps then take
-    // any other E820 type-1 regions, clamped above the minimal
-    // heap so they don't overlap.
+    // Lecture 24 - compute the bitmap size from the actual heap
+    // region length instead of using the fixed
+    // SAMOS_MINIMAL_HEAP_TABLE_SIZE (1 MiB) budget.
+    //
+    // Two-pass sizing because the bitmap eats into the same
+    // region as the data pool: an entry exists per BLOCK of the
+    // pool, and the pool is the region MINUS the bitmap. So:
+    //   pass 1: assume bitmap covers entire region, compute its
+    //           size as if every byte were a block
+    //   pass 2: subtract pass-1 bitmap from region; recompute
+    //           the bitmap to cover only the remaining data
+    //           pool
+    // This gets the bitmap-to-data ratio right to within one
+    // block, which is good enough for kheap.
+    size_t total_heap_size            = (size_t)((char*)end_address - (char*)heap_table_address);
+    size_t total_heap_blocks_est      = total_heap_size / SAMOS_HEAP_BLOCK_SIZE;
+    size_t total_heap_entry_table_est = sizeof(HEAP_BLOCK_TABLE_ENTRY) * total_heap_blocks_est;
+    size_t heap_data_size             = total_heap_size - total_heap_entry_table_est;
+    size_t total_heap_data_blocks     = heap_data_size / SAMOS_HEAP_BLOCK_SIZE;
+    size_t total_heap_entry_table_size = sizeof(HEAP_BLOCK_TABLE_ENTRY) * total_heap_data_blocks;
+
+    void* heap_address     = (char*)heap_table_address + total_heap_entry_table_size;
     void* heap_end_address = end_address;
 
     // L22 - the heap region has to be page-aligned at both ends so
