@@ -3,6 +3,9 @@
 #include "multiheap.h"
 #include "kernel.h"
 #include "status.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stddef.h>
 
 static struct multiheap_single_heap* multiheap_get_last_heap(struct multiheap* mh){
     struct multiheap_single_heap* cur = mh->first_multiheap;
@@ -26,6 +29,61 @@ struct multiheap* multiheap_new(struct heap* starting_heap){
 out:
     return mh;
 }
+
+// Lecture 25 - flag-check helper.
+static bool multiheap_heap_allows_paging(struct multiheap_single_heap* heap){
+    return heap->flags & MULTIHEAP_HEAP_FLAG_DEFRAGMENT_WITH_PAGING;
+}
+
+// Lecture 25 - return the highest physical eaddr across all
+// sub-heaps. The second-pass defragmenter uses this as the base
+// of the virtual arena (everything above is "virtual" memory).
+void* multiheap_get_max_memory_end_address(struct multiheap* mh){
+    void* max_addr = 0x00;
+    struct multiheap_single_heap* cur = mh->first_multiheap;
+    while(cur){
+        if(cur->heap->eaddr >= max_addr){
+            max_addr = cur->heap->eaddr;
+        }
+        cur = cur->next;
+    }
+    return max_addr;
+}
+
+// Lecture 25 - linear search by address range. O(N) over the
+// number of sub-heaps. Once the multiheap routes free and zalloc
+// by pointer, this is the hot path.
+struct multiheap_single_heap* multiheap_get_heap_for_address(struct multiheap* mh, void* address){
+    struct multiheap_single_heap* cur = mh->first_multiheap;
+    while(cur){
+        if(heap_is_address_within_heap(cur->heap, address)){
+            return cur;
+        }
+        cur = cur->next;
+    }
+    return NULL;
+}
+
+// Lecture 25 - "virtual" here is a multiheap concept, not a CPU
+// one. The defragmenter exposes contiguous-looking allocations
+// at addresses ABOVE max_end_data_addr by remapping the page
+// tables. Anything in that range needs special handling on free.
+bool multiheap_is_address_virtual(struct multiheap* mh, void* ptr){
+    return ptr >= mh->max_end_data_addr;
+}
+
+// Lecture 25 - translate a virtual-arena pointer back to its
+// physical owner by subtracting the virtual-arena base. The
+// inverse mapping (phys -> virt) is built into the page tables
+// the defragmenter installs.
+void* multiheap_virtual_address_to_physical(struct multiheap* mh, void* ptr){
+    return (void*)((uintptr_t)ptr - (uintptr_t)mh->max_end_data_addr);
+}
+
+// (The L25 helpers above are unused at L25 itself; later lectures
+// in the multiheap arc call them. -Wno-unused-function in our
+// CFLAGS keeps the static one quiet; the non-static ones do not
+// warn even when uncalled.)
 
 static int multiheap_add_heap(struct multiheap* mh, struct heap* heap, int flags){
     struct multiheap_single_heap* node = heap_zalloc(mh->starting_heap, sizeof(struct multiheap_single_heap));

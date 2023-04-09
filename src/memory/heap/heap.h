@@ -4,6 +4,7 @@
 #include "config.h"
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 
 #define HEAP_BLOCK_TABLE_ENTRY_TAKEN    0x01
 #define HEAP_BLOCK_TABLE_ENTRY_FREE     0x00
@@ -40,5 +41,9 @@ size_t heap_total_available(struct heap* heap);
 // multiheap defragmenter and any future region sizing code.
 uintptr_t heap_align_value_to_upper(uintptr_t val);
 uintptr_t heap_align_value_to_lower(uintptr_t val);
+
+// Lecture 25 - range check used by multiheap_get_heap_for_address
+// to figure out which sub-heap owns a given pointer.
+bool heap_is_address_within_heap(struct heap* heap, void* ptr);
 
 #endif

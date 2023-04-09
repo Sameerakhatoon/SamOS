@@ -90,6 +90,13 @@ static int heap_get_entry_type(HEAP_BLOCK_TABLE_ENTRY entry){
     return entry & 0x0F;
 }
 
+// Lecture 25 - inclusive range check. eaddr is the END boundary
+// recorded by heap_create (one past the last byte), so `ptr ==
+// eaddr` is a sentinel and treated as belonging to this heap.
+bool heap_is_address_within_heap(struct heap* heap, void* ptr){
+    return ptr >= heap->saddr && ptr <= heap->eaddr;
+}
+
 // Lecture 23 - promote heap-block-index types from int (32-bit)
 // to int64_t so heaps larger than ~8 TiB at 4-KiB blocks don't
 // overflow the index space. Also fix two latent bugs:
