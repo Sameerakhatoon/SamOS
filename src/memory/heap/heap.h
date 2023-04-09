@@ -14,6 +14,21 @@
 
 typedef unsigned char HEAP_BLOCK_TABLE_ENTRY;
 
+// Lecture 26 - per-heap callbacks fired on each block as a
+// multi-block allocation is being marked taken or as a free walk
+// reaches each block. The defragmenter (later lecture) hangs
+// page-table operations off these: when a block in a paging-
+// defragment heap is allocated, the callback installs the
+// virtual-arena mapping for it; when it is freed, the callback
+// tears the mapping down.
+//
+// Currently the size passed to the alloc callback is always
+// SAMOS_HEAP_BLOCK_SIZE (one block) - the callback fires once
+// per block within a multi-block allocation, not once per
+// allocation.
+typedef void* (*HEAP_BLOCK_ALLOCATED_CALLBACK_FUNCTION)(void* ptr, size_t size);
+typedef void  (*HEAP_BLOCK_FREE_CALLBACK_FUNCTION)(void* ptr);
+
 struct heap_table {
     HEAP_BLOCK_TABLE_ENTRY* entries;
     size_t total;
@@ -27,7 +42,20 @@ struct heap {
     // heap_create. Used by multiheap to test whether a freed
     // pointer belongs to a given sub-heap.
     void* eaddr;
+
+    // Lecture 26 - per-block callbacks. NULL == no callback for
+    // this heap (the default; the minimal heap and ordinary
+    // E820-backed sub-heaps do not need either). Defragmenter
+    // heaps will set both.
+    HEAP_BLOCK_ALLOCATED_CALLBACK_FUNCTION  block_allocated_callback;
+    HEAP_BLOCK_FREE_CALLBACK_FUNCTION       block_free_callback;
 };
+
+// Lecture 26 - convenience setter so callers do not poke struct
+// fields directly.
+void heap_callbacks_set(struct heap* heap,
+                        HEAP_BLOCK_ALLOCATED_CALLBACK_FUNCTION allocated_func,
+                        HEAP_BLOCK_FREE_CALLBACK_FUNCTION free_func);
 
 int    heap_create(struct heap* heap, void* ptr, void* end, struct heap_table* table);
 void*  heap_malloc(struct heap* heap, size_t size);
