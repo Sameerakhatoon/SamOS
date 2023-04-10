@@ -70,6 +70,7 @@ void* paging_align_address(void* ptr);
 struct paging_desc* paging_desc_new(paging_map_level_t root_map_level);
 void  paging_switch(struct paging_desc* desc);
 bool  paging_is_aligned(void* addr);
+struct paging_desc* paging_current_descriptor(void);
 int   paging_map_e820_memory_regions(struct paging_desc* desc);
 
 // Asm helpers (paging.asm).

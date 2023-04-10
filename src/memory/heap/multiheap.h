@@ -26,8 +26,20 @@ enum {
 
 struct multiheap_single_heap {
     struct heap* heap;
+    // Lecture 27 - the "shadow" heap that mirrors this sub-heap
+    // in the virtual arena. Lazily filled by multiheap_ready for
+    // sub-heaps that carry MULTIHEAP_HEAP_FLAG_DEFRAGMENT_WITH_PAGING.
+    // NULL otherwise.
+    struct heap* paging_heap;
     int          flags;
     struct multiheap_single_heap* next;
+};
+
+// Lecture 27 - multiheap-level flags. IS_READY is set by
+// multiheap_ready once the virtual arena is built; allocators
+// gate the second-pass defragment path on it.
+enum {
+    MULTIHEAP_FLAG_IS_READY = 0x01,
 };
 
 struct multiheap {
@@ -40,9 +52,10 @@ struct multiheap {
     // above this address are interpreted as "virtual" - they map
     // to a defragment-by-paging arena that lives in the unused
     // virtual address space above the last sub-heap. Populated
-    // by a later lecture when the second-pass allocator lands.
+    // by multiheap_ready (L27).
     void*                          max_end_data_addr;
 
+    int                            flags;
     size_t                         total_heaps;
 };
 
@@ -52,5 +65,12 @@ int   multiheap_add(struct multiheap* mh, void* saddr, void* eaddr, int flags);
 void* multiheap_alloc(struct multiheap* mh, size_t size);
 void* multiheap_palloc(struct multiheap* mh, size_t size);
 void  multiheap_free(struct multiheap* mh);
+
+// Lecture 27 - one-shot setup. Builds the virtual arena above
+// max_end_data_addr; for every DEFRAGMENT_WITH_PAGING sub-heap,
+// creates a shadow heap and identity-maps the virtual range
+// into the live PML4. Caller must have a paging descriptor
+// active (paging_switch already called).
+int multiheap_ready(struct multiheap* mh);
 
 #endif
