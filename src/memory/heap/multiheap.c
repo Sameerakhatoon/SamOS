@@ -81,6 +81,73 @@ void* multiheap_virtual_address_to_physical(struct multiheap* mh, void* ptr){
     return (void*)((uintptr_t)ptr - (uintptr_t)mh->max_end_data_addr);
 }
 
+// Lecture 28 - find the sub-heap whose SHADOW heap (paging_heap)
+// contains the given virtual-arena pointer. O(N) over sub-heaps;
+// only paging-defragment heaps are searched.
+struct multiheap_single_heap* multiheap_get_paging_heap_for_address(struct multiheap* mh, void* address){
+    struct multiheap_single_heap* cur = mh->first_multiheap;
+    while(cur){
+        if(!multiheap_heap_allows_paging(cur)){
+            cur = cur->next;
+            continue;
+        }
+        if(heap_is_address_within_heap(cur->paging_heap, address)){
+            return cur;
+        }
+        cur = cur->next;
+    }
+    return NULL;
+}
+
+// Lecture 28 - given a pointer that might be virtual-arena or
+// physical, resolve to:
+//   *heap_out         - the underlying physical sub-heap
+//   *paging_heap_out  - the shadow heap if virtual, else NULL
+//   *real_phys_addr   - the underlying physical address (== ptr
+//                       if already physical)
+void multiheap_get_heap_and_paging_heap_for_address(struct multiheap* mh,
+                                                    void* ptr,
+                                                    struct multiheap_single_heap** heap_out,
+                                                    struct multiheap_single_heap** paging_heap_out,
+                                                    void** real_phys_addr){
+    void* real_addr = ptr;
+    if(multiheap_is_address_virtual(mh, ptr)){
+        *paging_heap_out = multiheap_get_paging_heap_for_address(mh, ptr);
+        real_addr = multiheap_virtual_address_to_physical(mh, ptr);
+    }
+    *heap_out       = multiheap_get_heap_for_address(mh, real_addr);
+    *real_phys_addr = real_addr;
+}
+
+// Lecture 28 - block count of the allocation that `ptr` heads.
+// If `ptr` is in the virtual arena we walk the SHADOW heap (the
+// run-length lives there, not in the physical sub-heap).
+size_t multiheap_allocation_block_count(struct multiheap* mh, void* ptr){
+    struct multiheap_single_heap* paging_heap = NULL;
+    struct multiheap_single_heap* phys_heap   = NULL;
+    void* real_phys_addr = NULL;
+    multiheap_get_heap_and_paging_heap_for_address(mh, ptr, &phys_heap, &paging_heap, &real_phys_addr);
+
+    // Prefer the shadow heap when present: the bitmap walk has
+    // to use the SAME ptr we passed in, and that ptr is virtual.
+    struct multiheap_single_heap* heap_to_check = paging_heap ? paging_heap : phys_heap;
+    if(!heap_to_check){
+        return 0;
+    }
+    return heap_allocation_block_count(heap_to_check->heap, ptr);
+}
+
+// Lecture 28 - byte count of the same allocation.
+//
+// SamOs deviation: upstream is recursive against itself
+// (multiheap_allocation_byte_count calls
+// multiheap_allocation_byte_count), which infinite-loops. The
+// obvious intent is to call _block_count and multiply by block
+// size. We do that.
+size_t multiheap_allocation_byte_count(struct multiheap* mh, void* ptr){
+    return multiheap_allocation_block_count(mh, ptr) * SAMOS_HEAP_BLOCK_SIZE;
+}
+
 // (The L25 helpers above are unused at L25 itself; later lectures
 // in the multiheap arc call them. -Wno-unused-function in our
 // CFLAGS keeps the static one quiet; the non-static ones do not

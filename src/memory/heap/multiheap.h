@@ -73,4 +73,11 @@ void  multiheap_free(struct multiheap* mh);
 // active (paging_switch already called).
 int multiheap_ready(struct multiheap* mh);
 
+// Lecture 28 - allocation introspection. Both walk the heap
+// entry table from `ptr` and return the length of the
+// contiguous TAKEN run (block_count) or its byte equivalent
+// (byte_count).
+size_t multiheap_allocation_block_count(struct multiheap* mh, void* ptr);
+size_t multiheap_allocation_byte_count(struct multiheap* mh, void* ptr);
+
 #endif
