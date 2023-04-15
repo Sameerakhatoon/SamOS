@@ -47,6 +47,33 @@ struct paging_desc* paging_current_descriptor(void){
     return current_paging_desc;
 }
 
+// Lecture 29 - STUB. paging_get returns the PT leaf entry for a
+// given virtual address by walking PML4 -> PDPT -> PD -> PT.
+// Real implementation lands in L31. Until then we return NULL,
+// which propagates up through paging_get_physical_address and
+// out of multiheap_free's virtual-arena branch. multiheap_free
+// is dormant at L29 so this stub never actually fires.
+struct paging_desc_entry* paging_get(struct paging_desc* desc, void* virtual_address){
+    (void)desc;
+    (void)virtual_address;
+    return NULL;
+}
+
+// Lecture 29 - virtual-to-physical helper. Uses paging_get to
+// find the leaf entry, reconstructs the physical address as
+// (entry.address << 12) + (virtual_address & 0xFFF). Returns
+// NULL when the walk fails (which is also what the L29 stub
+// version of paging_get always returns).
+void* paging_get_physical_address(struct paging_desc* desc, void* virtual_address){
+    struct paging_desc_entry* entry = paging_get(desc, virtual_address);
+    if(!entry){
+        return NULL;
+    }
+    uint64_t physical_base = ((uint64_t)entry->address) << 12;
+    uint64_t offset        = ((uint64_t)virtual_address) & 0xFFF;
+    return (void*)(physical_base + offset);
+}
+
 void paging_switch(struct paging_desc* desc)
 {
     current_paging_desc = desc;

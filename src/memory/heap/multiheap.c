@@ -193,7 +193,10 @@ int multiheap_add(struct multiheap* mh, void* saddr, void* eaddr, int flags){
     return multiheap_add_heap(mh, heap, flags);
 }
 
-void multiheap_free(struct multiheap* mh){
+// Lecture 29 - was the all-heaps teardown; renamed to
+// _free_heap so the L29 per-allocation multiheap_free can take
+// the well-known name.
+void multiheap_free_heap(struct multiheap* mh){
     struct multiheap_single_heap* cur = mh->first_multiheap;
     while(cur){
         struct multiheap_single_heap* next = cur->next;
@@ -203,6 +206,55 @@ void multiheap_free(struct multiheap* mh){
         cur = next;
     }
     heap_free(mh->starting_heap, mh);
+}
+
+// Lecture 29 - per-allocation free.
+//
+// If `ptr` is in the virtual arena:
+//   1. Walk every block in the allocation. For each block,
+//      look up its physical backing via paging_get_physical_
+//      address and recursively multiheap_free the physical
+//      pointer (so the underlying physical sub-heap blocks
+//      get released).
+//   2. heap_free the virtual range on the shadow heap (so
+//      the bookkeeping bitmap clears and the per-block free
+//      callback fires to unmap the page).
+//
+// Else (`ptr` is physical):
+//   1. heap_free on the owning physical sub-heap.
+//
+// Dormant at L29 - kheap.c::kfree is still a no-op, and the
+// virtual-arena branch depends on the L31 paging_get
+// implementation anyway. The path is wired here so L30 and
+// later can finish the picture without further plumbing in
+// multiheap.c.
+void multiheap_free(struct multiheap* mh, void* ptr){
+    struct multiheap_single_heap* paging_heap   = NULL;
+    struct multiheap_single_heap* phys_heap     = NULL;
+    void* real_phys_addr = NULL;
+    multiheap_get_heap_and_paging_heap_for_address(mh, ptr, &phys_heap, &paging_heap, &real_phys_addr);
+
+    if(paging_heap){
+        size_t total_blocks   = heap_allocation_block_count(paging_heap->paging_heap, ptr);
+        size_t starting_block = (size_t)heap_address_to_block(paging_heap->paging_heap, ptr);
+        size_t ending_block   = starting_block + total_blocks;
+        for(size_t i = starting_block; i < ending_block; i++){
+            void* vaddr_for_block = (void*)((uintptr_t)ptr + (i * SAMOS_HEAP_BLOCK_SIZE));
+            void* data_phys_addr  = paging_get_physical_address(paging_current_descriptor(),
+                                                                 vaddr_for_block);
+            // Recurse with the physical backing. The recursion
+            // is bounded: the inner call's pointer is physical,
+            // so it lands in the phys_heap branch and returns
+            // without further recursion.
+            multiheap_free(mh, data_phys_addr);
+        }
+        // Now release the virtual-arena range. The shadow heap's
+        // free callback (multiheap_paging_heap_free_block) fires
+        // per block and unmaps each PT entry.
+        heap_free(paging_heap->paging_heap, ptr);
+    } else if(phys_heap){
+        heap_free(phys_heap->heap, real_phys_addr);
+    }
 }
 
 static void* multiheap_alloc_first_pass(struct multiheap* mh, size_t size){
