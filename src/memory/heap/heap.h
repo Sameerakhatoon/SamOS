@@ -43,6 +43,15 @@ struct heap {
     // pointer belongs to a given sub-heap.
     void* eaddr;
 
+    // Lecture 30 - running counts. heap_create initialises them
+    // (free = total, used = 0). heap_malloc_blocks and
+    // heap_mark_blocks_free keep them in sync. The defragment
+    // second pass uses free_blocks to pick which physical sub-
+    // heap can back a virtual allocation.
+    size_t total_blocks;
+    size_t free_blocks;
+    size_t used_blocks;
+
     // Lecture 26 - per-block callbacks. NULL == no callback for
     // this heap (the default; the minimal heap and ordinary
     // E820-backed sub-heaps do not need either). Defragmenter

@@ -85,4 +85,10 @@ int multiheap_ready(struct multiheap* mh);
 size_t multiheap_allocation_block_count(struct multiheap* mh, void* ptr);
 size_t multiheap_allocation_byte_count(struct multiheap* mh, void* ptr);
 
+// Lecture 30 - state predicates.
+bool multiheap_is_ready(struct multiheap* mh);
+bool multiheap_can_add_heap(struct multiheap* mh);
+bool multiheap_is_address_virtual(struct multiheap* mh, void* ptr);
+struct multiheap_single_heap* multiheap_get_heap_for_address(struct multiheap* mh, void* address);
+
 #endif
