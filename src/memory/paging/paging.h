@@ -80,11 +80,9 @@ int   paging_map_e820_memory_regions(struct paging_desc* desc);
 // walk terminates on a missing entry.
 void* paging_get_physical_address(struct paging_desc* desc, void* virtual_address);
 
-// Lecture 29 - return the PT entry for a given virtual address.
-// Lecture 31 implements this for real (it's a forward of the
-// walk used in paging_map). At L29 we expose the prototype +
-// a NULL-returning stub so paging_get_physical_address can
-// reference it without breaking the link.
+// Lecture 29 prototype, L31 real implementation: walks PML4 ->
+// PDPT -> PD -> PT and returns a pointer to the PT leaf entry,
+// or NULL if any intermediate table entry is missing.
 struct paging_desc_entry* paging_get(struct paging_desc* desc, void* virtual_address);
 
 // Asm helpers (paging.asm).
