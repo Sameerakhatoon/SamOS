@@ -11,6 +11,56 @@ global enable_interrupts
 global disable_interrupts
 global interrupt_pointer_table
 
+; Lecture 35 - 64-bit pushad / popad.
+;
+; x86_64 dropped the 1-insn pushad/popad helpers. We emulate them
+; via macros so the rest of idt.asm keeps reading like the 32-bit
+; original; only the body of each macro is hand-rolled.
+;
+; The 32-bit pushad pushed 8 32-bit regs in the order
+;   eax, ecx, edx, ebx, esp, ebp, esi, edi
+; popad consumes them in reverse but DISCARDS the saved esp
+; (popad's third pop is to nothing, then rsp is restored from the
+; original frame).
+;
+; Our 64-bit version preserves the same order at register width:
+; we stash the current rsp in a static slot, push rax..rdi in the
+; same order, then on popad pop in reverse and restore rsp from
+; the stash. The push of rsp itself is a pushed COPY (the value
+; the stack pointer had ON ENTRY to pushad_macro) so the layout
+; mirrors 32-bit pushad's expectations - C handlers that interpret
+; the frame as a struct see rsp at the same slot they used to see
+; esp.
+;
+; L36 will widen the rest of the file (push esp -> push rsp,
+; iret -> iretq, the interrupt_pointer_table entries from dd to
+; dq, etc).
+temp_rsp_storage: dq 0x00
+
+%macro pushad_macro 0
+    mov qword [temp_rsp_storage], rsp
+    push rax
+    push rcx
+    push rdx
+    push rbx
+    push qword [temp_rsp_storage]   ; rsp slot (32-bit pushad esp)
+    push rbp
+    push rsi
+    push rdi
+%endmacro
+
+%macro popad_macro 0
+    pop rdi
+    pop rsi
+    pop rbp
+    pop qword [temp_rsp_storage]    ; discard pushed rsp
+    pop rbx
+    pop rdx
+    pop rcx
+    pop rax
+    mov rsp, [temp_rsp_storage]
+%endmacro
+
 idt_load:
     push ebp
     mov ebp, esp
@@ -20,9 +70,9 @@ idt_load:
     ret
 
 no_interrupt:
-    pushad
+    pushad_macro
     call no_interrupt_handler
-    popad
+    popad_macro
     iret
 
 ; Ch 102 isr80h_wrapper - the int 0x80 entry point user processes will
@@ -33,7 +83,7 @@ isr80h_wrapper:
     ; Push the user general-purpose registers in the order C's
     ; struct interrupt_frame expects: edi, esi, ebp, esp(reserved),
     ; ebx, edx, ecx, eax.
-    pushad
+    pushad_macro
 
     ; Pass the address of the interrupt frame (current ESP) as the
     ; second argument to the C handler.
@@ -52,7 +102,7 @@ isr80h_wrapper:
     add esp, 8
 
     ; Restore the user GPRs.
-    popad
+    popad_macro
 
     ; Reload EAX with the syscall return value so the user code sees it.
     mov eax, [tmp_res]
@@ -67,7 +117,7 @@ isr80h_wrapper:
     int%1:
         ; INTERRUPT FRAME START - the CPU has already pushed:
         ;   ip, cs, flags, sp, ss
-        pushad
+        pushad_macro
         ; INTERRUPT FRAME END
 
         push esp           ; struct interrupt_frame*
@@ -75,7 +125,7 @@ isr80h_wrapper:
         call interrupt_handler
         add  esp, 8
 
-        popad
+        popad_macro
         iret
 %endmacro
 
