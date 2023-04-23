@@ -2,6 +2,7 @@
 #include "config.h"
 #include "kernel.h"
 #include "memory/memory.h"
+#include "memory/heap/kheap.h"   // L37
 #include "io/io.h"
 #include "task/task.h"
 #include "task/process.h"
@@ -71,13 +72,31 @@ int idt_register_interrupt_callback(int interrupt, INTERRUPT_CALLBACK_FUNCTION i
     return 0;
 }
 
+// Lecture 37 - 64-bit gate install.
+//
+//   - 64-bit selector (KERNEL_LONG_MODE_CODE_SELECTOR = 0x18,
+//     the L=1 code seg in kernel.asm's GDT).
+//   - Address split into three offset_N fields covering bits
+//     0..15, 16..31, 32..63.
+//   - ist = 0 (no TSS stack switch; there is no TSS yet).
+//   - type_attr = 0x8E for CPU exceptions / interrupts (vectors
+//     0..0x31 in upstream's convention - covers all 32 CPU
+//     vectors plus the first 18 PIC IRQs, slightly broader than
+//     strictly necessary but harmless). 0xEE for everything else
+//     (gives DPL=3 so user-mode int 0x80 syscalls don't #GP).
 void idt_set(int interrupt_no, void* address){
     struct idt_desc* desc = &idt_descriptors[interrupt_no];
-    desc->offset_1  = (uint32_t)address & 0x0000FFFF;
-    desc->selector  = KERNEL_CODE_SELECTOR;
-    desc->zero      = 0x00;
+    uintptr_t _address = (uintptr_t)address;
+    desc->offset_1  = (uint16_t)(_address         & 0xFFFF);
+    desc->selector  = KERNEL_LONG_MODE_CODE_SELECTOR;
+    desc->ist       = 0;
     desc->type_attr = 0xEE;
-    desc->offset_2  = (uint32_t)address >> 16;
+    if(interrupt_no <= 0x31){
+        desc->type_attr = 0x8E;
+    }
+    desc->offset_2  = (uint16_t)((_address >> 16) & 0xFFFF);
+    desc->offset_3  = (uint32_t)((_address >> 32) & 0xFFFFFFFF);
+    desc->reserved  = 0;
 }
 
 void isr80h_register_command(int command_id, ISR80H_COMMAND command){
@@ -115,7 +134,10 @@ void* isr80h_handler(int command, struct interrupt_frame* frame){
 void idt_init(){
     memset(idt_descriptors, 0, sizeof(idt_descriptors));
     idtr_descriptor.limit = sizeof(idt_descriptors) - 1;
-    idtr_descriptor.base  = (uint32_t)idt_descriptors;
+    // L37 - 64-bit base. The IDT itself lives wherever the
+    // compiler placed its static array; uintptr_t / uint64_t
+    // covers the full kernel address space.
+    idtr_descriptor.base  = (uint64_t)(uintptr_t)idt_descriptors;
 
     // Ch 112: every IDT vector now points at its macro-generated asm stub.
     for(int i = 0; i < SAMOS_TOTAL_INTERRUPTS; i++){

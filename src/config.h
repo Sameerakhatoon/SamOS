@@ -4,6 +4,10 @@
 #define KERNEL_CODE_SELECTOR    0x08
 #define KERNEL_DATA_SELECTOR    0x10
 
+// Lecture 37 - the 64-bit code segment selector lives at GDT
+// offset 0x18 (kernel.asm's GDT entry with L=1).
+#define KERNEL_LONG_MODE_CODE_SELECTOR  0x18
+
 #define SAMOS_TOTAL_INTERRUPTS  512
 
 // Lecture 24 - this is the MINIMUM heap size: we refuse to bring
