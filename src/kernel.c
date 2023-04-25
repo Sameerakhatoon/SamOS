@@ -15,6 +15,7 @@
 #include "kernel.h"
 #include <stddef.h>
 #include <stdint.h>
+#include "idt/idt.h"
 #include "memory/heap/kheap.h"
 #include "memory/heap/heap.h"
 #include "memory/memory.h"
@@ -131,6 +132,9 @@ void kernel_page()
     paging_switch(kernel_paging_desc);
 }
 
+// Lecture 38 - asm-side #DE trigger.
+extern void div_test(void);
+
 void kernel_main(void)
 {
     terminal_initialize();
@@ -190,13 +194,20 @@ void kernel_main(void)
     // the live PML4, locks the sub-heap set against further
     // adds. Must run AFTER paging_switch (multiheap_ready
     // panics if no descriptor is loaded).
-    //
-    // The L23-style drain + "Memory wasted" print are gone -
-    // upstream removed them here and SamOs follows. The new
-    // smoke token is "multiheap ready" so the regression test
-    // can prove kheap_post_paging returned without faulting.
     kheap_post_paging();
     print("multiheap ready\n");
+
+    // Lecture 38 - bring the IDT up and prove it works by
+    // deliberately triggering #DE. div_test does idiv rax
+    // with rax = 0 -> CPU raises divide-by-zero -> IDT
+    // vector 0 = idt_zero -> prints "Divide by zero error"
+    // and spins. The "oi" line below must NEVER appear; if
+    // it does, either the IDT install was wrong or the
+    // handler returned instead of halting.
+    idt_init();
+    print("hello\n");
+    div_test();
+    print("oi\n");
 
     while (1)
     {

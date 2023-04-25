@@ -4,8 +4,11 @@
 #include "memory/memory.h"
 #include "memory/heap/kheap.h"   // L37
 #include "io/io.h"
-#include "task/task.h"
-#include "task/process.h"
+// L38 - task / process subsystems not yet rebuilt in 64-bit;
+// every reference in this file is commented out below. Includes
+// stay out until those modules are back.
+// #include "task/task.h"
+// #include "task/process.h"
 #include "status.h"
 
 struct idt_desc  idt_descriptors[SAMOS_TOTAL_INTERRUPTS];
@@ -19,18 +22,27 @@ extern void* interrupt_pointer_table[SAMOS_TOTAL_INTERRUPTS];
 static ISR80H_COMMAND isr80h_commands[SAMOS_MAX_ISR80H_COMMANDS];
 static INTERRUPT_CALLBACK_FUNCTION interrupt_callbacks[SAMOS_TOTAL_INTERRUPTS];
 
+// Lecture 38 - print and halt. The L38 smoke test deliberately
+// triggers #DE via div_test in kernel.asm; this handler prints
+// the marker and never returns (no iretq path back to the
+// faulting instruction would make sense - the divide will
+// fault again immediately).
 void idt_zero(){
     print("Divide by zero error\n");
+    while(1) {}
 }
 
+// L38 - bodies disabled until the 64-bit task / process modules
+// land. The IDT structure works without them; we just don't have
+// anywhere to dispatch the standard exception or clock yet.
 void idt_handle_exception(){
-    process_terminate(task_current()->process);
-    task_next();
+    // process_terminate(task_current()->process);
+    // task_next();
 }
 
 void idt_clock(){
-    outb(0x20, 0x20);
-    task_next();
+    // outb(0x20, 0x20);
+    // task_next();
 }
 
 void no_interrupt_handler(){
@@ -38,29 +50,18 @@ void no_interrupt_handler(){
     outb(0x20, 0x20);
 }
 
+// Lecture 38 - minimal handler. The full task-aware version (page
+// switch + state save) is commented out until task / process
+// modules land. Just acks the PIC.
 void interrupt_handler(int interrupt, struct interrupt_frame* frame){
-    int from_user = ((frame->cs & 0x3) == 0x3);
-
-    // G05+G07+G08: only swap segments / save state / restore paging when the
-    // trap came FROM user mode. For kernel-mode interrupts the segments and
-    // CR3 are already kernel-side, and frame->ss / frame->esp are random
-    // stack bytes (CPU only pushes them on a privilege-level change), so
-    // writing them into task->registers corrupts the user task's selectors
-    // and the subsequent task_return iretd #GPs on `mov ds, ax`.
-    if(from_user){
-        kernel_page();
-    }
-    if(interrupt_callbacks[interrupt] != 0){
-        if(task_current()){
-            if(from_user){
-                task_current_save_state(frame);
-            }
-            interrupt_callbacks[interrupt](frame);
-        }
-    }
-    if(from_user && task_current()){
-        task_page();
-    }
+    (void)interrupt;
+    (void)frame;
+    // kernel_page();
+    // if(interrupt_callbacks[interrupt] != 0){
+    //     task_current_save_state(frame);
+    //     interrupt_callbacks[interrupt](frame);
+    // }
+    // task_page();
     outb(0x20, 0x20);
 }
 
@@ -122,12 +123,14 @@ void* isr80h_handle_command(int command, struct interrupt_frame* frame){
     return result;
 }
 
+// L38 - minimal stub. task save / kernel_page dance comes back
+// when the task subsystem does.
 void* isr80h_handler(int command, struct interrupt_frame* frame){
     void* res = 0;
-    kernel_page();
-    task_current_save_state(frame);
+    // kernel_page();
+    // task_current_save_state(frame);
     res = isr80h_handle_command(command, frame);
-    task_page();
+    // task_page();
     return res;
 }
 
@@ -153,8 +156,11 @@ void idt_init(){
         idt_register_interrupt_callback(i, idt_handle_exception);
     }
 
-    // Ch 150: IRQ0 (timer, vector 0x20) drives round-robin task switching.
-    idt_register_interrupt_callback(0x20, idt_clock);
+    // L38 - IRQ0/timer callback wiring stays commented out until
+    // task switching exists. The IDT still installs every
+    // vector's asm stub; we just won't fire user-supplied
+    // callbacks yet.
+    // idt_register_interrupt_callback(0x20, idt_clock);
 
     idt_load(&idtr_descriptor);
 }
