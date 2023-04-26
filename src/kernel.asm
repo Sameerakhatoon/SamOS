@@ -172,6 +172,30 @@ gdt:
     db 0x92                         ; Access (P=1 DPL=00 S=1 E=0 RW=1)
     db 0x00
     db 0x00
+
+    ; Lecture 39 - user-mode segment descriptors (selectors 0x28
+    ; and 0x30 - or 0x2B / 0x33 with RPL=3 OR'd in).
+    ;
+    ; The IRET-from-kernel-to-user path requires that CS.RPL=3
+    ; matches DPL=3 in the descriptor; same for SS. We add a
+    ; 64-bit user code seg and a user data seg here so future
+    ; task / process code can install them when entering ring 3.
+
+    ; 64-bit user code segment (selector 0x28)
+    dw 0x0000                       ; limit (ignored in long mode)
+    dw 0x0000                       ; base low
+    db 0x00                         ; base middle
+    db 0xFA                         ; access: P=1 DPL=11 S=1 E=1 RW=1 A=0
+    db 0x20                         ; flags: L=1, D=0 mandatory
+    db 0x00                         ; base high
+
+    ; 64-bit user data segment (selector 0x30)
+    dw 0x0000
+    dw 0x0000
+    db 0x00
+    db 0xF2                         ; access: P=1 DPL=11 S=1 E=0 RW=1 A=0
+    db 0x00                         ; flags: no L for data
+    db 0x00
 gdt_end:
 
 gdt_descriptor:
