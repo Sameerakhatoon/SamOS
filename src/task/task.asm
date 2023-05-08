@@ -1,83 +1,82 @@
-[BITS 32]
+; Lecture 41 - task.asm 64-bit rewrite.
+;
+; Three asm helpers used by task.c:
+;
+;   task_return(struct registers* regs)
+;     Build an iretq frame from the saved register file and
+;     jump to user mode. Args in RDI per SysV.
+;
+;   restore_general_purpose_registers(struct registers* regs)
+;     Reload rsi/rbp/rbx/rdx/rcx/rax/rdi from the file.
+;     Subset of pushad_macro's restore - we leave rdi for last
+;     because we are still using it as the file pointer.
+;
+;   user_registers()
+;     Load the user data selector (USER_DATA_SEGMENT = 0x33)
+;     into ds/es/fs/gs. CS gets set by iretq; SS is loaded
+;     from the iretq frame.
+
+[BITS 64]
 section .asm
 
-global user_registers
 global restore_general_purpose_registers
 global task_return
+global user_registers
 
-; void user_registers()
-; Reload DS/ES/FS/GS with the user data selector (0x23 = 0x20 | 3).
-user_registers:
-    mov ax, 0x23
-    mov ds, ax
-    mov es, ax
-    mov fs, ax
-    mov gs, ax
-    ret
+; The struct registers layout (see task.h):
+;   off  field
+;     0  rdi
+;     8  rsi
+;    16  rbp
+;    24  rbx
+;    32  rdx
+;    40  rcx
+;    48  rax
+;    56  ip
+;    64  cs
+;    72  flags
+;    80  rsp
+;    88  ss
+
+; void task_return(struct registers* regs)
+;
+; Manually constructs the iretq frame in reverse-push order:
+;   SS, RSP, RFLAGS, CS, RIP. The push order below pushes
+;   bottom-of-frame first.
+task_return:
+    push qword [rdi + 88]          ; SS
+    push qword [rdi + 80]          ; RSP
+    mov   rax, [rdi + 72]          ; RFLAGS
+    or    rax, 0x200               ; force IF=1 so the user can be preempted
+    push  rax
+    push  qword 0x2B               ; CS = USER_CODE_SEGMENT (0x28|3)
+    push  qword [rdi + 56]         ; RIP
+    call  restore_general_purpose_registers
+    iretq
 
 ; void restore_general_purpose_registers(struct registers* regs)
 ;
-; struct registers layout (sizes are 4 bytes each):
-;   0   edi
-;   4   esi
-;   8   ebp
-;  12   ebx
-;  16   edx
-;  20   ecx
-;  24   eax
-;  28   ip
-;  32   cs
-;  36   flags
-;  40   esp
-;  44   ss
-;
-; Note: Ch 97 fixes the final pop here - the book initially had
-; `pop esp` which would clobber the stack pointer with the saved
-; base pointer. We pop into ebp.
+; Reloads everything except rdi from the file, then reloads
+; rdi last (we are using it as the file base until that point).
 restore_general_purpose_registers:
-    push ebp
-    mov ebp, esp
-    mov ebx, [ebp+8]
-    mov edi, [ebx]
-    mov esi, [ebx+4]
-    mov ebp, [ebx+8]
-    mov edx, [ebx+16]
-    mov ecx, [ebx+20]
-    mov eax, [ebx+24]
-    mov ebx, [ebx+12]
-    pop ebp
+    mov rsi, [rdi + 8]
+    mov rbp, [rdi + 16]
+    mov rbx, [rdi + 24]
+    mov rdx, [rdi + 32]
+    mov rcx, [rdi + 40]
+    mov rax, [rdi + 48]
+    mov rdi, [rdi + 0]
     ret
 
-; void task_return(struct registers* regs)
-; Build a synthetic interrupt frame on the stack and iret into user
-; mode. The frame must match what the CPU pushes on a privilege-level
-; trap: SS, ESP, EFLAGS, CS, EIP (in that push order).
+; void user_registers()
 ;
-; Note: Ch 97 fixes the final argument push here - the book initially
-; pushed `[ebx+4]` (which would be the esi field, not the regs pointer
-; itself). The correct value is `[ebp+4]`, the regs argument.
-task_return:
-    mov ebp, esp
-    mov ebx, [ebp+4]            ; struct registers*
-
-    push dword [ebx+44]         ; SS
-    push dword [ebx+40]         ; ESP
-    pushf                       ; EFLAGS
-    pop eax
-    or eax, 0x200               ; set IF so interrupts return on in user mode
-    push eax
-    push dword [ebx+32]         ; CS
-    push dword [ebx+28]         ; EIP
-
-    ; Load user data selectors into segment registers.
-    mov ax, [ebx+44]
+; ds/es/fs/gs must be a DATA selector with DPL=3, so we use
+; USER_DATA_SEGMENT (0x33). SS gets set by the iretq frame
+; from task_return; CS is set by iretq itself.
+user_registers:
+    mov ax, 0x33                   ; USER_DATA_SEGMENT
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
-
-    push dword [ebp+4]          ; pass struct registers* to restore_gpr
-    call restore_general_purpose_registers
-    add esp, 4
-
-    iretd
+    ret
