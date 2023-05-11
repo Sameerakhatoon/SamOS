@@ -135,6 +135,14 @@ void kernel_page()
 // Lecture 38 - asm-side #DE trigger.
 extern void div_test(void);
 
+// Lecture 44 - public getter for the kernel's paging_desc.
+// Anyone needing to walk the kernel address space (e.g.
+// task.c::copy_string_from_task) calls this rather than
+// reaching for kernel_paging_desc directly.
+struct paging_desc* kernel_desc(){
+    return kernel_paging_desc;
+}
+
 void kernel_main(void)
 {
     terminal_initialize();

@@ -10,6 +10,7 @@
 #include "memory/heap/kheap.h"
 #include "memory/heap/heap.h"
 #include "memory/memory.h"
+#include "kernel.h"     // L43 - for panic()
 #include "status.h"
 
 static struct paging_desc* current_paging_desc = 0;
@@ -22,6 +23,84 @@ static bool paging_null_entry(struct paging_desc_entry* entry);
 struct paging_pml_entries* paging_pml4_entries_new(void)
 {
     return kzalloc(sizeof(struct paging_pml_entries));
+}
+
+// Lecture 43 - recursive teardown of a paging tree.
+//
+// table_entry is a pointer to the BASE of a level-N table (its
+// 512 entries laid out as a contiguous array). The level
+// parameter says what kind of entries those are:
+//
+//   level == 4   table_entry points at a PML4 (8-byte entries, each
+//                  pointing at a PDPT)
+//   level == 3   table_entry points at a PDPT (entries point at PD)
+//   level == 2   table_entry points at a PD   (entries point at PT)
+//   level == 1   table_entry points at a PT   (entries point at 4-KiB
+//                  pages - those are the LEAVES; we do not free
+//                  the page itself because it is data, not table
+//                  bookkeeping)
+//
+// We recurse from level N down to level 2, freeing the intermediate
+// tables on the way out. At level 1 we just kfree the PT table.
+// The pages mapped BY the PT are user data - the caller's
+// responsibility to free.
+static void paging_desc_entry_free(struct paging_desc_entry* table_entry,
+                                   paging_map_level_t level)
+{
+    if(paging_null_entry(table_entry)){
+        return;
+    }
+    if(level == 0){
+        panic("paging_desc_entry_free: level must be at least 1\n");
+    }
+    if(level > PAGING_MAP_LEVEL_4){
+        panic("paging_desc_entry_free: level > 4 not supported\n");
+    }
+
+    if(level > 1){
+        // Walk the 512 entries of this table; recurse into the
+        // non-null ones at level-1.
+        for(int i = 0; i < PAGING_TOTAL_ENTRIES_PER_TABLE; i++){
+            struct paging_desc_entry* entry = &table_entry[i];
+            if(!paging_null_entry(entry)){
+                struct paging_desc_entry* child =
+                    (struct paging_desc_entry*)(((uint64_t)entry->address) << 12);
+                if(child){
+                    paging_desc_entry_free(child, level - 1);
+                }
+            }
+        }
+    }
+
+    // Free THIS table's memory. (At level 1 we're freeing a PT
+    // table; the level-1 walk above doesn't run, so we go straight
+    // here.)
+    kfree(table_entry);
+}
+
+// Lecture 43 - free an entire paging_desc tree.
+//
+// The PML4 is walked one entry at a time. Non-null entries
+// recurse into their PDPT (level-1 of 4 = 3). After the recursion
+// we free the PML entries block and the descriptor itself.
+//
+// This is the function task_free has been waiting for since
+// L40 - now dying tasks can release their page-table trees
+// instead of leaking ~MB per dead process.
+void paging_desc_free(struct paging_desc* desc){
+    paging_map_level_t level = desc->level;
+    for(int i = 0; i < PAGING_TOTAL_ENTRIES_PER_TABLE; i++){
+        struct paging_desc_entry* entry = &desc->pml->entries[i];
+        if(!paging_null_entry(entry)){
+            struct paging_desc_entry* child =
+                (struct paging_desc_entry*)(((uint64_t)entry->address) << 12);
+            if(child){
+                paging_desc_entry_free(child, level - 1);
+            }
+        }
+    }
+    kfree(desc->pml);
+    kfree(desc);
 }
 
 static bool paging_map_level_is_valid(paging_map_level_t level)
