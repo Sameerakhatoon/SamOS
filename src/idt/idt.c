@@ -4,11 +4,11 @@
 #include "memory/memory.h"
 #include "memory/heap/kheap.h"   // L37
 #include "io/io.h"
-// L38 - task / process subsystems not yet rebuilt in 64-bit;
-// every reference in this file is commented out below. Includes
-// stay out until those modules are back.
-// #include "task/task.h"
-// #include "task/process.h"
+// Lecture 52 - task subsystem is back in the build (L45). Re-
+// enable the includes so the dispatch path's task_current /
+// task_page / etc resolve.
+#include "task/task.h"
+#include "task/process.h"
 #include "status.h"
 
 struct idt_desc  idt_descriptors[SAMOS_TOTAL_INTERRUPTS];
@@ -32,17 +32,23 @@ void idt_zero(){
     while(1) {}
 }
 
-// L38 - bodies disabled until the 64-bit task / process modules
-// land. The IDT structure works without them; we just don't have
-// anywhere to dispatch the standard exception or clock yet.
+// Lecture 52 - panic for now. Future lecture will route through
+// process_terminate / task_next once those calls are safer to
+// make from interrupt context.
 void idt_handle_exception(){
+    panic("Panic Exception\n");
     // process_terminate(task_current()->process);
     // task_next();
 }
 
+// Lecture 52 - timer-IRQ callback. PIC ack + round-robin to the
+// next task. The "test\n" print is upstream's debug
+// breadcrumb; we keep it so the regression test can prove the
+// IRQ wiring really fired once interrupts come up.
 void idt_clock(){
-    // outb(0x20, 0x20);
-    // task_next();
+    outb(0x20, 0x20);
+    print("test\n");
+    task_next();
 }
 
 void no_interrupt_handler(){
@@ -50,18 +56,30 @@ void no_interrupt_handler(){
     outb(0x20, 0x20);
 }
 
-// Lecture 38 - minimal handler. The full task-aware version (page
-// switch + state save) is commented out until task / process
-// modules land. Just acks the PIC.
+// Lecture 52 - full task-aware handler restored.
+//
+// kernel_page() puts us on the kernel address space and reloads
+// the kernel data selectors (we may have entered from a user
+// task with its own PML4 + 0x33 data segs loaded).
+//
+// If a callback is registered for this vector, save the user's
+// register state into the current task and fire it.
+//
+// task_page() restores the user task's PML4 + 0x33 data segs
+// before iretq returns to ring 3.
+//
+// SAFETY: task_page() needs a current_task. As long as
+// interrupts are disabled (no sti yet at L52), the timer
+// never fires and the path is unreachable. The keyboard
+// (L53) will need to make sure a task exists before enabling
+// interrupts.
 void interrupt_handler(int interrupt, struct interrupt_frame* frame){
-    (void)interrupt;
-    (void)frame;
-    // kernel_page();
-    // if(interrupt_callbacks[interrupt] != 0){
-    //     task_current_save_state(frame);
-    //     interrupt_callbacks[interrupt](frame);
-    // }
-    // task_page();
+    kernel_page();
+    if(interrupt_callbacks[interrupt] != 0){
+        task_current_save_state(frame);
+        interrupt_callbacks[interrupt](frame);
+    }
+    task_page();
     outb(0x20, 0x20);
 }
 
@@ -123,14 +141,15 @@ void* isr80h_handle_command(int command, struct interrupt_frame* frame){
     return result;
 }
 
-// L38 - minimal stub. task save / kernel_page dance comes back
-// when the task subsystem does.
+// Lecture 52 - full task-aware syscall handler restored. Same
+// shape as interrupt_handler: kernel_page in, dispatch, task_page
+// out.
 void* isr80h_handler(int command, struct interrupt_frame* frame){
     void* res = 0;
-    // kernel_page();
-    // task_current_save_state(frame);
+    kernel_page();
+    task_current_save_state(frame);
     res = isr80h_handle_command(command, frame);
-    // task_page();
+    task_page();
     return res;
 }
 
@@ -156,11 +175,10 @@ void idt_init(){
         idt_register_interrupt_callback(i, idt_handle_exception);
     }
 
-    // L38 - IRQ0/timer callback wiring stays commented out until
-    // task switching exists. The IDT still installs every
-    // vector's asm stub; we just won't fire user-supplied
-    // callbacks yet.
-    // idt_register_interrupt_callback(0x20, idt_clock);
+    // Lecture 52 - timer (IRQ0 = vector 0x20) now dispatches to
+    // idt_clock which task_next's. Won't actually fire until we
+    // sti somewhere.
+    idt_register_interrupt_callback(0x20, idt_clock);
 
     idt_load(&idtr_descriptor);
 }
