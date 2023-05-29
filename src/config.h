@@ -16,6 +16,11 @@
 //   = 1000 1001 = 0x89
 #define TSS_DESCRIPTOR_TYPE  0x89
 
+// Lecture 50 - GDT slot indices for the C side.
+#define KERNEL_LONG_MODE_CODE_GDT_INDEX  3
+#define KERNEL_LONG_MODE_DATA_GDT_INDEX  4
+#define KERNEL_LONG_MODE_TSS_GDT_INDEX   7
+
 #define SAMOS_TOTAL_INTERRUPTS  512
 
 // Lecture 24 - this is the MINIMUM heap size: we refuse to bring

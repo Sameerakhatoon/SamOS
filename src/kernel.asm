@@ -22,6 +22,7 @@
 global _start
 global kernel_registers
 global div_test
+global gdt                              ; L50 - exposed for C-side TSS install
 extern kernel_main
 
 CODE_SEG equ 0x08
@@ -196,6 +197,14 @@ gdt:
     db 0xF2                         ; access: P=1 DPL=11 S=1 E=0 RW=1 A=0
     db 0x00                         ; flags: no L for data
     db 0x00
+
+    ; Lecture 50 - two reserved slots for the 64-bit TSS
+    ; descriptor (gdt[7] and gdt[8]). The TSS desc is 16 bytes
+    ; wide, so it occupies TWO consecutive 8-byte GDT slots.
+    ; kernel_main fills these in at runtime via gdt_set_tss
+    ; after kheap_init.
+    dq 0x0000000000000000
+    dq 0x0000000000000000
 gdt_end:
 
 gdt_descriptor:
