@@ -248,11 +248,19 @@ void kernel_main(void)
         (struct tss_desc_64*)&gdt[KERNEL_LONG_MODE_TSS_GDT_INDEX];
     gdt_set_tss(tssdesc, &tss, sizeof(tss) - 1, TSS_DESCRIPTOR_TYPE, 0x00);
 
+    // Lecture 55 - ltr the TSS. The GDTR limit was set at boot
+    // to gdt_end - gdt - 1, which (since L50 reserved the two
+    // TSS slots BEFORE gdt_end) already covers selector 0x38.
+    // So ltr finds the descriptor we just wrote and loads it.
+    tss_load(KERNEL_LONG_MODE_TSS_SELECTOR);
+    print("tss load was fine\n");
+
     // Lecture 54 - register every syscall handler the user can
     // ask for via int 0x80. isr80h_register_commands fills the
     // isr80h_commands[] table; isr80h_handler dispatches a
     // user-supplied command id into that table on each int 0x80.
     isr80h_register_commands();
+    print("register isr80h\n");
 
     print("tss ready\n");
 

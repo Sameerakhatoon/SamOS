@@ -8,6 +8,11 @@
 // offset 0x18 (kernel.asm's GDT entry with L=1).
 #define KERNEL_LONG_MODE_CODE_SELECTOR  0x18
 
+// Lecture 55 - TSS selector. The 64-bit TSS descriptor lives
+// in GDT slot 7 (its high half spills into slot 8). Selector
+// = slot * 8 = 0x38.
+#define KERNEL_LONG_MODE_TSS_SELECTOR   0x38
+
 // Lecture 49 - TSS descriptor access byte.
 //   bit 7 (P)     = 1  present
 //   bits 5..6 (DPL) = 00  ring 0
