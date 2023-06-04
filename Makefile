@@ -18,11 +18,58 @@ FILES = ./build/kernel.asm.o ./build/kernel.o ./build/string/string.o ./build/me
 INCLUDES = -I./src
 FLAGS = -g -ffreestanding -falign-jumps -falign-functions -falign-labels -falign-loops -fstrength-reduce -fomit-frame-pointer -finline-functions -Wno-unused-function -fno-builtin -Werror -Wno-unused-label -Wno-cpp -Wno-unused-parameter -nostdlib -nostartfiles -nodefaultlibs -Wall -O0 -Iinc
 
-all: ./bin/boot.bin ./bin/kernel.bin
+all: ./bin/boot.bin ./bin/kernel.bin user_programs
 	rm -rf ./bin/os.bin
+	# Build the on-disk image as: boot + kernel + 16 MiB zero pad.
 	dd if=./bin/boot.bin >> ./bin/os.bin
 	dd if=./bin/kernel.bin >> ./bin/os.bin
 	dd if=/dev/zero bs=1048576 count=16 >> ./bin/os.bin
+	# Lecture 58 - lay a FAT16 filesystem ONTO THE WHOLE IMAGE
+	# but preserve SamOs's boot sector (-k = keep boot sector +
+	# preserve our BPB). Then mcopy user programs in. SamOs uses
+	# mformat / mcopy (no sudo) instead of upstream's mount / cp.
+	#
+	# Our boot.asm BPB says ReservedSectors=200 (= 100 KiB), so
+	# the FAT starts at sector 200. kernel.bin is well under
+	# 100 KiB so it doesn't overlap the FAT region.
+	# -R 200    200 reserved sectors. Our boot.asm BPB says 200,
+	#           and kernel.bin loads to sectors 1..N (N < 200).
+	#           Without -R, mformat picks 1 and FAT overwrites
+	#           kernel.bin.
+	# -c 4      4 sectors per cluster. With 16 MiB disk and 1
+	#           sector = 512 bytes, this gives ~8192 clusters -
+	#           in the FAT16 range (4085..65525) so mformat
+	#           picks FAT16 and doesn't go FAT32 on us.
+	# (no -k)   we let mformat write a fresh boot sector. The
+	#           BPB it produces is the one disk_search_and_init
+	#           will parse, and the boot CODE in it is mformat's
+	#           generic "not bootable" stub.
+	# IMPORTANT: this means BIOS won't boot from os.bin directly.
+	# We re-prepend our SamOs boot.bin AFTER mformat by dd-ing
+	# its first 62 bytes (jmp + BPB-header up to the OEMIdentifier
+	# start) followed by the boot-asm CODE proper at the right
+	# offset. Cleaner: just dd boot.bin over the whole boot sector.
+	# We keep mformat's BPB in there too, because boot.bin's BPB
+	# is the one the BIOS reads but the kernel's disk driver
+	# trusts whatever's there at runtime.
+	mformat -R 200 -c 4 -i ./bin/os.bin :: || true
+	# Overlay our SamOs boot.bin's boot CODE (offsets 62..511)
+	# while keeping mformat's BPB (offsets 0..61). This way:
+	#   - BIOS at offset 510 sees 0xAA55 (mformat preserves it)
+	#   - BIOS sees a valid FAT16 BPB to read filesystem geometry
+	#   - The bootstrap CODE at offset 62 is OUR boot.asm, which
+	#     loads kernel.bin at sectors 1..N and jumps to 0x100000.
+	# kernel.bin is below sector 200 (ReservedSectors), so the
+	# FATs are safely above it.
+	# Overlay our SamOs boot.bin's boot CODE (offsets 62..511)
+	# WITH the boot signature (510..511). 450 bytes covers code
+	# + signature. mformat preserves the BPB (offsets 0..61) it
+	# just wrote.
+	dd if=./bin/boot.bin of=./bin/os.bin bs=1 skip=62 seek=62 count=450 conv=notrunc 2>/dev/null
+	mcopy -n -i ./bin/os.bin ./programs/simple/build/simple.bin ::SIMPLE.BIN || true
+
+user_programs:
+	cd ./programs/simple && $(MAKE) all
 
 ./bin/kernel.bin: $(FILES)
 	x86_64-elf-ld -g -relocatable $(FILES) -o ./build/kernelfull.o
