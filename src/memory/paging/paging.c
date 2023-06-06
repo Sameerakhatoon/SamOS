@@ -242,15 +242,30 @@ int paging_map(struct paging_desc* desc, void* virt, void* phys, int flags)
     size_t pd_index   = (va >> 21) & 0x1FF;
     size_t pt_index   = (va >> 12) & 0x1FF;
 
+    // Lecture 59 hot-fix: every intermediate entry gets U=1
+    // (= user-accessible) unconditionally, ALSO on existing
+    // entries.
+    //
+    // For a user-mode access to reach the leaf, EVERY entry in
+    // PML4 -> PDPT -> PD -> PT must have user_supervisor=1. If
+    // a previous map call (e.g. paging_map_e820_memory_regions)
+    // created the intermediate entry without U=1, a later
+    // user-mode mapping at the same address would have a U=1
+    // leaf but U=0 intermediates -> ring 3 walk still fails.
+    //
+    // The leaf's U bit is what controls effective access; making
+    // intermediates always-user is safe and matches what
+    // PeachOS / Linux / most kernels do.
     struct paging_desc_entry* pml4_entry = &desc->pml->entries[pml4_index];
     if (paging_null_entry(pml4_entry))
     {
         void* new_pdpt = kzalloc(
             sizeof(struct paging_desc_entry) * PAGING_TOTAL_ENTRIES_PER_TABLE);
-        pml4_entry->address    = ((uintptr_t)new_pdpt) >> 12;
-        pml4_entry->present    = 1;
-        pml4_entry->read_write = 1;
+        pml4_entry->address        = ((uintptr_t)new_pdpt) >> 12;
+        pml4_entry->present        = 1;
+        pml4_entry->read_write     = 1;
     }
+    pml4_entry->user_supervisor = 1;
 
     struct paging_desc_entry* pdpt_entries =
         (struct paging_desc_entry*)((uintptr_t)(pml4_entry->address) << 12);
@@ -259,10 +274,11 @@ int paging_map(struct paging_desc* desc, void* virt, void* phys, int flags)
     {
         void* new_pd = kzalloc(
             sizeof(struct paging_desc_entry) * PAGING_TOTAL_ENTRIES_PER_TABLE);
-        pdpt_entry->address    = ((uintptr_t)new_pd) >> 12;
-        pdpt_entry->present    = 1;
-        pdpt_entry->read_write = 1;
+        pdpt_entry->address        = ((uintptr_t)new_pd) >> 12;
+        pdpt_entry->present        = 1;
+        pdpt_entry->read_write     = 1;
     }
+    pdpt_entry->user_supervisor = 1;
 
     struct paging_desc_entry* pd_entries =
         (struct paging_desc_entry*)((uintptr_t)(pdpt_entry->address) << 12);
@@ -271,10 +287,11 @@ int paging_map(struct paging_desc* desc, void* virt, void* phys, int flags)
     {
         void* new_pt = kzalloc(
             sizeof(struct paging_desc_entry) * PAGING_TOTAL_ENTRIES_PER_TABLE);
-        pd_entry->address    = ((uintptr_t)new_pt) >> 12;
-        pd_entry->present    = 1;
-        pd_entry->read_write = 1;
+        pd_entry->address        = ((uintptr_t)new_pt) >> 12;
+        pd_entry->present        = 1;
+        pd_entry->read_write     = 1;
     }
+    pd_entry->user_supervisor = 1;
 
     struct paging_desc_entry* pt_entries =
         (struct paging_desc_entry*)((uintptr_t)(pd_entry->address) << 12);
@@ -287,9 +304,11 @@ int paging_map(struct paging_desc* desc, void* virt, void* phys, int flags)
         paging_invalidate_tlb_entry(virt);
     }
 
-    pt_entry->address    = ((uintptr_t)phys) >> 12;
-    pt_entry->present    = (flags & PAGING_IS_PRESENT)  ? 1 : 0;
-    pt_entry->read_write = (flags & PAGING_IS_WRITEABLE) ? 1 : 0;
+    pt_entry->address        = ((uintptr_t)phys) >> 12;
+    pt_entry->present        = (flags & PAGING_IS_PRESENT)        ? 1 : 0;
+    pt_entry->read_write     = (flags & PAGING_IS_WRITEABLE)      ? 1 : 0;
+    // L59 hot-fix - propagate the caller's user bit.
+    pt_entry->user_supervisor = (flags & PAGING_ACCESS_FROM_ALL)   ? 1 : 0;
 
     return res;
 }
@@ -311,8 +330,17 @@ int paging_map_e820_memory_regions(struct paging_desc* desc)
     // 0x100000 - they all live here. Marking them present in
     // the new descriptor lets us paging_switch without
     // immediately faulting on a banner write.
+    //
+    // L59-fix: also pass PAGING_ACCESS_FROM_ALL (U=1) so the
+    // TSS structure (which the CPU reads automatically during
+    // ring-3 -> ring-0 gate dispatch) is reachable through a
+    // task PML4 walk even when CPL=3 at the moment of fault.
+    // Without U=1 on the kernel pages, a #PF on user code
+    // triggers a #DF because the CPU can't fetch tss.rsp0.
+    // This is exactly the same workaround the 32-bit PeachOS
+    // used; we make it explicit.
     paging_map_to(desc, (void*)0x00, (void*)0x00, (void*)0x100000,
-                  PAGING_IS_WRITEABLE | PAGING_IS_PRESENT);
+                  PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
 
     size_t total_entries = e820_total_entries();
     for (size_t i = 0; i < total_entries; i++)
@@ -336,7 +364,7 @@ int paging_map_e820_memory_regions(struct paging_desc* desc)
         }
 
         paging_map_to(desc, base_addr, base_addr, end_addr,
-                      PAGING_IS_WRITEABLE | PAGING_IS_PRESENT);
+                      PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
     }
     return 0;
 }

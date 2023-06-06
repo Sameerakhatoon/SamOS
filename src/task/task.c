@@ -268,6 +268,15 @@ static int task_init(struct task* task, struct process* process){
         return -EIO;
     }
 
+    // Lecture 59 - identity-map every E820-usable region into the
+    // task's own PML4. Once we paging_switch to this descriptor
+    // (entering ring 3), the kernel-side data the task still
+    // reaches (its own GDT entries, the IDT we just lidt'd, the
+    // VGA buffer) must stay addressable. Same map the kernel
+    // already built into kernel_paging_desc; we replicate it
+    // per task.
+    paging_map_e820_memory_regions(task->paging_desc);
+
     task->registers.ip = SAMOS_PROGRAM_VIRTUAL_ADDRESS;
     if(process->filetype == PROCESS_FILETYPE_ELF){
         // L40 deviation: elfloader not yet rebuilt; panic instead
