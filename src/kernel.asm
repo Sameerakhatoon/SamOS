@@ -109,6 +109,61 @@ long_mode_entry:
     mov rsp, 0x00200000
     mov rbp, rsp
 
+    ; Lecture 61 - remap the 8259 PIC.
+    ;
+    ; By default the master PIC vectors IRQ0..7 at CPU vectors
+    ; 0x08..0x0F - which COLLIDE with the CPU's exception range
+    ; (0x00..0x1F). IRQ0 (timer) at vector 0x08 is exactly the
+    ; CPU's #DF (double fault) slot, so the first timer tick
+    ; after a sti dispatches into our idt_handle_exception which
+    ; panics.
+    ;
+    ; The fix: send ICW1..ICW4 init sequences to both PICs telling
+    ; them to vector at 0x20+ (master) and 0x28+ (slave). After
+    ; this, IRQ0 lands at vector 0x20 -> idt_clock -> task_next.
+    ;
+    ; Initialisation has to happen in real mode here (port IO at
+    ; 0x20/0x21/0xA0/0xA1 doesn't care about CPL, but doing it
+    ; once at boot is the simplest place).
+
+    ; Master PIC init -----------------------------------------
+    mov al, 0x11    ; ICW1: cascade + ICW4 follows
+    out 0x20, al    ; -> master command
+    mov al, 0x20    ; ICW2: master vector base = 0x20
+    out 0x21, al    ; -> master data
+    mov al, 0x04    ; ICW3: slave PIC at IRQ2
+    out 0x21, al
+    mov al, 0x01    ; ICW4: 8086 mode
+    out 0x21, al
+
+    ; Slave PIC init ------------------------------------------
+    mov al, 0x11    ; ICW1
+    out 0xA0, al    ; -> slave command
+    mov al, 0x28    ; ICW2: slave vector base = 0x28
+    out 0xA1, al    ; -> slave data
+    mov al, 0x02    ; ICW3: cascade identity = IRQ2
+    out 0xA1, al
+    mov al, 0x01    ; ICW4: 8086 mode
+    out 0xA1, al
+
+    ; IRQ masks ------------------------------------------------
+    ; Master: 0xFB = 1111 1011 = all masked except IRQ2 (slave
+    ; cascade). IRQ0 (timer) STAYS MASKED for now - we want to
+    ; reach user mode without the timer firing immediately. The
+    ; timer gets unmasked separately when we are ready for it.
+    mov al, 0xFB
+    out 0x21, al
+
+    ; Slave: all masked.
+    mov al, 0xFF
+    out 0xA1, al
+
+    ; Send EOI to both - any in-flight interrupt from before the
+    ; remap is now ack'd.
+    mov al, 0x20
+    out 0x20, al
+    out 0xA0, al
+
     ; Hand off to kernel_main. The System V AMD64 ABI says RDI/RSI/
     ; RDX/RCX/R8/R9 are caller-saved arg registers; kernel_main()
     ; takes no args so we don't need to pre-load anything.
