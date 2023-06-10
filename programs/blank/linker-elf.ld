@@ -3,7 +3,7 @@
    the flat-binary path. Same VMA / section ordering as linker.ld; only
    OUTPUT_FORMAT differs. */
 ENTRY(_start)
-OUTPUT_FORMAT(elf32-i386)
+OUTPUT_FORMAT(elf64-x86-64)
 SECTIONS
 {
     . = 0x400000;
