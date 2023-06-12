@@ -14,7 +14,7 @@
 # we substitute the mformat/mcopy pipeline used by SamOs since it
 # does not need sudo or a real mount point.
 
-FILES = ./build/kernel.asm.o ./build/kernel.o ./build/string/string.o ./build/memory/memory.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/heap/multiheap.o ./build/memory/paging/paging.o ./build/memory/paging/paging.asm.o ./build/io/io.asm.o ./build/idt/idt.o ./build/idt/idt.asm.o ./build/task/task.o ./build/task/task.asm.o ./build/task/process.o ./build/task/tss.asm.o ./build/fs/file.o ./build/fs/pparser.o ./build/fs/fat/fat16.o ./build/disk/disk.o ./build/disk/streamer.o ./build/gdt/gdt.o ./build/keyboard/keyboard.o ./build/keyboard/classic.o ./build/isr80h/isr80h.o ./build/isr80h/io.o ./build/isr80h/heap.o ./build/isr80h/misc.o ./build/isr80h/process.o
+FILES = ./build/kernel.asm.o ./build/kernel.o ./build/string/string.o ./build/memory/memory.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/heap/multiheap.o ./build/memory/paging/paging.o ./build/memory/paging/paging.asm.o ./build/io/io.asm.o ./build/idt/idt.o ./build/idt/idt.asm.o ./build/task/task.o ./build/task/task.asm.o ./build/task/process.o ./build/task/tss.asm.o ./build/fs/file.o ./build/fs/pparser.o ./build/fs/fat/fat16.o ./build/disk/disk.o ./build/disk/streamer.o ./build/gdt/gdt.o ./build/keyboard/keyboard.o ./build/keyboard/classic.o ./build/isr80h/isr80h.o ./build/isr80h/io.o ./build/isr80h/heap.o ./build/isr80h/misc.o ./build/isr80h/process.o ./build/loader/formats/elf.o ./build/loader/formats/elfloader.o
 INCLUDES = -I./src
 FLAGS = -g -ffreestanding -falign-jumps -falign-functions -falign-labels -falign-loops -fstrength-reduce -fomit-frame-pointer -finline-functions -Wno-unused-function -fno-builtin -Werror -Wno-unused-label -Wno-cpp -Wno-unused-parameter -nostdlib -nostartfiles -nodefaultlibs -Wall -O0 -Iinc
 
@@ -67,6 +67,9 @@ all: ./bin/boot.bin ./bin/kernel.bin user_programs
 	# just wrote.
 	dd if=./bin/boot.bin of=./bin/os.bin bs=1 skip=62 seek=62 count=450 conv=notrunc 2>/dev/null
 	mcopy -n -i ./bin/os.bin ./programs/simple/build/simple.bin ::SIMPLE.BIN || true
+	# L63 - drop the ELF programs onto the disk too.
+	mcopy -n -i ./bin/os.bin ./programs/blank/blank.elf  ::BLANK.ELF  || true
+	mcopy -n -i ./bin/os.bin ./programs/shell/shell.elf  ::SHELL.ELF  || true
 
 user_programs:
 	cd ./programs/simple && $(MAKE) all
@@ -161,6 +164,14 @@ user_programs:
 
 ./build/isr80h/process.o: ./src/isr80h/process.c
 	x86_64-elf-gcc $(INCLUDES) -I./src/isr80h $(FLAGS) -std=gnu99 -c ./src/isr80h/process.c -o ./build/isr80h/process.o
+
+./build/loader/formats/elf.o: ./src/loader/formats/elf.c
+	mkdir -p ./build/loader/formats
+	x86_64-elf-gcc $(INCLUDES) -I./src/loader/formats $(FLAGS) -std=gnu99 -c ./src/loader/formats/elf.c -o ./build/loader/formats/elf.o
+
+./build/loader/formats/elfloader.o: ./src/loader/formats/elfloader.c
+	mkdir -p ./build/loader/formats
+	x86_64-elf-gcc $(INCLUDES) -I./src/loader/formats $(FLAGS) -std=gnu99 -c ./src/loader/formats/elfloader.c -o ./build/loader/formats/elfloader.o
 
 ./build/memory/paging/paging.o: ./src/memory/paging/paging.c
 	x86_64-elf-gcc $(INCLUDES) -I./src/memory/paging $(FLAGS) -std=gnu99 -c ./src/memory/paging/paging.c -o ./build/memory/paging/paging.o
