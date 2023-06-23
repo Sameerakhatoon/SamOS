@@ -3,6 +3,7 @@
 #include "io/io.h"
 #include "kernel.h"
 #include "idt/idt.h"
+#include "idt/irq.h"     // L68 - IRQ_enable
 #include "task/task.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -33,6 +34,12 @@ struct keyboard classic_keyboard = {
 int classic_keyboard_init(){
     idt_register_interrupt_callback(ISR_KEYBOARD_INTERRUPT, classic_keyboard_handle_interrupt);
     keyboard_set_capslock(&classic_keyboard, KEYBOARD_CAPS_LOCK_OFF);
+
+    // Lecture 68 - unmask IRQ1 (keyboard) at the PIC. After
+    // this the PIC will deliver scancode interrupts to the
+    // IDT vector we wired up in idt_init.
+    IRQ_enable(IRQ_KEYBOARD);
+
     outb(PS2_PORT, PS2_COMMAND_ENABLE_FIRST_PORT);
     return 0;
 }
