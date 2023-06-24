@@ -1,0 +1,18 @@
+// /** @file
+// SamOs UEFI Application help strings - Lecture 71 port of
+// PeachOSStr.uni.
+//
+// Copyright (c) 2016, Intel Corporation. All rights reserved.<BR>
+//
+// SPDX-License-Identifier: BSD-2-Clause-Patent
+//
+// **/
+
+/=#
+
+#langdef en-US "English"
+
+#string STR_HELLO_WORLD_HELP_INFORMATION        #language en-US ""
+".TH SamOs 0 "Loads the SamOs kernel."\r\n"
+".SH NAME\r\n"
+"SamOs UEFI Application.\r\n"

@@ -1,0 +1,17 @@
+// /** @file
+// SamOs UEFI Application - Lecture 71 port of PeachOS.uni.
+//
+// This is a sample shell application that will print a banner
+// to the UEFI Console.
+//
+// Copyright (c) 2008 - 2018, Intel Corporation. All rights reserved.<BR>
+//
+// SPDX-License-Identifier: BSD-2-Clause-Patent
+//
+// **/
+
+
+#string STR_MODULE_ABSTRACT             #language en-US "SamOs UEFI Application - EDKII Module"
+
+#string STR_MODULE_DESCRIPTION          #language en-US "Prints the SamOs banner to the UEFI Console."
+
