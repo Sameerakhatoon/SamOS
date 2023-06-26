@@ -1,6 +1,12 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+// Lecture 73 - the physical address the UEFI bootloader copies
+// the kernel to (and the BIOS bootloader's load target as well).
+// Both boot paths agree on 0x100000 so kernel.asm runs from the
+// same address either way.
+#define SAMOS_KERNEL_LOCATION   0x100000
+
 #define KERNEL_CODE_SELECTOR    0x08
 #define KERNEL_DATA_SELECTOR    0x10
 

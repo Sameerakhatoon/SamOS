@@ -40,11 +40,24 @@
 
 [LibraryClasses]
   UefiApplicationEntryPoint
+  UefiBootServicesTableLib    # L73 - AllocatePages, ExitBootServices
   UefiLib
   PcdLib
 
 [FeaturePcd]
   gEfiMdeModulePkgTokenSpaceGuid.PcdHelloWorldPrintEnable   ## CONSUMES
+
+# L73 - protocols we look up at runtime.
+[Protocols]
+  gEfiLoadedImageProtocolGuid
+  gEfiAcpiSdtProtocolGuid
+  gEfiPciRootBridgeIoProtocolGuid
+
+# L73 - GUIDs for FileInfo + ACPI tables.
+[Guids]
+  gEfiFileInfoGuid
+  gEfiAcpi10TableGuid
+  gEfiAcpi20TableGuid
 
 [Pcd]
   gEfiMdeModulePkgTokenSpaceGuid.PcdHelloWorldPrintString   ## SOMETIMES_CONSUMES
