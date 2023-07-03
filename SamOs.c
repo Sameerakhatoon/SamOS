@@ -20,8 +20,123 @@
 #include <Protocol/SimpleFileSystem.h>
 #include "./SamOs64Bit/src/config.h"
 
+// Lecture 75 - E820-format entries the kernel's existing
+// memory.c reads via SAMOS_MEMORY_MAP_* macros.
+typedef struct __attribute__((packed)) E820Entry {
+    UINT64 base_addr;
+    UINT64 length;
+    UINT32 type;          // 1 = usable
+    UINT32 extended_attr;
+} E820Entry;
+
+// Lecture 75 - on-disk container: u64 count + flexible array
+// of E820Entry. Written at SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION
+// (count) + SAMOS_MEMORY_MAP_LOCATION (entries).
+typedef struct __attribute__((packed)) E820Entries {
+    UINT64    count;
+    E820Entry entries[];
+} E820Entries;
+
 EFI_HANDLE        imageHandle  = NULL;
 EFI_SYSTEM_TABLE* systemTable  = NULL;
+
+// Lecture 75 - convert the UEFI memory map to E820 format at
+// the addresses the kernel expects.
+//
+// UEFI replaces BIOS int 0x15/0xE820 with gBS->GetMemoryMap.
+// We query the map size first (with a NULL buffer to provoke
+// EFI_BUFFER_TOO_SMALL), allocate, query again. Then walk the
+// descriptors, filter for EfiConventionalMemory (= usable
+// RAM), and write each one as an E820Entry with type=1 at
+// SAMOS_MEMORY_MAP_LOCATION. The count goes at
+// SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION as a UINT64.
+//
+// The kernel's e820_total_entries reads the count as a
+// uint16_t, which is fine as long as the entry count fits in
+// 16 bits (4096 max - we have maybe 20 usable regions on a
+// typical PC).
+EFI_STATUS SetupMemoryMaps(void){
+    EFI_STATUS             status;
+    UINTN                  memoryMapSize     = 0;
+    EFI_MEMORY_DESCRIPTOR* memoryMap         = NULL;
+    UINTN                  mapKey;
+    UINTN                  descriptorSize;
+    UINT32                 descriptorVersion;
+
+    // Pass 1: ask UEFI for the buffer size. The expected result
+    // is EFI_BUFFER_TOO_SMALL with memoryMapSize updated.
+    status = gBS->GetMemoryMap(&memoryMapSize, NULL, &mapKey,
+                               &descriptorSize, &descriptorVersion);
+    if(status != EFI_BUFFER_TOO_SMALL && EFI_ERROR(status)){
+        Print(L"Error retrieving initial memory map size: %r\n", status);
+        return status;
+    }
+
+    // Pad by 10 descriptors of headroom. AllocatePool itself
+    // can change the memory map by adding new descriptors, so
+    // pass 2 might come back with more entries than pass 1
+    // sized for.
+    memoryMapSize += descriptorSize * 10;
+    memoryMap = AllocatePool(memoryMapSize);
+    if(memoryMap == NULL){
+        Print(L"Error allocating memory for memory map\n");
+        return EFI_OUT_OF_RESOURCES;
+    }
+
+    // Pass 2: real query.
+    status = gBS->GetMemoryMap(&memoryMapSize, memoryMap, &mapKey,
+                               &descriptorSize, &descriptorVersion);
+    if(EFI_ERROR(status)){
+        Print(L"Error getting memory map: %r\n", status);
+        FreePool(memoryMap);
+        return status;
+    }
+
+    // Count EfiConventionalMemory descriptors (= usable RAM
+    // the bootloader hasn't claimed yet).
+    UINTN descriptorCount = memoryMapSize / descriptorSize;
+    EFI_MEMORY_DESCRIPTOR* desc = memoryMap;
+    UINTN totalConventionalDescriptors = 0;
+    for(UINTN i = 0; i < descriptorCount; ++i){
+        if(desc->Type == EfiConventionalMemory){
+            totalConventionalDescriptors++;
+        }
+        desc = (EFI_MEMORY_DESCRIPTOR*)((UINT8*)desc + descriptorSize);
+    }
+
+    // Reserve fixed pages for the E820 dump.
+    EFI_PHYSICAL_ADDRESS MemoryMapLocationE820 = SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION;
+    UINTN MemoryMapSizeE820 = (sizeof(E820Entry) * totalConventionalDescriptors)
+                              + sizeof(UINT64);
+    status = gBS->AllocatePages(AllocateAddress, EfiLoaderData,
+                                EFI_SIZE_TO_PAGES(MemoryMapSizeE820),
+                                &MemoryMapLocationE820);
+    if(EFI_ERROR(status)){
+        Print(L"Error allocating memory for the E820 Entries: %r\n", status);
+        return status;
+    }
+
+    // Walk again, this time copying out.
+    E820Entries* e820Entries = (E820Entries*)MemoryMapLocationE820;
+    UINTN ConventionalMemoryIndex = 0;
+    desc = memoryMap;
+    for(UINTN i = 0; i < descriptorCount; ++i){
+        if(desc->Type == EfiConventionalMemory){
+            E820Entry* e = &e820Entries->entries[ConventionalMemoryIndex];
+            e->base_addr     = desc->PhysicalStart;
+            e->length        = desc->NumberOfPages * 4096;
+            e->type          = 1;
+            e->extended_attr = 0;
+            Print(L"e820Entry=%p\n", e);
+            ConventionalMemoryIndex++;
+        }
+        desc = (EFI_MEMORY_DESCRIPTOR*)((UINT8*)desc + descriptorSize);
+    }
+
+    e820Entries->count = totalConventionalDescriptors;
+    FreePool(memoryMap);
+    return EFI_SUCCESS;
+}
 
 //
 // Read a file from the FAT partition we were loaded from.
@@ -169,6 +284,12 @@ UefiMain(IN EFI_HANDLE       ImageHandle,
 
     CopyMem((VOID*)KernelBase, KernelBuffer, KernelBufferSize);
     Print(L"Kernel copied to: %p\n", KernelBase);
+
+    // Lecture 75 - dump the UEFI memory map as E820-shaped
+    // entries at SAMOS_MEMORY_MAP_LOCATION so the kernel's
+    // memory.c can read them via the existing
+    // e820_total_entries / e820_entry helpers.
+    SetupMemoryMaps();
 
     // After this gBS is invalid.
     gBS->ExitBootServices(ImageHandle, 0);
