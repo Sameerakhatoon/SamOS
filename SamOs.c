@@ -261,6 +261,15 @@ UefiMain(IN EFI_HANDLE       ImageHandle,
 
     Print(L"SamOs UEFI bootloader.\n");
 
+    // Lecture 76 - dump the UEFI memory map FIRST, before we
+    // AllocatePages for the kernel. Otherwise the kernel
+    // allocation can grab pages that SetupMemoryMaps wanted to
+    // reserve (it AllocatePages's at SAMOS_MEMORY_MAP_TOTAL_
+    // ENTRIES_LOCATION = 0x210000), causing one of them to
+    // fail. Running this first ensures the dump area is
+    // reserved before any other AllocatePages call.
+    SetupMemoryMaps();
+
     VOID*  KernelBuffer     = NULL;
     UINTN  KernelBufferSize = 0;
     Status = ReadFileFromCurrentFilesystem(L"kernel.bin",
@@ -284,12 +293,6 @@ UefiMain(IN EFI_HANDLE       ImageHandle,
 
     CopyMem((VOID*)KernelBase, KernelBuffer, KernelBufferSize);
     Print(L"Kernel copied to: %p\n", KernelBase);
-
-    // Lecture 75 - dump the UEFI memory map as E820-shaped
-    // entries at SAMOS_MEMORY_MAP_LOCATION so the kernel's
-    // memory.c can read them via the existing
-    // e820_total_entries / e820_entry helpers.
-    SetupMemoryMaps();
 
     // After this gBS is invalid.
     gBS->ExitBootServices(ImageHandle, 0);
