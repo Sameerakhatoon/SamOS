@@ -198,8 +198,7 @@ Error code bits (Intel SDM Vol 3, sec 4.7):
 
 Example decode: `error_code = 0x07 = 0b0111` means "user write to a
 present page". Combined with the fact CR2 sits at 0x3FF000 = stack
-top + 1, this is a user task writing past its mapped stack region
-(see G10's investigation notes for the full case study).
+top + 1, this is a user task writing past its mapped stack region.
 
 After you know which page faulted, dump the user PD entry for it:
 
@@ -382,6 +381,5 @@ See section 8 above.
 ## See also
 
 - `docs/gdb-cheatsheet.md` - the brief GDB cheatsheet
-- `docs/debugging-history.md` - what we hit and when
 - `docs/testing-guide.md` - automated regression suite
 - `docs/feature-walkthrough.md` - manual QEMU verification recipes

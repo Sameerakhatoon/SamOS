@@ -7,8 +7,7 @@
 #   - kernel_main reaches the launch point and prints
 #     "entering userland... (deferred, G04)"
 # The actual process_load + task_run_first_ever_task call is
-# commented out pending the G04 investigation - see
-# docs/gotchas/G04-iret-to-ring3-resets.md. This test asserts that
+# commented out pending the G04 investigation. This test asserts that
 # the deferred-launch marker is visible on the VGA buffer, proving
 # Ch 98's plumbing didn't break anything upstream.
 

@@ -11,7 +11,7 @@
 # buffer are observable on the serial mirror.
 #
 # Because keyboard_push delivers to whichever process is current at
-# IRQ1 time (G11 keeps current_process in lockstep with the scheduled
+# IRQ1 time (current_process is kept in lockstep with the scheduled
 # task), we send LOTS of 'x' and Enter keys to maximize the chance
 # that RL gets enough chars and at least one Enter while it is the
 # current task.

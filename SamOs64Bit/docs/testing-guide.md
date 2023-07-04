@@ -227,6 +227,5 @@ this).
 
 ## See also
 
-- `docs/debugging-history.md` - the full bug-hunt narrative
 - `docs/feature-walkthrough.md` - manual QEMU testing recipes
 - `docs/gdb-cheatsheet.md` - GDB cheatsheet

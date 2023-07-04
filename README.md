@@ -7,10 +7,6 @@ A 64-bit multi-threaded kernel built from scratch, chapter by chapter, following
 ```
 samos/
 ├── README.md              # this file
-├── PROGRESS.md            # checkbox per book chapter, commit hash next to each
-├── docs/
-│   ├── chapters/Chxx.md   # one note per book chapter (intent, what was built)
-│   └── gotchas/Gxx.md     # one note per discovered bug + its fix
 ├── src/                   # kernel sources
 ├── programs/              # user-space utilities (built once the book gets there)
 └── tests/                 # end-to-end tests (bash; one script per feature)
@@ -26,6 +22,7 @@ qemu-system-x86_64 -hda bin/os.bin -m 512 -accel tcg -display none -serial stdio
 ./tests/run.sh
 ```
 
-## Status
+## Notes
 
-See [PROGRESS.md](PROGRESS.md).
+The study notes written along the way (one per book chapter and one per
+bug found) are kept with the book that goes with this repository.

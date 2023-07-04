@@ -89,7 +89,7 @@ KEYBOARD_CAPS_LOCK_STATE keyboard_get_capslock(struct keyboard* keyboard){
 }
 
 char keyboard_pop(){
-    // G06: book ships `if (task_current()) return 0;` which is inverted.
+    // Book ships `if (task_current()) return 0;` which is inverted.
     // The early-return is meant to bail when there is NO task; the body
     // below dereferences task_current()->process so the guard must be
     // !task_current().

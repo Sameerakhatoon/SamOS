@@ -116,7 +116,7 @@ sudo cp ./bin/SamOs.efi /tmp/samos-mnt/EFI/BOOT/BOOTX64.EFI
 sudo cp ./SamOs64Bit/bin/kernel.bin /tmp/samos-mnt/kernel.bin
 sudo cp ./SamOs64Bit/programs/blank/blank.elf /tmp/samos-mnt/BLANK.ELF || true
 sudo cp ./SamOs64Bit/programs/shell/shell.elf /tmp/samos-mnt/SHELL.ELF || true
-# G48 unblock: stage the (stub) system font BMP so the kernel's
+# Stage the (stub) system font BMP so the kernel's
 # terminal_create path runs at boot. A real upstream sysfont
 # would replace this 9x16-cell white-block stub.
 sudo cp ./SamOs64Bit/assets/sysfont.bmp /tmp/samos-mnt/sysfont.bmp || true

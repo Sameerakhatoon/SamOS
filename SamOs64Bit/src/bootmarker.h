@@ -175,8 +175,8 @@ typedef enum {
     BM_FEATURE_FONT_DRAW_OFFSET = 141, // font_draw_text at non-zero offset works
     BM_FEATURE_VECTOR_GROW = 142, // vector grows past initial capacity
     BM_FEATURE_FREE_NULL = 143, // kfree(NULL) is a no-op
-    BM_FEATURE_TASK_SLEEP_MATH = 144, // task_sleep math is + (G37)
-    BM_FEATURE_WIN_EVENT_2PUSH = 145, // two window_event_push calls observe G18
+    BM_FEATURE_TASK_SLEEP_MATH = 144, // task_sleep math is +
+    BM_FEATURE_WIN_EVENT_2PUSH = 145, // two window_event_push calls observe the ring fix
     BM_FEATURE_DISK_DRIVER_VEC = 146, // disk_driver_get_drivers returns >= 1
     BM_FEATURE_E820_REGION_SUM = 147, // accessible_memory >= largest_free
     BM_FEATURE_GRAPHICS_ROOT_Z = 148, // root graphics has z_index 0

@@ -164,8 +164,7 @@ void kernel_main(void)
     // this WILL return NULL here. We guard the call so the kernel
     // does not deref NULL and #PF. Once kzalloc starts returning
     // real memory the guard is harmless and the mapping fires.
-    // Upstream PeachOS64 commits this code unguarded - documented
-    // in docs/64bit/chapters/L21-paging-map-e820.md as a deferred
+    // Upstream PeachOS64 commits this code unguarded: a deferred
     // bug they accept until L22 lands.
     kernel_paging_desc = paging_desc_new(PAGING_MAP_LEVEL_4);
     if (!kernel_paging_desc)
@@ -263,7 +262,7 @@ void kernel_main(void)
     // mouse_driver_vector - that vector is allocated by
     // mouse_system_init. Upstream calls stage2 first and only
     // gets away with it because their headless-test coverage
-    // never reached this code path. The e2e runtime sweep (G46)
+    // never reached this code path. The e2e runtime sweep
     // surfaced it.
     mouse_system_init();
     mouse_system_load_static_drivers();
@@ -282,7 +281,7 @@ void kernel_main(void)
     boot_marker_set(BM_STAGE_GRAPHICS_UP,
                     default_graphics_info.framebuffer ? 1u : 0u);
 
-    // SamOs e2e (G48): upstream panics if sysfont.bmp is absent
+    // SamOs e2e: upstream panics if sysfont.bmp is absent
     // or the terminal cannot be created. With the empty
     // bin/os.img the asset is missing and the kernel cannot
     // reach later subsystems. Treat both failures as "skip

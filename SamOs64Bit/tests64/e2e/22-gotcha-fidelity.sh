@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # e2e/22-gotcha-fidelity.sh - source-fidelity regression for the
 # preserved upstream-typo gotchas documented in
-# docs/64bit/debugging-history.md (G14, G17, G19, G20, G22-G35,
+# the port's debugging history (G14, G17, G19, G20, G22-G35,
 # G39-G42).
 #
 # These bugs are inert in the SamOs port because they are either
@@ -163,7 +163,7 @@ assert_present "G48 system_font_local guard" \
 
 # G13 / G43 / G44 / G45 are BIOS-path-only and the current
 # SamOs build supports the UEFI path. The audit lives in
-# docs/64bit/debugging-history.md only; no source anchor here.
+# the port's debugging history only; no source anchor here.
 
 if [ "$fail" = 0 ]; then
     echo "PASS: e2e/22 gotcha fidelity (all preserved-typo and fix anchors present)"
@@ -171,6 +171,6 @@ if [ "$fail" = 0 ]; then
 else
     echo "FAIL: e2e/22 gotcha fidelity (see misses above)"
     echo "      a missing anchor means a cleanup edit removed a documented"
-    echo "      gotcha marker; verify against docs/64bit/debugging-history.md"
+    echo "      gotcha marker; verify against the debugging history"
     exit 1
 fi

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # e2e/108-gotcha-runtime.sh - runtime regression anchors for the
 # real-bug gotchas (G18 + G37). Both are documented in
-# debugging-history.md; their fixes are source-anchored by
+# the debugging history; their fixes are source-anchored by
 # 22-gotcha-fidelity. This test adds a runtime mark so a
 # regression that silently undoes either fix also fails an
 # e2e (not just the grep).

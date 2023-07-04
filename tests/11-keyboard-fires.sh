@@ -7,7 +7,7 @@
 # current process's buffer, and the KEY task's getkeyblock+putchar
 # loop must echo it as "K:a" on serial. So a passing test 11 means:
 #   1) IRQ1 fired without crashing the kernel,
-#   2) keyboard_push wrote 'a' into the KEY task's buffer (per G11),
+#   2) keyboard_push wrote 'a' into the KEY task's buffer,
 #   3) cmd 2 (getkey/getkeyblock) returned that 'a',
 #   4) cmd 3 putchar emitted the four bytes K, :, a, \n to serial.
 

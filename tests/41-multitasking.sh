@@ -4,7 +4,7 @@
 # Ch 150 grand-finale sentinel - validates the whole post-Ch-100 chain
 # end-to-end: ELF loader (Ch 121-126), user-mode syscalls, c_start,
 # process_inject_arguments, PIT IRQ -> idt_clock -> task_next preempt,
-# and the G05/G07/G08/G09/G10 guards.
+# and the scheduler and interrupt guards fixed along the way.
 #
 # Mechanism: kernel_main loads blank.elf instances tagged "Testing!"
 # and "Abc!" (plus the transient CRASH/EXIT/BS/MF/PC ones, which die

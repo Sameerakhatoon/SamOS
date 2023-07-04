@@ -197,8 +197,6 @@ bash tests/run.sh
 
 ## 6. See also
 
-- `docs/64bit/toolchain-installation.md` - the same recipe with
-  `TARGET=x86_64-elf` for the 64-bit Module 1 branch
 - `docs/testing-guide.md` - how to use the test suite once the
   toolchain is in place
 - `docs/feature-walkthrough.md` - driving QEMU by hand after a

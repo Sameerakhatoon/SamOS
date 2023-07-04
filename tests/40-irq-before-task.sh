@@ -1,7 +1,7 @@
 #!/bin/bash
 # tests/40-irq-before-task.sh
 #
-# G05 regression sentinel - after Ch 113, the generic interrupt_handler
+# Regression sentinel - after Ch 113, the generic interrupt_handler
 # calls task_page() on every IRQ. Before the first user task is loaded,
 # current_task is NULL and task_page -> task_switch(NULL) triple-faults
 # the kernel. This test asserts the kernel reaches its post-IRQ smoke

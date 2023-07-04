@@ -2,8 +2,7 @@
 
 What to do, and what to expect, after `qemu-system-x86_64 -hda bin/os.bin`
 to verify each chapter's user-visible behaviour by hand. Pair
-with `docs/testing-guide.md` (automated suite) and
-`docs/debugging-history.md` (when something goes wrong).
+with `docs/testing-guide.md` (automated suite).
 
 The recipe is always the same shape:
 
@@ -90,8 +89,8 @@ log=$(mktemp)
 grep -oE 'Testing!|Abc!' "$log" | sort | uniq -c
 ```
 
-Expect counts in the hundreds for each. If either is 0, see G07 /
-G09 / G10 in `docs/debugging-history.md`.
+Expect counts in the hundreds for each. If either is 0, one of the G07, G09 or
+G10 bugs is back.
 
 ## Exception handler (Ch 147)
 
@@ -253,8 +252,7 @@ grep -c BSS-FAIL "$log"  # = 0
 ```
 
 If you see `BSS-FAIL` here, G12 is missing - `process_map_elf` is
-aliasing the .bss PHDR to the ELF buffer start. See
-`docs/gotchas/G12-elf-bss-aliasing.md`.
+aliasing the .bss PHDR to the ELF buffer start.
 
 ## Kernel panic (Ch 82)
 
@@ -299,5 +297,4 @@ terminal instead of the VM, you're in console mode.
 ## See also
 
 - `docs/testing-guide.md` - the automated suite
-- `docs/debugging-history.md` - every bug we hit and how
 - `docs/gdb-cheatsheet.md` - GDB usage for live debugging
