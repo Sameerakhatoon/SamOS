@@ -193,3 +193,21 @@ void* kpzalloc(size_t size){
 void kfree(void* ptr){
     (void)ptr;
 }
+
+// Lecture 78-stub - krealloc temporary so vector.c can link.
+// L80 brings a real implementation. The current shim does
+// kzalloc+memcpy+kfree - over-reads slightly past the old
+// allocation if new_size > old_size, but that's harmless as
+// long as kfree is a no-op (which it currently is).
+void* krealloc(void* ptr, size_t new_size){
+    if(!ptr){
+        return kzalloc(new_size);
+    }
+    void* new_ptr = kzalloc(new_size);
+    if(!new_ptr){
+        return NULL;
+    }
+    memcpy(new_ptr, ptr, new_size);
+    kfree(ptr);
+    return new_ptr;
+}
