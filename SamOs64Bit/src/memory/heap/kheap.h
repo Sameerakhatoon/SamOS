@@ -16,6 +16,8 @@ void*         kzalloc(size_t size);
 void*         kpalloc(size_t size);   // L22 - palloc = first-pass, then paging-defragment second pass
 void*         kpzalloc(size_t size);  // L22 - kpalloc + memset 0
 void          kfree(void* ptr);       // still stubbed: no-op until multiheap_free lands
+// Lecture 80 - krealloc routes through multiheap_realloc.
+void*         krealloc(void* old_ptr, size_t new_size);
 
 // Lecture 32 - call once paging is set up. Hands the live
 // kernel multiheap off to multiheap_ready: stand up the

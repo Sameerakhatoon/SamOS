@@ -83,6 +83,10 @@ uintptr_t heap_align_value_to_lower(uintptr_t val);
 // to figure out which sub-heap owns a given pointer.
 bool heap_is_address_within_heap(struct heap* heap, void* ptr);
 
+// Lecture 80 - krealloc support.
+bool  heap_is_block_range_free(struct heap* heap, size_t starting_block, size_t ending_block);
+void* heap_realloc(struct heap* heap, void* old_ptr, size_t new_size);
+
 // Lecture 28 - given a pointer to the start of an allocation,
 // return the number of blocks the allocation spans. Used by
 // the defragmenter to know how much virtual range to remap.

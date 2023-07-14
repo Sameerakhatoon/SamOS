@@ -194,20 +194,9 @@ void kfree(void* ptr){
     (void)ptr;
 }
 
-// Lecture 78-stub - krealloc temporary so vector.c can link.
-// L80 brings a real implementation. The current shim does
-// kzalloc+memcpy+kfree - over-reads slightly past the old
-// allocation if new_size > old_size, but that's harmless as
-// long as kfree is a no-op (which it currently is).
-void* krealloc(void* ptr, size_t new_size){
-    if(!ptr){
-        return kzalloc(new_size);
-    }
-    void* new_ptr = kzalloc(new_size);
-    if(!new_ptr){
-        return NULL;
-    }
-    memcpy(new_ptr, ptr, new_size);
-    kfree(ptr);
-    return new_ptr;
+// Lecture 80 - real krealloc. Drops the L78 stub.
+// Routes through multiheap_realloc which finds the owning
+// sub-heap and calls heap_realloc.
+void* krealloc(void* old_ptr, size_t new_size){
+    return multiheap_realloc(kernel_multiheap, old_ptr, new_size);
 }
