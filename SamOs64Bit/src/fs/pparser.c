@@ -3,6 +3,7 @@
 #include "string/string.h"
 #include "memory/heap/kheap.h"
 #include "memory/memory.h"
+#include "disk/disk.h"
 #include "status.h"
 
 static int                pathparser_path_valid_format(const char* filename);
@@ -11,9 +12,15 @@ static struct path_root*  pathparser_create_root(int drive_number);
 static const char*        pathparser_get_path_part(const char** path);
 static struct path_part*  pathparser_parse_path_part(struct path_part* last_part, const char** path);
 
+// Lecture 81 - accept '@' as a drive character. "@:/" means
+// "the primary filesystem disk" - whichever disk
+// disk_search_and_init picked. Lets userland programs use a
+// stable path even when the kernel ships on disk N != 0.
 static int pathparser_path_valid_format(const char* filename){
     int len = strnlen(filename, SAMOS_MAX_PATH);
-    return (len >= 3 && isdigit(filename[0]) && memcmp((void*)&filename[1], ":/", 2) == 0);
+    return (len >= 3
+            && (isdigit(filename[0]) || filename[0] == '@')
+            && memcmp((void*)&filename[1], ":/", 2) == 0);
 }
 
 static int pathparser_get_drive_by_path(const char** path){
@@ -21,7 +28,17 @@ static int pathparser_get_drive_by_path(const char** path){
         return -EBADPATH;
     }
 
-    int drive_no = tonumericdigit(*path[0]);
+    char drive_character = (*path)[0];
+    int  drive_no        = tonumericdigit((*path)[0]);
+    if(drive_character == '@'){
+        // L81 - resolve '@' through disk_primary_fs_disk(). If no
+        // filesystem disk was mounted, refuse the path.
+        struct disk* primary_fs = disk_primary_fs_disk();
+        if(!primary_fs){
+            return -EIO;
+        }
+        drive_no = primary_fs->id;
+    }
 
     // Skip the "N:/" prefix.
     *path += 3;

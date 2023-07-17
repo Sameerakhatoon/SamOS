@@ -314,7 +314,9 @@ void kernel_main(void)
     // We keep SIMPLE.BIN here for fast CI. The L67+ work
     // (probably IRQ-driven IO) or a switch to a smaller linker
     // script will let us flip to BLANK.ELF without timing out.
-    int res = process_load_switch("0:/SIMPLE.BIN", &p);
+    // Lecture 81 - "@" resolves to the primary filesystem disk
+    // through pparser_get_drive_by_path. Drops the literal "0:".
+    int res = process_load_switch("@:/SIMPLE.BIN", &p);
     if(res != SAMOS_ALL_OK){
         panic("Failed to load user program\n");
     }
