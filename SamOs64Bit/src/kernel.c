@@ -30,6 +30,7 @@
 #include "fs/pparser.h"
 #include "disk/disk.h"
 #include "disk/streamer.h"
+#include "disk/gpt.h"
 #include "gdt/gdt.h"
 #include "config.h"
 #include "status.h"
@@ -234,6 +235,10 @@ void kernel_main(void)
     // can fopen("0:/foo") from kernel context.
     fs_init();
     disk_search_and_init();
+
+    // Lecture 82 - now that disks are enumerated, parse GPT
+    // headers and spin up a virtual disk per partition.
+    gpt_init();
 
     // Allocate a 1 MiB kernel stack for ring transitions.
     // kzalloc lays it out low-to-high; rsp0 needs the TOP of
