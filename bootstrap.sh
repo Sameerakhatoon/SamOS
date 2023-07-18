@@ -59,7 +59,7 @@ else
         libisl-dev
         # EDK2 build prerequisites:
         uuid-dev
-        iasl
+        acpica-tools
         python3
         python3-distutils-extra
     )

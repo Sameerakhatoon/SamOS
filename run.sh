@@ -1,15 +1,18 @@
 #!/bin/bash
-# Lecture 71 - top-level run.sh for the UEFI boot path.
+# run.sh - boot bin/os.img (built by ./build.sh) in QEMU under OVMF.
 #
-# Requires:
-#   - OVMF firmware at /usr/share/ovmf/OVMF.fd (apt install ovmf)
-#   - bin/os.img built by ./build.sh
+# The kernel's COM1 console is on this terminal (-serial stdio);
+# the framebuffer opens in a QEMU window. Extra arguments are passed
+# to QEMU, e.g. `./run.sh -machine q35` or `./run.sh -display none`.
 #
-# For the BIOS path: cd SamOs64Bit && qemu-system-x86_64 -hda bin/os.bin
+# Requires OVMF at /usr/share/ovmf/OVMF.fd (apt install ovmf).
 
-qemu-system-x86_64 \
+cd "$(dirname "$0")"
+exec qemu-system-x86_64 \
   -machine pc \
   -drive file=./bin/os.img,format=raw,if=ide \
   -m 512M \
   -cpu Skylake-Server,tsc-frequency=2800000000 \
-  -bios /usr/share/ovmf/OVMF.fd
+  -bios /usr/share/ovmf/OVMF.fd \
+  -serial stdio \
+  "$@"

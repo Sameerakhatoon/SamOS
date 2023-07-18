@@ -1,135 +1,153 @@
 #!/bin/bash
-# Lecture 71 - top-level build orchestrator for SamOs.
+# build.sh - one-command build for SamOS: bin/os.img, no sudo.
 #
-# Combines two builds:
-#   1. The EDK2 UEFI application SamOs.efi (top-level *.c/*.inf/*.uni).
-#      Requires EDK2 cloned at $HOME/edk2 with BaseTools built and the
-#      module symlinked under MdeModulePkg/Application/SamOs/.
-#   2. The inner kernel + user-program build (SamOs64Bit/build.sh).
+#   1. The EDK2 UEFI loader SamOs.efi (top-level SamOs.c/.inf/.uni).
+#   2. The kernel + user programs (SamOs64Bit/build.sh).
+#   3. A 700 MiB GPT disk image, bin/os.img:
+#        p1: FAT16 ESP  (label ABC)   /EFI/BOOT/BOOTX64.EFI, KERNEL.BIN, programs, font
+#        p2: FAT16 data (label SAMOS) programs, font, HELLO.TXT
 #
-# This script then composes a 700 MiB GPT-partitioned disk image:
-#   p1: FAT16 ESP holding the UEFI bootloader at /EFI/BOOT/BOOTX64.EFI
-#   p2: FAT16 SamOs partition for the kernel + user programs
+# SamOS divergence from the course book: the book composes
+# the image with losetup + parted + mkfs.vfat + mount, which all need
+# root. We write the GPT with sgdisk and the filesystems with
+# mkfs.fat --offset / mtools `-i image@@offset`, all on the plain
+# image file. Same layout, no sudo, and safe to run in parallel
+# from several git worktrees. 
 #
-# Run requirements (NOT auto-installed here):
-#   - EDK2 / BaseTools (https://github.com/tianocore/edk2)
-#   - parted, mkfs.vfat, losetup (need sudo for these)
-#   - OVMF firmware (Debian/Ubuntu: apt install ovmf -> /usr/share/ovmf/OVMF.fd)
+# Requirements: nasm, sgdisk (gdisk), mkfs.fat (dosfstools),
+# mtools, the x86_64-elf cross compiler in ~/opt/cross, and EDK2 at
+# ~/edk2 with BaseTools built (bootstrap.sh installs all of these).
 #
-# SamOs deviation from upstream PeachOS64 L71 build.sh: variable names
-# adjusted to SamOs prefix. Disk image renamed bin/PeachOS.efi ->
-# bin/SamOs.efi.
+# Environment:
+#   EDK2_ROOT       EDK2 checkout (default ~/edk2)
+#   EDK2_TOOLCHAIN  EDK2 toolchain tag (default GCC)
+#   SAMOS_EFI       use this prebuilt SamOs.efi instead of building one
+#   EXTRA_CFLAGS    passed through to the kernel build
 
-set -e
+set -euo pipefail
 
-CURRENT_DIR=$(pwd)
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT"
 
-# Friendly dependency check. If anything obvious is missing, point
-# at bootstrap.sh rather than failing two layers deep in a Makefile.
+: "${EDK2_TOOLCHAIN:=GCC}"
+: "${EDK2_ROOT:=$HOME/edk2}"
+export PATH="${PREFIX:-$HOME/opt/cross}/bin:$PATH"
+export MTOOLS_SKIP_CHECK=1
+export MTOOLS_NO_VFAT=1     # 8.3 names only: the kernel's FAT16 can't read LFNs yet
+
 _missing=()
-command -v qemu-system-x86_64 >/dev/null 2>&1 || _missing+=(qemu-system-x86_64)
-command -v nasm               >/dev/null 2>&1 || _missing+=(nasm)
-command -v parted             >/dev/null 2>&1 || _missing+=(parted)
-command -v mkfs.vfat          >/dev/null 2>&1 || _missing+=(mkfs.vfat)
-command -v mcopy              >/dev/null 2>&1 || _missing+=(mcopy)
-[ -x "${PREFIX:-$HOME/opt/cross}/bin/x86_64-elf-gcc" ] || \
-    command -v x86_64-elf-gcc >/dev/null 2>&1 || _missing+=(x86_64-elf-gcc)
+for tool in nasm sgdisk mkfs.fat mcopy mmd x86_64-elf-gcc x86_64-elf-ld; do
+    command -v "$tool" >/dev/null 2>&1 || _missing+=("$tool")
+done
 if [ ${#_missing[@]} -gt 0 ]; then
     echo "build.sh: missing required tools: ${_missing[*]}" >&2
-    echo "build.sh: run ./bootstrap.sh from this directory to install everything." >&2
+    echo "build.sh: run ./bootstrap.sh to install them." >&2
     exit 2
 fi
-unset _missing
+
+mkdir -p "$ROOT/bin"
 
 # -------------------------------------------------------------------
-# Step 1: EDK2 UEFI application build.
+# Step 1: the UEFI loader.
 # -------------------------------------------------------------------
-# Upstream's build.sh cd's three levels up to reach the EDK2 root
-# (../../../ from MdeModulePkg/Application/PeachOS/). We mirror that
-# expectation: this script is run from the SamOs project root, which
-# in an EDK2 setup is symlinked under MdeModulePkg/Application/SamOs/.
-#
-# EDK2 toolchain auto-detection. Modern Ubuntu (24+) ships gcc 13
-# which maps to EDK2's GCCNOLTO tag. Older boxes may use GCC5.
-# Override via $EDK2_TOOLCHAIN if needed.
-: "${EDK2_TOOLCHAIN:=GCCNOLTO}"
-: "${EDK2_ROOT:=$HOME/edk2}"
-
-# If EDK2 isn't set up, skip this step and just build the BIOS path.
-if [ -d "$EDK2_ROOT/BaseTools" ]; then
-    cd "$EDK2_ROOT"
-    export EDK_TOOLS_PATH="$EDK2_ROOT/BaseTools"
-    . edksetup.sh BaseTools
-    build -p MdeModulePkg/MdeModulePkg.dsc \
-          -m MdeModulePkg/Application/SamOs/SamOs.inf \
-          -a X64 -t "$EDK2_TOOLCHAIN"
-    cd "$CURRENT_DIR"
+EFI_OUT="$ROOT/bin/SamOs.efi"
+if [ -n "${SAMOS_EFI:-}" ]; then
+    cp "$SAMOS_EFI" "$EFI_OUT"
+elif [ -x "$EDK2_ROOT/BaseTools/Source/C/bin/GenFw" ]; then
+    # ~/edk2 is shared by every worktree, so serialise the symlink
+    # swap + build + copy.
+    (
+        flock 9
+        link="$EDK2_ROOT/MdeModulePkg/Application/SamOs"
+        if [ -e "$link" ] && [ ! -L "$link" ]; then
+            echo "build.sh: $link exists and is not a symlink" >&2
+            exit 1
+        fi
+        ln -sfn "$ROOT" "$link"
+        dsc="$EDK2_ROOT/MdeModulePkg/MdeModulePkg.dsc"
+        if ! grep -q 'Application/SamOs/SamOs.inf' "$dsc"; then
+            sed -i 's|^\(\s*\)MdeModulePkg/Application/HelloWorld/HelloWorld.inf|&\n\1MdeModulePkg/Application/SamOs/SamOs.inf|' "$dsc"
+        fi
+        cd "$EDK2_ROOT"
+        export EDK_TOOLS_PATH="$EDK2_ROOT/BaseTools"
+        set +u
+        . ./edksetup.sh BaseTools >/dev/null
+        set -u
+        build -p MdeModulePkg/MdeModulePkg.dsc \
+              -m MdeModulePkg/Application/SamOs/SamOs.inf \
+              -a X64 -t "$EDK2_TOOLCHAIN" -q
+        cp "$EDK2_ROOT/Build/MdeModule/DEBUG_${EDK2_TOOLCHAIN}/X64/SamOs.efi" "$EFI_OUT"
+    ) 9>"$HOME/.samos-edk2.lock"
+elif [ -f "$EFI_OUT" ]; then
+    echo "build.sh: EDK2 not found at $EDK2_ROOT; reusing existing bin/SamOs.efi" >&2
 else
-    echo "EDK2 not detected at $EDK2_ROOT/BaseTools - skipping UEFI build."
-    echo "(see file header for setup notes)"
+    echo "build.sh: EDK2 not found at $EDK2_ROOT and no bin/SamOs.efi to reuse." >&2
+    echo "build.sh: run ./bootstrap.sh, or set SAMOS_EFI=/path/to/SamOs.efi." >&2
+    exit 2
 fi
 
 # -------------------------------------------------------------------
-# Step 2: build the inner kernel + user programs.
+# Step 2: kernel + user programs.
 # -------------------------------------------------------------------
-cd "$CURRENT_DIR/SamOs64Bit"
-bash build.sh
-cd "$CURRENT_DIR"
+bash "$ROOT/SamOs64Bit/build.sh"
+
+K="$ROOT/SamOs64Bit"
+for f in "$K/bin/kernel.bin" "$K/programs/blank/blank.elf" "$K/programs/shell/shell.elf" "$K/assets/sysfont.bmp"; do
+    [ -f "$f" ] || { echo "build.sh: missing build output $f" >&2; exit 1; }
+done
 
 # -------------------------------------------------------------------
-# Step 3 (UEFI-only): compose the GPT-partitioned disk image.
+# Step 3: the GPT disk image.
 # -------------------------------------------------------------------
-EDK2_OUT="$EDK2_ROOT/Build/MdeModule/DEBUG_${EDK2_TOOLCHAIN}/X64/SamOs.efi"
-if [ ! -f "$EDK2_OUT" ]; then
-    echo "SamOs.efi not produced at $EDK2_OUT - skipping disk image composition."
-    echo "BIOS path image is at SamOs64Bit/bin/os.bin (16 MiB)."
-    exit 0
-fi
+IMG="$ROOT/bin/os.img"
+TMP_IMG="$IMG.tmp.$$"
+trap 'rm -f "$TMP_IMG"' EXIT
 
-mkdir -p ./bin /tmp/samos-mnt
+IMG_MIB=700
+SECTORS=$((IMG_MIB * 2048))
+P1_START=2048                    # 1 MiB
+P2_START=$((SECTORS / 2))        # 50%
+P1_END=$((P2_START - 1))
+P2_END=$((SECTORS - 2048 - 1))   # leave 1 MiB at the end for the backup GPT
+P1_SECTORS=$((P1_END - P1_START + 1))
+P2_SECTORS=$((P2_END - P2_START + 1))
 
-dd if=/dev/zero bs=1048576 count=700 of=./bin/os.img
-LOOPDEV=$(sudo losetup --find --show --partscan ./bin/os.img)
-echo "Loop Device $LOOPDEV"
+rm -f "$TMP_IMG"
+truncate -s "${IMG_MIB}M" "$TMP_IMG"
+sgdisk --clear \
+       --new=1:${P1_START}:${P1_END} --typecode=1:EF00 --change-name=1:ESP \
+       --new=2:${P2_START}:${P2_END} --typecode=2:0700 --change-name=2:SAMOS \
+       "$TMP_IMG" >/dev/null
 
-# GPT partition table.
-sudo parted "$LOOPDEV" --script mklabel gpt
-# ESP for the bootloader.
-sudo parted "$LOOPDEV" --script mkpart ESP fat16 1Mib 50%
-# SamOs partition for the kernel.
-sudo parted "$LOOPDEV" --script mkpart ESP fat16 50% 100%
-sudo parted "$LOOPDEV" --script set 1 esp on
-sudo partprobe "$LOOPDEV"
-sleep 2
-lsblk "$LOOPDEV"
+# mkfs.fat's BLOCKS argument is in KiB. -h records the partition
+# start as "hidden sectors", as mkfs.vfat does on a real partition.
+# It warns that BLOCKS is smaller than the rest of the file; that is
+# the point, so that one warning is filtered out.
+mkfs_part() {
+    mkfs.fat -F 16 -n "$1" --offset "$2" -h "$2" "$TMP_IMG" $(($3 / 2)) 2>&1 >/dev/null \
+        | { grep -v 'block count mismatch' || true; } >&2
+}
+mkfs_part ABC   $P1_START $P1_SECTORS
+mkfs_part SAMOS $P2_START $P2_SECTORS
 
-sudo mkfs.vfat -n ABC   "${LOOPDEV}p1"
-sudo mkfs.vfat -n SAMOS "${LOOPDEV}p2"
+P1="$TMP_IMG@@$((P1_START * 512))"
+P2="$TMP_IMG@@$((P2_START * 512))"
 
-# Mount the ESP. The UEFI loader reads kernel.bin from the same
-# filesystem it was loaded from (ReadFileFromCurrentFilesystem),
-# so the kernel + user ELFs go HERE, not on partition 2.
-sudo mount -t vfat "${LOOPDEV}p1" /tmp/samos-mnt
-sudo mkdir -p /tmp/samos-mnt/EFI/BOOT
-cp "$EDK2_OUT" ./bin/SamOs.efi
-sudo cp ./bin/SamOs.efi /tmp/samos-mnt/EFI/BOOT/BOOTX64.EFI
-sudo cp ./SamOs64Bit/bin/kernel.bin /tmp/samos-mnt/kernel.bin
-sudo cp ./SamOs64Bit/programs/blank/blank.elf /tmp/samos-mnt/BLANK.ELF || true
-sudo cp ./SamOs64Bit/programs/shell/shell.elf /tmp/samos-mnt/SHELL.ELF || true
-# Stage the (stub) system font BMP so the kernel's
-# terminal_create path runs at boot. A real upstream sysfont
-# would replace this 9x16-cell white-block stub.
-sudo cp ./SamOs64Bit/assets/sysfont.bmp /tmp/samos-mnt/sysfont.bmp || true
-sudo umount /tmp/samos-mnt
+# p1 (ESP): the UEFI loader reads KERNEL.BIN from the filesystem it
+# was loaded from, so the kernel and user programs go here.
+mmd   -i "$P1" ::/EFI ::/EFI/BOOT
+mcopy -i "$P1" "$EFI_OUT"                      ::/EFI/BOOT/BOOTX64.EFI
+mcopy -i "$P1" "$K/bin/kernel.bin"             ::/KERNEL.BIN
+mcopy -i "$P1" "$K/programs/blank/blank.elf"   ::/BLANK.ELF
+mcopy -i "$P1" "$K/programs/shell/shell.elf"   ::/SHELL.ELF
+mcopy -i "$P1" "$K/assets/sysfont.bmp"         ::/SYSFONT.BMP
 
-# Also stage the ELF programs onto the SAMOS partition (p2) so
-# kernel-side `fopen("@:/BLANK.ELF")` resolves regardless of which
-# FAT partition the kernel's disk driver picks as primary.
-sudo mount -t vfat "${LOOPDEV}p2" /tmp/samos-mnt
-sudo cp ./SamOs64Bit/programs/blank/blank.elf /tmp/samos-mnt/BLANK.ELF || true
-sudo cp ./SamOs64Bit/programs/shell/shell.elf /tmp/samos-mnt/SHELL.ELF || true
-sudo cp ./SamOs64Bit/assets/sysfont.bmp /tmp/samos-mnt/sysfont.bmp || true
-sudo umount /tmp/samos-mnt
-sudo losetup -d "$LOOPDEV"
+# p2 (SAMOS): the kernel's primary filesystem ("@:/").
+mcopy -i "$P2" "$K/programs/blank/blank.elf"   ::/BLANK.ELF
+mcopy -i "$P2" "$K/programs/shell/shell.elf"   ::/SHELL.ELF
+mcopy -i "$P2" "$K/assets/sysfont.bmp"         ::/SYSFONT.BMP
+mcopy -i "$P2" "$K/hello.txt"                  ::/HELLO.TXT
 
-echo "Build completed (bin/os.img + bin/SamOs.efi)"
+mv -f "$TMP_IMG" "$IMG"
+trap - EXIT
+echo "build.sh: bin/os.img ready ($(du -h --apparent-size "$IMG" | cut -f1) sparse, $(du -h "$IMG" | cut -f1) on disk)"
