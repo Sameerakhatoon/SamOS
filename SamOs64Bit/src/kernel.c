@@ -41,6 +41,7 @@
 #include "graphics/terminal.h"    // L100 - system_terminal handle
 #include "graphics/window.h"      // L122 - window_system_initialize
 #include "mouse/mouse.h"          // L150 - mouse_system_init / load_static_drivers
+#include "io/serial.h"            // COM1 console
 
 // L87 - bss-resident default_graphics_info lives in kernel.asm;
 // the long-mode entry stashes the UEFI framebuffer params into it
@@ -70,6 +71,8 @@ void terminal_writechar(char c, char colour)
 
 void print(const char* str)
 {
+    // Mirror every kernel print to COM1 (see io/serial.h).
+    serial_write(str);
     size_t len = strlen(str);
     for (size_t i = 0; i < len; i++)
     {
@@ -82,9 +85,13 @@ void print(const char* str)
 // of silent while(1)s, so we get a visible reason on VGA.
 void panic(const char* msg)
 {
+    serial_write("\nKERNEL PANIC: ");
     print(msg);
+    // SamOs divergence: halt with interrupts off instead of a
+    // busy spin, so a panicked kernel stops burning a host CPU.
     while (1)
     {
+        __asm__ volatile("cli; hlt");
     }
 }
 
@@ -129,6 +136,8 @@ void kernel_main(void)
     // is gone; system_terminal is created later, after the
     // framebuffer-side graphics_setup and font_system_init.
     struct graphics_info* screen_info = NULL;
+    serial_init();
+    serial_write("SamOS: kernel_main\n");
     boot_marker_set(BM_STAGE_KERNEL_MAIN, 0);
     print("Hello 64-bit!\n");
 

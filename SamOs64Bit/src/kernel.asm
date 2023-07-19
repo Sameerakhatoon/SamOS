@@ -137,8 +137,15 @@ long_mode_new_gdt_complete:
     out 0x20, al
     out 0xA0, al
 
-    jmp kernel_main
-    jmp $
+    ; SamOs divergence: `call`, not the book's `jmp`.
+    ; The SysV ABI wants rsp = 8 (mod 16) at function entry; a jmp
+    ; with rsp = 0x200000 enters kernel_main misaligned, and the
+    ; first `movaps` gcc emits for a zero-initialised struct #GPs.
+    call kernel_main
+.hang:
+    cli
+    hlt
+    jmp .hang
 
 ; Lecture 38 - deliberate #DE for IDT testing.
 div_test:

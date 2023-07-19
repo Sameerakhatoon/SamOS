@@ -75,7 +75,10 @@ idt_load:
 
 no_interrupt:
     pushad_macro
+    mov rbx, rsp
+    and rsp, -16
     call no_interrupt_handler
+    mov rsp, rbx
     popad_macro
     iretq
 
@@ -93,7 +96,13 @@ no_interrupt:
         ; AMD64 SysV: pass interrupt number in RDI, frame ptr in RSI.
         mov rdi, %1
         mov rsi, rsp
+        ; SamOs divergence: align the C call. rbx is
+        ; callee-saved and already in the frame, so it holds the
+        ; frame pointer across the call.
+        mov rbx, rsp
+        and rsp, -16
         call interrupt_handler
+        mov rsp, rbx
         popad_macro
         iretq
 %endmacro
@@ -115,7 +124,11 @@ isr80h_wrapper:
     ; First arg = command number (user's pre-trap rax)
     mov rdi, rax
 
+    ; SamOs divergence: align the C call, see int%1.
+    mov rbx, rsp
+    and rsp, -16
     call isr80h_handler
+    mov rsp, rbx
 
     ; Stash handler's return value before popad_macro clobbers rax
     mov qword [tmp_res], rax

@@ -19,6 +19,7 @@
 #include "graphics/window.h"
 #include "graphics/terminal.h"   // L158 - process_print routes here
 #include "kernel.h"
+#include "io/serial.h"     // Mirror process output to COM1
 #include <stdbool.h>
 
 // The current process that is running.
@@ -341,12 +342,19 @@ out:
 }
 
 // Lecture 158 - process_print_char / process_print write into
-// the sysout window's terminal. Upstream does not null-check
-// process->sysout_win; we keep that behaviour so the first
-// caller (peachos_divert_stdout_to_window in blank.c) wires
-// it up before any printf fires.
+// the sysout window's terminal.
+//
+// SamOs divergence: every byte a process prints is also
+// mirrored to the COM1 serial console, and a process that never
+// redirected its output (sysout_win == NULL) falls back to the
+// kernel console instead of dereferencing NULL as upstream does.
 void process_print_char(struct process* process, char c){
+    serial_putc(c);
     struct process_window* printing_process_win = process->sysout_win;
+    if(!printing_process_win){
+        terminal_writechar(c, 15);
+        return;
+    }
     struct terminal* win_term = window_terminal(printing_process_win->kernel_win);
     if(win_term){
         terminal_write(win_term, c);
@@ -354,7 +362,14 @@ void process_print_char(struct process* process, char c){
 }
 
 void process_print(struct process* process, const char* message){
+    serial_write(message);
     struct process_window* printing_process_win = process->sysout_win;
+    if(!printing_process_win){
+        for(const char* p = message; *p; p++){
+            terminal_writechar(*p, 15);
+        }
+        return;
+    }
     struct terminal* win_term = window_terminal(printing_process_win->kernel_win);
     if(win_term){
         terminal_print(win_term, message);
