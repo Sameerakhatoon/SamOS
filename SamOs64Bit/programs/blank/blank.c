@@ -177,6 +177,13 @@ int main(int argc, char** argv){
         samos_e2e_mark(USER_PROC_ARGS_OK, 1);
     }
 
+    // SamOs e2e: every marker except the keyboard probe
+    // below is written by now. The host harness waits for this
+    // serial line instead of sleeping a fixed time (tests64/e2e/
+    // _lib.sh, E2E_SENTINEL). The leading newline ends the line the
+    // samos_putchar('!') probe left open, so the sentinel's ^ matches.
+    print("\ne2e: user selftest done\n");
+
     // L82-L88 / L122 PS/2 keyboard end to end: poll the keyboard
     // buffer for up to ~15 seconds. The host-side e2e test
     // (116-user-keyboard-input) uses QEMU 'sendkey' to inject

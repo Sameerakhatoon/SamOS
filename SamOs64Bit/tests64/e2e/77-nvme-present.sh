@@ -5,17 +5,17 @@
 # QEMU's -machine pc does not include an NVMe controller by
 # default; we attach one via -device nvme,... and assert the
 # kernel's PCI scan saw class 0x01:0x08. The backing image is
-# tiny (4 MiB) and lives at /tmp/nvme.img so we do not pull a
+# tiny (4 MiB) and lives at $E2E_TMP/nvme.img so we do not pull a
 # real disk into the test.
 . "$(dirname "$0")/_lib.sh"
 
 # Pre-create the backing image if it is missing.
-if [ ! -f /tmp/nvme.img ]; then
-    dd if=/dev/zero of=/tmp/nvme.img bs=1M count=4 status=none
+if [ ! -f "$E2E_TMP/nvme.img" ]; then
+    dd if=/dev/zero of=$E2E_TMP/nvme.img bs=1M count=4 status=none
 fi
 
 # QEMU 8.x style: drive id linked to nvme device.
-export E2E_EXTRA_QEMU_ARGS="-drive file=/tmp/nvme.img,if=none,id=nvm,format=raw -device nvme,drive=nvm,serial=samos-e2e"
+export E2E_EXTRA_QEMU_ARGS="-drive file=$E2E_TMP/nvme.img,if=none,id=nvm,format=raw -device nvme,drive=nvm,serial=samos-e2e"
 
 boot_and_dump 25
 

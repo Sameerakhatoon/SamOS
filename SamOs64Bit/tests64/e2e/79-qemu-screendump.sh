@@ -19,34 +19,19 @@
 set -uo pipefail
 . "$(dirname "$0")/_lib.sh"
 
-E2E_PPM="${E2E_PPM:-/tmp/samos-e2e-screen.ppm}"
-rm -f "$E2E_PPM"
-
-e2e_select_image
-
-qemu_args=(
-    -m 512M
-    -accel tcg
-    -display none
-    -monitor stdio
-    -no-reboot
-    -drive "file=$E2E_IMAGE,format=raw,if=ide"
-    -bios "$E2E_OVMF"
-    -machine pc
-    -cpu Skylake-Server
-)
+E2E_PPM="$E2E_TMP/screen.ppm"
 
 # Sleep, screendump, then quit.
-(
+_screendump_script() {
     sleep 25
     printf 'screendump "%s"\n' "$E2E_PPM"
     sleep 2
     printf 'quit\n'
-) | timeout 35 qemu-system-x86_64 "${qemu_args[@]}" \
-        > /tmp/samos-e2e-qemu.log 2>&1 || true
+}
+e2e_run_qemu 35 _screendump_script
 
 if [ ! -s "$E2E_PPM" ]; then
-    e2e_fail "screendump produced no PPM (qemu log: /tmp/samos-e2e-qemu.log)"
+    e2e_fail "screendump produced no PPM ($(tail -n 3 "$E2E_QEMU_LOG"))"
 fi
 
 # A blank framebuffer would be a giant PPM of all zeros. Scan

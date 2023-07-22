@@ -27,28 +27,12 @@
 set -uo pipefail
 . "$(dirname "$0")/_lib.sh"
 
-e2e_select_image
-
-qemu_args=(
-    -m 512M
-    -accel tcg
-    -display none
-    -monitor stdio
-    -no-reboot
-    -drive "file=$E2E_IMAGE,format=raw,if=ide"
-    -bios "$E2E_OVMF"
-    -machine pc
-    -cpu Skylake-Server
-)
-
-rm -f "$E2E_DUMP"
-
 # Boot for ~12 s (kernel boot + selftest + user-task startup),
 # then fire sendkey at intervals to give the kernel multiple
 # opportunities to receive an IRQ1. We pmemsave at 28 s which
 # is past both the host-side sendkey timing AND the user-side
 # polling loop's 15-second budget.
-(
+_keys_script() {
     sleep 12
     printf 'sendkey a\n'
     sleep 1
@@ -62,10 +46,10 @@ rm -f "$E2E_DUMP"
     sleep 12
     printf 'pmemsave 0x6000 %d "%s"\n' "$E2E_MARKER_REGION_SIZE" "$E2E_DUMP"
     printf 'quit\n'
-) | timeout 45 qemu-system-x86_64 "${qemu_args[@]}" \
-        > /tmp/samos-e2e-qemu.log 2>&1 || true
+}
+e2e_run_qemu 45 _keys_script
 
-[ -s "$E2E_DUMP" ] || e2e_fail "no marker dump (qemu log /tmp/samos-e2e-qemu.log)"
+[ -s "$E2E_DUMP" ] || e2e_fail "no marker dump ($(tail -n 3 "$E2E_QEMU_LOG"))"
 
 # This test is currently a DEFER: the chain compiles + scaffolds
 # correctly but the kbd IRQ + per-process buffer routing does
