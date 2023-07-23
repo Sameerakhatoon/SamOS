@@ -12,14 +12,11 @@
 //     paging_map API to remap a kernel-side scratch page into
 //     the task's address space, copy, then map it back to its
 //     original state. References kernel_desc() (lands in L44).
-//   - ELF entry-point support remains "panic, not supported"
-//     until elfloader is back.
+//   - ELF entry points are supported again since the L65
+//     elfloader.
 //
-// task.c is NOT yet in the build at L40. It references
-// kernel_desc, paging_desc_free, process_switch, etc - those
-// land in L43 (paging_desc_free), L44 (kernel_desc), and L41
-// / L42 (process). Once L40-L42 + L43-L44 are all in, the file
-// can be added to FILES.
+// task.c is in the build (Makefile FILES) and has been since the
+// L43/L44 prerequisites landed.
 
 #include "task.h"
 #include "process.h"

@@ -1,12 +1,11 @@
-// Lecture 128 - TSC frequency + delay (SOURCE-ONLY).
+// Lecture 128 - TSC frequency + delay.
 //
 // Reads the bus / core frequency through CPUID leaves 0x15 and
 // 0x16 (in that order; 0x16 is a fallback), then exposes an
 // RDTSC sample + a `udelay(us)` busy wait.
 //
-// tsc.asm provides `tsc_microseconds` (L129); without it
-// `tsc_seconds` does not link. The Makefile does NOT include
-// tsc.o yet for that reason.
+// tsc.o and tsc.asm.o (which provides `tsc_microseconds`, L129)
+// are both linked into the kernel.
 
 #include "tsc.h"
 #include "cpuid.h"
@@ -43,8 +42,9 @@ TIME_TSC tsc_frequency(void){
     // also gets the spurious multiply. The whole subsystem is
     // off-by-1e6 until upstream fixes it; udelay then waits
     // 10^6 times too few cycles, which on a typical 3 GHz core
-    // makes `udelay(1)` return almost immediately. Documented;
-    // the file is not yet linked so no observable effect.
+    // makes `udelay(us)` wait about `us` SECONDS instead (the
+    // cycle count is 10^6 too large) and overflow for large `us`.
+    // The file IS linked, so this is live; the scheduler work fixes it.
     tsc_freq *= 1000000;
     tsc_freq_val = tsc_freq;
 
