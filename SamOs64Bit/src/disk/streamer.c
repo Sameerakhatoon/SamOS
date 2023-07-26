@@ -16,6 +16,19 @@ struct disk_stream* diskstreamer_new(int disk_id){
     return streamer;
 }
 
+// Lecture 83 - alternative constructor for callers that already
+// hold the disk pointer (FAT16 in particular, after the L78/L82
+// virtual-disk wiring).
+struct disk_stream* diskstreamer_new_from_disk(struct disk* disk){
+    if(!disk){
+        return 0;
+    }
+    struct disk_stream* streamer = kzalloc(sizeof(struct disk_stream));
+    streamer->pos  = 0;
+    streamer->disk = disk;
+    return streamer;
+}
+
 int diskstreamer_seek(struct disk_stream* stream, int pos){
     stream->pos = pos;
     return 0;
