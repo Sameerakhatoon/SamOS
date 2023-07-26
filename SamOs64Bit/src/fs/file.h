@@ -3,6 +3,7 @@
 
 #include "pparser.h"
 #include <stdint.h>
+#include <stddef.h>
 
 typedef unsigned int FILE_SEEK_MODE;
 enum {
@@ -37,15 +38,20 @@ typedef int   (*FS_READ_FUNCTION)(struct disk* disk, void* private, uint32_t siz
 typedef int   (*FS_SEEK_FUNCTION)(void* private, uint32_t offset, FILE_SEEK_MODE seek_mode);
 typedef int   (*FS_STAT_FUNCTION)(struct disk* disk, void* private, struct file_stat* stat);
 typedef int   (*FS_CLOSE_FUNCTION)(void* private);
+// Lecture 84 - filesystems can report their volume label.
+// disk_search_and_init uses this to pick the primary
+// filesystem disk by name match.
+typedef int   (*FS_VOLUME_NAME_FUNCTION)(void* private, char* name_out, size_t max);
 
 struct filesystem {
-    FS_RESOLVE_FUNCTION resolve;
-    FS_OPEN_FUNCTION    open;
-    FS_READ_FUNCTION    read;
-    FS_SEEK_FUNCTION    seek;
-    FS_STAT_FUNCTION    stat;
-    FS_CLOSE_FUNCTION   close;
-    char                name[20];
+    FS_RESOLVE_FUNCTION     resolve;
+    FS_OPEN_FUNCTION        open;
+    FS_READ_FUNCTION        read;
+    FS_SEEK_FUNCTION        seek;
+    FS_STAT_FUNCTION        stat;
+    FS_CLOSE_FUNCTION       close;
+    FS_VOLUME_NAME_FUNCTION volume_name; // L84
+    char                    name[20];
 };
 
 struct file_descriptor {
