@@ -14,65 +14,16 @@
 # we substitute the mformat/mcopy pipeline used by SamOs since it
 # does not need sudo or a real mount point.
 
-FILES = ./build/kernel.asm.o ./build/kernel.o ./build/kernel_selftest.o ./build/string/string.o ./build/memory/memory.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/heap/multiheap.o ./build/memory/paging/paging.o ./build/memory/paging/paging.asm.o ./build/io/io.asm.o ./build/io/cpuid.o ./build/io/tsc.o ./build/io/tsc.asm.o ./build/io/serial.o ./build/io/pci.o ./build/idt/idt.o ./build/idt/idt.asm.o ./build/idt/irq.o ./build/task/task.o ./build/task/task.asm.o ./build/task/process.o ./build/task/userlandptr.o ./build/task/tss.asm.o ./build/fs/file.o ./build/fs/pparser.o ./build/fs/fat/fat16.o ./build/disk/disk.o ./build/disk/driver.o ./build/disk/drivers/pata.o ./build/disk/drivers/nvme.o ./build/disk/streamer.o ./build/disk/gpt.o ./build/graphics/graphics.o ./build/graphics/font.o ./build/graphics/terminal.o ./build/graphics/window.o ./build/graphics/image/image.o ./build/graphics/image/bmp.o ./build/mouse/mouse.o ./build/mouse/ps2mouse.o ./build/gdt/gdt.o ./build/keyboard/keyboard.o ./build/keyboard/classic.o ./build/isr80h/isr80h.o ./build/isr80h/io.o ./build/isr80h/heap.o ./build/isr80h/misc.o ./build/isr80h/window.o ./build/isr80h/graphics.o ./build/isr80h/time.o ./build/isr80h/file.o ./build/isr80h/process.o ./build/loader/formats/elf.o ./build/loader/formats/elfloader.o ./build/lib/vector/vector.o
+FILES = ./build/kernel.asm.o ./build/kernel.o ./build/early_fault.o ./build/kernel_selftest.o ./build/string/string.o ./build/memory/memory.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/heap/multiheap.o ./build/memory/paging/paging.o ./build/memory/paging/paging.asm.o ./build/io/io.asm.o ./build/io/cpuid.o ./build/io/tsc.o ./build/io/tsc.asm.o ./build/io/serial.o ./build/io/pci.o ./build/idt/idt.o ./build/idt/idt.asm.o ./build/idt/irq.o ./build/task/task.o ./build/task/task.asm.o ./build/task/process.o ./build/task/userlandptr.o ./build/task/tss.asm.o ./build/fs/file.o ./build/fs/pparser.o ./build/fs/fat/fat16.o ./build/disk/disk.o ./build/disk/driver.o ./build/disk/drivers/pata.o ./build/disk/drivers/nvme.o ./build/disk/streamer.o ./build/disk/gpt.o ./build/graphics/graphics.o ./build/graphics/font.o ./build/graphics/terminal.o ./build/graphics/window.o ./build/graphics/image/image.o ./build/graphics/image/bmp.o ./build/mouse/mouse.o ./build/mouse/ps2mouse.o ./build/gdt/gdt.o ./build/keyboard/keyboard.o ./build/keyboard/classic.o ./build/isr80h/isr80h.o ./build/isr80h/io.o ./build/isr80h/heap.o ./build/isr80h/misc.o ./build/isr80h/window.o ./build/isr80h/graphics.o ./build/isr80h/time.o ./build/isr80h/file.o ./build/isr80h/process.o ./build/loader/formats/elf.o ./build/loader/formats/elfloader.o ./build/lib/vector/vector.o
 INCLUDES = -I./src
 FLAGS = -g -ffreestanding -falign-jumps -falign-functions -falign-labels -falign-loops -fstrength-reduce -fomit-frame-pointer -finline-functions -Wno-unused-function -fno-builtin -Werror -Wno-unused-label -Wno-cpp -Wno-unused-parameter -nostdlib -nostartfiles -nodefaultlibs -Wall -O0 -Iinc
 # Lecture 200 - declare phony targets so the recursive-make
 # invocations do not get short-circuited by the filesystem.
 .PHONY: all clean user_programs user_programs_clean
 
-all: ./bin/boot.bin ./bin/kernel.bin user_programs
-	rm -rf ./bin/os.bin
-	# Build the on-disk image as: boot + kernel + 16 MiB zero pad.
-	dd if=./bin/boot.bin >> ./bin/os.bin
-	dd if=./bin/kernel.bin >> ./bin/os.bin
-	dd if=/dev/zero bs=1048576 count=16 >> ./bin/os.bin
-	# Lecture 58 - lay a FAT16 filesystem ONTO THE WHOLE IMAGE
-	# but preserve SamOs's boot sector (-k = keep boot sector +
-	# preserve our BPB). Then mcopy user programs in. SamOs uses
-	# mformat / mcopy (no sudo) instead of upstream's mount / cp.
-	#
-	# Our boot.asm BPB says ReservedSectors=200 (= 100 KiB), so
-	# the FAT starts at sector 200. kernel.bin is well under
-	# 100 KiB so it doesn't overlap the FAT region.
-	# -R 200    200 reserved sectors. Our boot.asm BPB says 200,
-	#           and kernel.bin loads to sectors 1..N (N < 200).
-	#           Without -R, mformat picks 1 and FAT overwrites
-	#           kernel.bin.
-	# -c 4      4 sectors per cluster. With 16 MiB disk and 1
-	#           sector = 512 bytes, this gives ~8192 clusters -
-	#           in the FAT16 range (4085..65525) so mformat
-	#           picks FAT16 and doesn't go FAT32 on us.
-	# (no -k)   we let mformat write a fresh boot sector. The
-	#           BPB it produces is the one disk_search_and_init
-	#           will parse, and the boot CODE in it is mformat's
-	#           generic "not bootable" stub.
-	# IMPORTANT: this means BIOS won't boot from os.bin directly.
-	# We re-prepend our SamOs boot.bin AFTER mformat by dd-ing
-	# its first 62 bytes (jmp + BPB-header up to the OEMIdentifier
-	# start) followed by the boot-asm CODE proper at the right
-	# offset. Cleaner: just dd boot.bin over the whole boot sector.
-	# We keep mformat's BPB in there too, because boot.bin's BPB
-	# is the one the BIOS reads but the kernel's disk driver
-	# trusts whatever's there at runtime.
-	mformat -R 200 -c 4 -i ./bin/os.bin :: || true
-	# Overlay our SamOs boot.bin's boot CODE (offsets 62..511)
-	# while keeping mformat's BPB (offsets 0..61). This way:
-	#   - BIOS at offset 510 sees 0xAA55 (mformat preserves it)
-	#   - BIOS sees a valid FAT16 BPB to read filesystem geometry
-	#   - The bootstrap CODE at offset 62 is OUR boot.asm, which
-	#     loads kernel.bin at sectors 1..N and jumps to 0x100000.
-	# kernel.bin is below sector 200 (ReservedSectors), so the
-	# FATs are safely above it.
-	# Overlay our SamOs boot.bin's boot CODE (offsets 62..511)
-	# WITH the boot signature (510..511). 450 bytes covers code
-	# + signature. mformat preserves the BPB (offsets 0..61) it
-	# just wrote.
-	dd if=./bin/boot.bin of=./bin/os.bin bs=1 skip=62 seek=62 count=450 conv=notrunc 2>/dev/null
-	mcopy -n -i ./bin/os.bin ./programs/simple/build/simple.bin ::SIMPLE.BIN || true
-	# L63 - drop the ELF programs onto the disk too.
-	mcopy -n -i ./bin/os.bin ./programs/blank/blank.elf  ::BLANK.ELF  || true
-	mcopy -n -i ./bin/os.bin ./programs/shell/shell.elf  ::SHELL.ELF  || true
+# The BIOS boot path (boot.asm + a flat FAT16 os.bin) is gone.
+# ../build.sh puts kernel.bin and the programs into bin/os.img.
+all: ./bin/kernel.bin user_programs
 
 # Lecture 200 - the recursive-make calls use `$(MAKE) -C` so
 # the parent's make-flags + jobserver propagate cleanly. Order
@@ -93,9 +44,6 @@ user_programs_clean:
 ./bin/kernel.bin: $(FILES)
 	x86_64-elf-ld -g -relocatable $(FILES) -o ./build/kernelfull.o
 	x86_64-elf-gcc $(FLAGS) -T ./src/linker.ld -o ./bin/kernel.bin -ffreestanding -O0 -nostdlib ./build/kernelfull.o
-
-./bin/boot.bin: ./src/boot/boot.asm
-	nasm -f bin ./src/boot/boot.asm -o ./bin/boot.bin
 
 ./build/kernel.asm.o: ./src/kernel.asm
 	nasm -f elf64 -g ./src/kernel.asm -o ./build/kernel.asm.o
@@ -276,9 +224,9 @@ user_programs_clean:
 	nasm -f elf64 -g ./src/memory/paging/paging.asm -o ./build/memory/paging/paging.asm.o
 
 clean:
-	rm -rf ./bin/boot.bin
+
 	rm -rf ./bin/kernel.bin
-	rm -rf ./bin/os.bin
+
 	rm -rf ${FILES}
 	rm -rf ./build/kernelfull.o
 	# Lecture 14 safety net: wipe every .o under build/.
@@ -290,3 +238,7 @@ clean:
 # COM1 serial console.
 ./build/io/serial.o: ./src/io/serial.c
 	x86_64-elf-gcc $(INCLUDES) -I./src/io $(FLAGS) -std=gnu99 -c ./src/io/serial.c -o ./build/io/serial.o
+
+# Early exception handler (minimal IDT before idt_init).
+./build/early_fault.o: ./src/early_fault.c
+	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c ./src/early_fault.c -o ./build/early_fault.o

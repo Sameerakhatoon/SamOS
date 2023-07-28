@@ -1,42 +1,63 @@
 ; Lecture 74 - UEFI-compatible kernel.asm.
 ;
-; The 32-bit -> 64-bit transition prologue is GONE. UEFI loads
-; kernel.bin into long mode already; the previous code (PAE/CR3/
-; EFER.LME/CR0.PG dance) is exactly what UEFI did on our behalf
-; before ExitBootServices.
+; UEFI enters the kernel in long mode with its own GDT, IDT and
+; page tables. This file installs ours, remaps the PIC and jumps to
+; kernel_main.
 ;
-; What stays: kernel_registers helper, long_mode_entry main body
-; (now does its OWN CR3+lgdt because UEFI hands us a UEFI-flavoured
-; GDT we want to replace), PIC remap, jmp kernel_main, the GDT
-; itself, and the static PML4/PDPT/PD identity-mapping skeleton.
-;
-; SamOs DEVIATION: this breaks the BIOS boot path. Our boot.asm
-; transitions to 32-bit protected mode then jumps to 0x100000
-; expecting 32-bit code. After L74, byte 0 at 0x100000 is `cli`
-; (0xFA, same in both modes) but byte 1 begins a `jmp` to
-; long_mode_entry whose body is 64-bit-encoded instructions
-; (REX-prefixed mov rax, ...) which decode as garbage in 32-bit
-; mode. The kernel will not run from the BIOS path until either
-; boot.asm grows the long-mode transition itself or a separate
-; BIOS entry point gets added back. SamOs accepts this divergence
-; per the user's directive to follow upstream verbatim.
+; SamOS divergences from the book:
+;   * rdi holds ONE pointer, to struct samos_boot_info, instead of
+;     four framebuffer values in rdi/rsi/rdx/rcx.
+;   * The stack is set first, to the top of the loader-reserved
+;     kernel window, and .bss is zeroed before anything uses it.
+;   * A minimal exception IDT is installed before the GDT swap, so a
+;     fault during early boot prints a register dump on COM1
+;     (early_fault.c) instead of triple-faulting into a reset.
 
 [BITS 64]
+
+%define SAMOS_BOOT_STACK_TOP 0x200000     ; = SAMOS_KERNEL_WINDOW_END in config.h
 
 global _start
 global kernel_registers
 global div_test
 global gdt
-global default_graphics_info     ; L87 - root surface struct in bss
+global default_graphics_info     ; L87 - root surface struct
+global samos_boot_info_ptr
 extern kernel_main
+extern early_fault
+extern _kernel_bss_start
+extern _kernel_bss_end
 
 CODE_SEG           equ 0x08
 DATA_SEG           equ 0x10
 LONG_MODE_CODE_SEG equ 0x18
 LONG_MODE_DATA_SEG equ 0x20
 
+section .text
+
 _start:
     cli
+    cld
+    mov r12, rdi                       ; boot_info, survives the calls below
+    mov rsp, SAMOS_BOOT_STACK_TOP
+    xor rbp, rbp
+
+    ; Zero .bss. The loader already zeroed the window, but the kernel
+    ; must not depend on that.
+    mov rdi, _kernel_bss_start
+    mov rcx, _kernel_bss_end
+    sub rcx, rdi
+    xor eax, eax
+    rep stosb
+
+    mov [samos_boot_info_ptr], r12
+
+    ; Early IDT, gates pointing at the firmware's code selector
+    ; (still the live CS until the far return below).
+    xor edi, edi
+    mov di, cs
+    call early_idt_install
+
     jmp long_mode_entry
 
 ; Lecture 15: kernel_registers() - reload ds/es/fs/gs with the
@@ -50,16 +71,12 @@ kernel_registers:
     ret
 
 long_mode_entry:
-    ; Lecture 74 - install our own page tables. UEFI was using its
-    ; own page tables that mapped UEFI structures we don't care
-    ; about; ours covers the first GiB identity-mapped via
-    ; 2-MiB PS=1 leaves.
+    ; Lecture 74 - install our own page tables: the first GiB
+    ; identity-mapped via 2-MiB PS=1 leaves.
     mov rax, PML4_Table
     mov cr3, rax
 
-    ; Lecture 74 - install our own GDT. UEFI's GDT had different
-    ; selectors than what kernel.c expects (slot 3 = our long-mode
-    ; code seg).
+    ; Lecture 74 - install our own GDT.
     lgdt [gdt_descriptor]
 
     mov ax, LONG_MODE_DATA_SEG
@@ -69,42 +86,30 @@ long_mode_entry:
     mov gs, ax
     mov ss, ax
 
-    mov rsp, 0x00200000
-    mov rbp, rsp
-
-    ; Lecture 74 - far retfq to reload CS from our new GDT.
-    ; Just installing a new GDT doesn't change the live CS; UEFI's
-    ; original CS is still cached in the shadow register. A far
-    ; return is the simplest way to atomically swap CS to slot 3
-    ; (our long-mode code seg). Push the target SS slot
-    ; (LONG_MODE_CODE_SEG = 0x18) and target RIP, then retfq pops
-    ; both into CS:RIP.
-    push QWORD 0x18                         ; target CS = slot 3
+    ; Lecture 74 - far return to reload CS from our new GDT.
+    push QWORD LONG_MODE_CODE_SEG
     push QWORD long_mode_new_gdt_complete
     retfq
 
 long_mode_new_gdt_complete:
+    ; Re-point the early IDT gates at our own code selector.
+    mov edi, LONG_MODE_CODE_SEG
+    call early_idt_install
 
-    ; Lecture 87 - stash the framebuffer parameters UEFI passed in
-    ; rdi/edx/ecx/esi into the default_graphics_info struct. Done
-    ; HERE because long-mode jumps clobbered nothing and we are
-    ; still before kernel_main's C prologue. After this we never
-    ; need rdi/etc. again until kernel_main runs.
-    ;   rdi = framebuffer base                  -> +0  qword
-    ;   edx = horizontal resolution             -> +8  dword
-    ;   ecx = vertical resolution               -> +12 dword
-    ;   esi = pixels per scan line              -> +16 dword
-    mov [default_graphics_info + 0],  rdi
-    mov [default_graphics_info + 8],  edx
-    mov [default_graphics_info + 12], ecx
-    mov [default_graphics_info + 16], esi
+    ; Lecture 87 - copy the framebuffer parameters into the
+    ; default_graphics_info struct (layout below). They now come from
+    ; boot_info (see src/boot/boot_info.h for the offsets).
+    mov rax, [r12 + 16]                ; fb_base
+    mov [default_graphics_info + 0], rax
+    mov eax, [r12 + 32]                ; fb_width
+    mov [default_graphics_info + 8], eax
+    mov eax, [r12 + 36]                ; fb_height
+    mov [default_graphics_info + 12], eax
+    mov eax, [r12 + 40]                ; fb_pitch
+    mov [default_graphics_info + 16], eax
 
-    ; Lecture 61 - remap the 8259 PIC.
-    ; By default IRQ0..7 land at vectors 0x08..0x0F which collide
-    ; with CPU exceptions (#DF in particular). Move them to
-    ; 0x20..0x27 (master) and 0x28..0x2F (slave).
-
-    ; Master PIC ICW1..ICW4
+    ; Lecture 61 - remap the 8259 PIC: IRQ0..7 -> 0x20..0x27,
+    ; IRQ8..15 -> 0x28..0x2F, away from the CPU exception vectors.
     mov al, 0x11
     out 0x20, al
     mov al, 0x20
@@ -114,7 +119,6 @@ long_mode_new_gdt_complete:
     mov al, 0x01
     out 0x21, al
 
-    ; Slave PIC ICW1..ICW4
     mov al, 0x11
     out 0xA0, al
     mov al, 0x28
@@ -152,6 +156,86 @@ div_test:
     mov rax, 0
     idiv rax
     ret
+
+; ------------------------------------------------------------------
+; Early exception IDT
+; ------------------------------------------------------------------
+; early_idt_install(rdi = code selector): fill gates 0..31 and lidt.
+early_idt_install:
+    lea rsi, [early_idt]
+    lea rdx, [early_stub_table]
+    xor ecx, ecx
+.next_gate:
+    mov rax, [rdx + rcx * 8]           ; stub address
+    mov [rsi + 0], ax                  ; offset 15..0
+    mov [rsi + 2], di                  ; selector
+    mov byte [rsi + 4], 0              ; IST
+    mov byte [rsi + 5], 0x8E           ; present, DPL 0, 64-bit interrupt gate
+    shr rax, 16
+    mov [rsi + 6], ax                  ; offset 31..16
+    shr rax, 16
+    mov [rsi + 8], eax                 ; offset 63..32
+    mov dword [rsi + 12], 0
+    add rsi, 16
+    inc ecx
+    cmp ecx, 32
+    jb .next_gate
+    lidt [early_idtr]
+    ret
+
+; One stub per vector. Vectors with a CPU-pushed error code skip the
+; dummy push so every frame has the same layout.
+%macro EARLY_STUB 1
+early_stub_%1:
+%if %1 = 8 || %1 = 10 || %1 = 11 || %1 = 12 || %1 = 13 || %1 = 14 || %1 = 17 || %1 = 21 || %1 = 29 || %1 = 30
+%else
+    push qword 0
+%endif
+    push qword %1
+    jmp early_fault_common
+%endmacro
+
+%assign v 0
+%rep 32
+EARLY_STUB v
+%assign v v + 1
+%endrep
+
+early_fault_common:
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+    mov rdi, rsp                       ; struct early_fault_frame*
+    and rsp, -16
+    call early_fault                   ; never returns
+.hang:
+    cli
+    hlt
+    jmp .hang
+
+align 8
+early_stub_table:
+%assign v 0
+%rep 32
+    dq early_stub_ %+ v
+%assign v v + 1
+%endrep
+
+early_idtr:
+    dw 32 * 16 - 1
+    dq early_idt
 
 ; ------------------------------------------------------------------
 ; Global descriptor table (GDT)
@@ -217,11 +301,7 @@ gdt_end:
 
 gdt_descriptor:
     dw gdt_end - gdt - 1            ; Limit
-    ; Lecture 74 - base widened to 8 bytes. In long mode the GDTR
-    ; layout is { uint16 limit; uint64 base }. Using `dd` (4 bytes)
-    ; left half of the base zero on real hardware where the GDT
-    ; lives above 4 GiB.
-    dq gdt
+    dq gdt                          ; L74 - 8-byte base in long mode
 
 ; ------------------------------------------------------------------
 ; 4-level page-table skeleton: PML4 -> PDPT -> PD with 2-MiB pages.
@@ -246,15 +326,13 @@ PD_Table:
     %endrep
 
 
-; Lecture 87 - root graphics_info instance. Stored here so the
-; long-mode entry can fill the framebuffer fields straight from
-; the UEFI handoff registers before any C code runs. The layout
-; below MUST mirror struct graphics_info in src/graphics/graphics.h.
+; Lecture 87 - root graphics_info instance. The layout below MUST
+; mirror struct graphics_info in src/graphics/graphics.h.
 ;
-; offset 0   qword framebuffer pointer        (rdi from UEFI)
-; offset 8   dword horizontal_resolution      (edx from UEFI)
-; offset 12  dword vertical_resolution        (ecx from UEFI)
-; offset 16  dword pixels_per_scanline        (esi from UEFI)
+; offset 0   qword framebuffer pointer
+; offset 8   dword horizontal_resolution
+; offset 12  dword vertical_resolution
+; offset 16  dword pixels_per_scanline
 ; offset 20  dword <padding to align pixels>
 ; offset 24  qword pixels back buffer pointer
 ; offset 32  dword width
@@ -293,3 +371,10 @@ default_graphics_info:
     dd 0    ; +84  transparency_key
     dq 0    ; +88  mouse_click
     dq 0    ; +96  mouse_move
+
+section .bss
+align 16
+early_idt:
+    resb 32 * 16
+samos_boot_info_ptr:
+    resq 1

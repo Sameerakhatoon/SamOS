@@ -42,6 +42,7 @@
 #include "graphics/window.h"      // L122 - window_system_initialize
 #include "mouse/mouse.h"          // L150 - mouse_system_init / load_static_drivers
 #include "io/serial.h"            // COM1 console
+#include "boot/boot_info.h"       // Loader handoff block
 
 // L87 - bss-resident default_graphics_info lives in kernel.asm;
 // the long-mode entry stashes the UEFI framebuffer params into it
@@ -130,6 +131,23 @@ struct paging_desc* kernel_desc(){
     return kernel_paging_desc;
 }
 
+// Set by kernel.asm from the loader's rdi.
+extern struct samos_boot_info* samos_boot_info_ptr;
+
+static int cmdline_has(const char* word)
+{
+    const char* s = samos_boot_info_ptr->cmdline;
+    size_t n = strlen(word);
+    for (; *s; s++)
+    {
+        if (strncmp(s, word, n) == 0 && (s[n] == ' ' || s[n] == 0))
+        {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void kernel_main(void)
 {
     // Lecture 100 - terminal_initialize() (VGA-text grid setup)
@@ -138,6 +156,24 @@ void kernel_main(void)
     struct graphics_info* screen_info = NULL;
     serial_init();
     serial_write("SamOS: kernel_main\n");
+
+    // Refuse a loader that does not speak this boot_info.
+    if (samos_boot_info_ptr->magic != SAMOS_BOOT_INFO_MAGIC ||
+        samos_boot_info_ptr->version != SAMOS_BOOT_INFO_VERSION)
+    {
+        panic("boot_info magic/version mismatch: rebuild SamOs.efi\n");
+    }
+    serial_write("boot_info: cmdline \"");
+    serial_write(samos_boot_info_ptr->cmdline);
+    serial_write("\"\n");
+
+    // e2e hook: fault before idt_init so the early IDT has
+    // to catch it and dump registers on COM1.
+    if (cmdline_has("samos.early_fault_test"))
+    {
+        __asm__ volatile("ud2");
+    }
+
     boot_marker_set(BM_STAGE_KERNEL_MAIN, 0);
     print("Hello 64-bit!\n");
 

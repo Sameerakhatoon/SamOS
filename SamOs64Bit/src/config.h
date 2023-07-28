@@ -7,6 +7,23 @@
 // same address either way.
 #define SAMOS_KERNEL_LOCATION   0x100000
 
+// The loader reserves [SAMOS_KERNEL_LOCATION,
+// SAMOS_KERNEL_WINDOW_END) for the kernel image, its .bss and the
+// boot stack, which grows down from the window end. linker.ld
+// checks that .bss stays below the stack.
+#define SAMOS_KERNEL_WINDOW_END     0x200000
+#define SAMOS_BOOT_STACK_TOP        SAMOS_KERNEL_WINDOW_END
+#define SAMOS_BOOT_STACK_SIZE       0x10000
+#define SAMOS_KERNEL_MAX_IMAGE_SIZE (SAMOS_KERNEL_WINDOW_END - SAMOS_KERNEL_LOCATION - SAMOS_BOOT_STACK_SIZE)
+
+// Boot data area, also reserved by the loader: struct
+// samos_boot_info (boot/boot_info.h) in the first page, then the
+// memory map at SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION.
+#define SAMOS_BOOT_DATA_LOCATION    0x20F000
+#define SAMOS_BOOT_DATA_PAGES       5
+#define SAMOS_BOOT_INFO_LOCATION    SAMOS_BOOT_DATA_LOCATION
+#define SAMOS_MEMORY_MAP_MAX_ENTRIES 512
+
 #define KERNEL_CODE_SELECTOR    0x08
 #define KERNEL_DATA_SELECTOR    0x10
 

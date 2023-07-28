@@ -11,6 +11,7 @@
 #include "memory/heap/heap.h"
 #include "memory/memory.h"
 #include "kernel.h"     // L43 - for panic()
+#include "boot/boot_info.h"
 #include "status.h"
 
 static struct paging_desc* current_paging_desc = 0;
@@ -346,7 +347,9 @@ int paging_map_e820_memory_regions(struct paging_desc* desc)
     for (size_t i = 0; i < total_entries; i++)
     {
         struct e820_entry* entry = e820_entry(i);
-        if (entry->type != 1)
+        // The loader reports the kernel window and boot data
+        // area as their own type; they must stay mapped.
+        if (entry->type != SAMOS_E820_TYPE_USABLE && entry->type != SAMOS_E820_TYPE_KERNEL)
         {
             continue;
         }
