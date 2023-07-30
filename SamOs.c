@@ -408,25 +408,27 @@ UefiMain(IN EFI_HANDLE       ImageHandle,
         return Status;
     }
 
-    // 4. Final memory map + ExitBootServices. The map buffer gets
-    //    headroom because allocating it can split a descriptor.
+    // 4. Final memory map + ExitBootServices. Size the buffer once,
+    //    with headroom because allocating it can split a descriptor:
+    //    after a failed ExitBootServices only GetMemoryMap may be
+    //    called again, so the loop below must not allocate.
     UINTN  MapSize = 0, MapKey = 0, DescriptorSize = 0, MapCapacity = 0;
     UINT32 DescriptorVersion = 0;
     EFI_MEMORY_DESCRIPTOR* Map = NULL;
+    Status = gBS->GetMemoryMap(&MapSize, NULL, &MapKey, &DescriptorSize, &DescriptorVersion);
+    if (Status != EFI_BUFFER_TOO_SMALL) {
+        Print(L"Error sizing the memory map: %r\n", Status);
+        return EFI_ERROR(Status) ? Status : EFI_DEVICE_ERROR;
+    }
+    MapCapacity = MapSize + 64 * DescriptorSize;
+    Map = AllocatePool(MapCapacity);
+    if (Map == NULL) {
+        Print(L"Error allocating the memory map buffer\n");
+        return EFI_OUT_OF_RESOURCES;
+    }
     for (UINTN Attempt = 0; Attempt < 8; Attempt++) {
         MapSize = MapCapacity;
         Status = gBS->GetMemoryMap(&MapSize, Map, &MapKey, &DescriptorSize, &DescriptorVersion);
-        if (Status == EFI_BUFFER_TOO_SMALL) {
-            if (Map != NULL) {
-                FreePool(Map);
-            }
-            MapCapacity = MapSize + 16 * DescriptorSize;
-            Map = AllocatePool(MapCapacity);
-            if (Map == NULL) {
-                return EFI_OUT_OF_RESOURCES;   // can't Print safely once EBS was tried
-            }
-            continue;
-        }
         if (EFI_ERROR(Status)) {
             return Status;
         }
