@@ -52,6 +52,7 @@
   gEfiLoadedImageProtocolGuid
   gEfiAcpiSdtProtocolGuid
   gEfiPciRootBridgeIoProtocolGuid
+  gEfiGraphicsOutputProtocolGuid
 
 # L73 - GUIDs for FileInfo + ACPI tables.
 [Guids]
