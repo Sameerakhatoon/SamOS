@@ -31,6 +31,12 @@
 #include "disk/disk.h"
 #include "disk/streamer.h"
 #include "disk/gpt.h"
+#include "graphics/graphics.h"   // L87 - root surface struct + API
+
+// L87 - bss-resident default_graphics_info lives in kernel.asm;
+// the long-mode entry stashes the UEFI framebuffer params into it
+// before any C code runs. kernel_main only needs the address.
+extern struct graphics_info default_graphics_info;
 #include "gdt/gdt.h"
 #include "config.h"
 #include "status.h"
@@ -221,6 +227,21 @@ void kernel_main(void)
     // panics if no descriptor is loaded).
     kheap_post_paging();
     print("multiheap ready\n");
+
+    // Lecture 87 - bring up the graphics subsystem. The struct
+    // was filled in by long-mode entry from the UEFI handoff
+    // regs. Paint a red 100x100 square in the top-left as a
+    // visible "graphics works" beacon, then commit it to the
+    // physical framebuffer via redraw_all.
+    graphics_setup(&default_graphics_info);
+    struct framebuffer_pixel red = {0};
+    red.red = 0xff;
+    for(int x = 0; x < 100; x++){
+        for(int y = 0; y < 100; y++){
+            graphics_draw_pixel(graphics_screen_info(), x, y, red);
+        }
+    }
+    graphics_redraw_all();
 
     // Lecture 50 - bring up IDT, then build a TSS so future
     // ring-3 traps have a kernel-side stack to land on. The

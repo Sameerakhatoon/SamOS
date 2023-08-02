@@ -27,6 +27,7 @@ global _start
 global kernel_registers
 global div_test
 global gdt
+global default_graphics_info     ; L87 - root surface struct in bss
 extern kernel_main
 
 CODE_SEG           equ 0x08
@@ -83,6 +84,20 @@ long_mode_entry:
     retfq
 
 long_mode_new_gdt_complete:
+
+    ; Lecture 87 - stash the framebuffer parameters UEFI passed in
+    ; rdi/edx/ecx/esi into the default_graphics_info struct. Done
+    ; HERE because long-mode jumps clobbered nothing and we are
+    ; still before kernel_main's C prologue. After this we never
+    ; need rdi/etc. again until kernel_main runs.
+    ;   rdi = framebuffer base                  -> +0  qword
+    ;   edx = horizontal resolution             -> +8  dword
+    ;   ecx = vertical resolution               -> +12 dword
+    ;   esi = pixels per scan line              -> +16 dword
+    mov [default_graphics_info + 0],  rdi
+    mov [default_graphics_info + 8],  edx
+    mov [default_graphics_info + 12], ecx
+    mov [default_graphics_info + 16], esi
 
     ; Lecture 61 - remap the 8259 PIC.
     ; By default IRQ0..7 land at vectors 0x08..0x0F which collide
@@ -222,3 +237,52 @@ PD_Table:
         dq addr + 0x83              ; Present | RW | PS=1
         %assign addr addr + 0x200000
     %endrep
+
+
+; Lecture 87 - root graphics_info instance. Stored here so the
+; long-mode entry can fill the framebuffer fields straight from
+; the UEFI handoff registers before any C code runs. The layout
+; below MUST mirror struct graphics_info in src/graphics/graphics.h.
+;
+; offset 0   qword framebuffer pointer        (rdi from UEFI)
+; offset 8   dword horizontal_resolution      (edx from UEFI)
+; offset 12  dword vertical_resolution        (ecx from UEFI)
+; offset 16  dword pixels_per_scanline        (esi from UEFI)
+; offset 20  dword <padding to align pixels>
+; offset 24  qword pixels back buffer pointer
+; offset 32  dword width
+; offset 36  dword height
+; offset 40  dword starting_x
+; offset 44  dword starting_y
+; offset 48  dword relative_x
+; offset 52  dword relative_y
+; offset 56  qword parent
+; offset 64  qword children
+; offset 72  dword flags
+; offset 76  dword z_index
+; offset 80  dword ignore_color
+; offset 84  dword transparency_key
+; offset 88  qword mouse_click handler
+; offset 96  qword mouse_move  handler
+align 8
+default_graphics_info:
+    dq 0    ; +0   framebuffer
+    dd 0    ; +8   horizontal_resolution
+    dd 0    ; +12  vertical_resolution
+    dd 0    ; +16  pixels_per_scanline
+    dd 0    ; +20  padding
+    dq 0    ; +24  pixels
+    dd 0    ; +32  width
+    dd 0    ; +36  height
+    dd 0    ; +40  starting_x
+    dd 0    ; +44  starting_y
+    dd 0    ; +48  relative_x
+    dd 0    ; +52  relative_y
+    dq 0    ; +56  parent
+    dq 0    ; +64  children
+    dd 0    ; +72  flags
+    dd 0    ; +76  z_index
+    dd 0    ; +80  ignore_color
+    dd 0    ; +84  transparency_key
+    dq 0    ; +88  mouse_click
+    dq 0    ; +96  mouse_move
