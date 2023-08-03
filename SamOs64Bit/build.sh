@@ -8,7 +8,7 @@ export PREFIX="$HOME/opt/cross"
 export TARGET=x86_64-elf
 export PATH="$PREFIX/bin:$PATH"
 
-mkdir -p bin build build/string build/memory build/memory/heap build/memory/paging build/io build/idt build/task build/fs build/fs/fat build/disk build/gdt build/keyboard build/isr80h build/loader build/loader/formats build/lib build/lib/vector build/graphics
+mkdir -p bin build build/string build/memory build/memory/heap build/memory/paging build/io build/idt build/task build/fs build/fs/fat build/disk build/gdt build/keyboard build/isr80h build/loader build/loader/formats build/lib build/lib/vector build/graphics build/graphics/image
 
 # Force a full recompile every time. Our Makefile has no header
 # dependencies, so any header edit (struct layout, prototype change)
