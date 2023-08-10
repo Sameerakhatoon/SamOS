@@ -5,6 +5,7 @@
 // UEFI register payload directly into it.
 
 #include "graphics.h"
+#include "graphics/image/image.h"
 #include "kernel.h"
 #include "memory/paging/paging.h"
 #include "memory/heap/kheap.h"
@@ -184,5 +185,6 @@ void graphics_setup(struct graphics_info* main_graphics_info){
     graphics_info_vector = vector_new(sizeof(struct graphics_info*), 4, 0);
     vector_push(graphics_info_vector, &main_graphics_info);
 
-    // TODO L88: load image formats.
+    // Lecture 88 part 2 - registry init now that the screen is up.
+    graphics_image_formats_init();
 }
