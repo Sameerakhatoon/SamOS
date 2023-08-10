@@ -32,6 +32,7 @@
 #include "disk/streamer.h"
 #include "disk/gpt.h"
 #include "graphics/graphics.h"   // L87 - root surface struct + API
+#include "graphics/image/image.h" // L90 - graphics_image_load
 
 // L87 - bss-resident default_graphics_info lives in kernel.asm;
 // the long-mode entry stashes the UEFI framebuffer params into it
@@ -230,18 +231,9 @@ void kernel_main(void)
 
     // Lecture 87 - bring up the graphics subsystem. The struct
     // was filled in by long-mode entry from the UEFI handoff
-    // regs. Paint a red 100x100 square in the top-left as a
-    // visible "graphics works" beacon, then commit it to the
-    // physical framebuffer via redraw_all.
+    // regs. Lecture 90 replaces the red-square smoke test with a
+    // real BMP draw once disks are up; see further below.
     graphics_setup(&default_graphics_info);
-    struct framebuffer_pixel red = {0};
-    red.red = 0xff;
-    for(int x = 0; x < 100; x++){
-        for(int y = 0; y < 100; y++){
-            graphics_draw_pixel(graphics_screen_info(), x, y, red);
-        }
-    }
-    graphics_redraw_all();
 
     // Lecture 50 - bring up IDT, then build a TSS so future
     // ring-3 traps have a kernel-side stack to land on. The
@@ -342,6 +334,17 @@ void kernel_main(void)
     // script will let us flip to BLANK.ELF without timing out.
     // Lecture 81 - "@" resolves to the primary filesystem disk
     // through pparser_get_drive_by_path. Drops the literal "0:".
+    // Lecture 90 - drop the background BMP onto the screen
+    // surface before the user task takes over. The image lives
+    // on the primary FS; @ resolves to the L81 primary disk.
+    // Errors are intentionally swallowed: a missing/bad
+    // bkground.bmp must not block boot.
+    struct image* bg = graphics_image_load("@:/bkground.bmp");
+    if(bg){
+        graphics_draw_image(NULL, bg, 0, 0);
+        graphics_redraw_all();
+    }
+
     int res = process_load_switch("@:/SIMPLE.BIN", &p);
     if(res != SAMOS_ALL_OK){
         panic("Failed to load user program\n");
