@@ -33,4 +33,13 @@ void kernel_registers();
 struct paging_desc;
 struct paging_desc* kernel_desc();
 
+// Lecture 93 - cheap MIN/MAX used by graphics_redraw_region's
+// intersection math. Header-only; expand the args twice.
+#ifndef MIN
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
+#ifndef MAX
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#endif
+
 #endif
