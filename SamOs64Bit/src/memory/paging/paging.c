@@ -48,9 +48,9 @@ struct paging_pml_entries* paging_pml4_entries_new(void)
 static void paging_desc_entry_free(struct paging_desc_entry* table_entry,
                                    paging_map_level_t level)
 {
-    if(paging_null_entry(table_entry)){
-        return;
-    }
+    // The book returned early here when the table's FIRST
+    // entry was null, leaking any table whose slot 0 is unused (a PD
+    // for 0x400000 uses slot 2). Callers already skip null entries.
     if(level == 0){
         panic("paging_desc_entry_free: level must be at least 1\n");
     }
@@ -210,6 +210,11 @@ struct paging_desc* paging_desc_new(paging_map_level_t root_map_level)
         return NULL;
     }
     desc->pml   = paging_pml4_entries_new();
+    if (!desc->pml)
+    {
+        kfree(desc);
+        return NULL;
+    }
     desc->level = root_map_level;
     return desc;
 }
@@ -262,6 +267,10 @@ int paging_map(struct paging_desc* desc, void* virt, void* phys, int flags)
     {
         void* new_pdpt = kzalloc(
             sizeof(struct paging_desc_entry) * PAGING_TOTAL_ENTRIES_PER_TABLE);
+        if (!new_pdpt)
+        {
+            return -ENOMEM;   // The book mapped page 0 here
+        }
         pml4_entry->address        = ((uintptr_t)new_pdpt) >> 12;
         pml4_entry->present        = 1;
         pml4_entry->read_write     = 1;
@@ -275,6 +284,10 @@ int paging_map(struct paging_desc* desc, void* virt, void* phys, int flags)
     {
         void* new_pd = kzalloc(
             sizeof(struct paging_desc_entry) * PAGING_TOTAL_ENTRIES_PER_TABLE);
+        if (!new_pd)
+        {
+            return -ENOMEM;   // The book mapped page 0 here
+        }
         pdpt_entry->address        = ((uintptr_t)new_pd) >> 12;
         pdpt_entry->present        = 1;
         pdpt_entry->read_write     = 1;
@@ -288,6 +301,10 @@ int paging_map(struct paging_desc* desc, void* virt, void* phys, int flags)
     {
         void* new_pt = kzalloc(
             sizeof(struct paging_desc_entry) * PAGING_TOTAL_ENTRIES_PER_TABLE);
+        if (!new_pt)
+        {
+            return -ENOMEM;   // The book mapped page 0 here
+        }
         pd_entry->address        = ((uintptr_t)new_pt) >> 12;
         pd_entry->present        = 1;
         pd_entry->read_write     = 1;
@@ -340,8 +357,12 @@ int paging_map_e820_memory_regions(struct paging_desc* desc)
     // triggers a #DF because the CPU can't fetch tss.rsp0.
     // This is exactly the same workaround the 32-bit PeachOS
     // used; we make it explicit.
-    paging_map_to(desc, (void*)0x00, (void*)0x00, (void*)0x100000,
-                  PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
+    int res = paging_map_to(desc, (void*)0x00, (void*)0x00, (void*)0x100000,
+                            PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
+    if (res < 0)
+    {
+        return res;
+    }
 
     size_t total_entries = e820_total_entries();
     for (size_t i = 0; i < total_entries; i++)
@@ -366,8 +387,12 @@ int paging_map_e820_memory_regions(struct paging_desc* desc)
             end_addr = paging_align_to_lower_page(end_addr);
         }
 
-        paging_map_to(desc, base_addr, base_addr, end_addr,
-                      PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
+        res = paging_map_to(desc, base_addr, base_addr, end_addr,
+                            PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
+        if (res < 0)
+        {
+            return res;
+        }
     }
     return 0;
 }

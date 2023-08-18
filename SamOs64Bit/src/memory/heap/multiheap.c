@@ -4,6 +4,7 @@
 #include "kernel.h"
 #include "memory/paging/paging.h"
 #include "status.h"
+#include "memory/memory.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -69,8 +70,13 @@ struct multiheap_single_heap* multiheap_get_heap_for_address(struct multiheap* m
 // one. The defragmenter exposes contiguous-looking allocations
 // at addresses ABOVE max_end_data_addr by remapping the page
 // tables. Anything in that range needs special handling on free.
+//
+// Before multiheap_ready, max_end_data_addr is 0, so the book
+// called EVERY pointer virtual and then dereferenced the (still
+// NULL) shadow heap. Harmless while kfree was a no-op; fatal once it
+// is real. No pointer is virtual until the arena exists.
 bool multiheap_is_address_virtual(struct multiheap* mh, void* ptr){
-    return ptr >= mh->max_end_data_addr;
+    return multiheap_is_ready(mh) && ptr >= mh->max_end_data_addr;
 }
 
 // Lecture 30 - ready / can_add_heap predicates. Once
@@ -99,7 +105,7 @@ void* multiheap_virtual_address_to_physical(struct multiheap* mh, void* ptr){
 struct multiheap_single_heap* multiheap_get_paging_heap_for_address(struct multiheap* mh, void* address){
     struct multiheap_single_heap* cur = mh->first_multiheap;
     while(cur){
-        if(!multiheap_heap_allows_paging(cur)){
+        if(!multiheap_heap_allows_paging(cur) || !cur->paging_heap){
             cur = cur->next;
             continue;
         }
@@ -138,21 +144,42 @@ void multiheap_get_heap_and_paging_heap_for_address(struct multiheap* mh,
 // reallocating a defragment-by-paging allocation would need
 // to remap the virtual range AND keep underlying physical
 // blocks in sync, which has not been implemented.
+//
+// A virtual-arena pointer is reallocated by allocate, copy,
+// free instead of panicking, and a pointer no heap owns returns
+// NULL (the book silently allocated a fresh block and leaked the
+// caller's view of the old one).
 void* multiheap_realloc(struct multiheap* mh, void* old_ptr, size_t new_size){
+    if(!old_ptr){
+        return multiheap_alloc(mh, new_size);
+    }
     struct multiheap_single_heap* paging_heap = NULL;
     struct multiheap_single_heap* phys_heap   = NULL;
     void* real_phys_addr = NULL;
     multiheap_get_heap_and_paging_heap_for_address(mh, old_ptr, &phys_heap, &paging_heap, &real_phys_addr);
 
     if(paging_heap){
-        panic("multiheap_realloc: virtual-arena realloc not implemented\n");
+        size_t old_size = heap_allocation_block_count(paging_heap->paging_heap, old_ptr) * SAMOS_HEAP_BLOCK_SIZE;
+        if(old_size == 0){
+            return NULL;
+        }
+        if(new_size == 0){
+            multiheap_free(mh, old_ptr);
+            return NULL;
+        }
+        void* new_ptr = multiheap_palloc(mh, new_size);
+        if(!new_ptr){
+            return NULL;
+        }
+        memcpy(new_ptr, old_ptr, (int)(old_size < new_size ? old_size : new_size));
+        multiheap_free(mh, old_ptr);
+        return new_ptr;
     }
 
-    struct multiheap_single_heap* heap_to_use = phys_heap;
-    if(!heap_to_use){
-        return multiheap_alloc(mh, new_size);
+    if(!phys_heap){
+        return NULL;
     }
-    return heap_realloc(heap_to_use->heap, old_ptr, new_size);
+    return heap_realloc(phys_heap->heap, old_ptr, new_size);
 }
 
 // Lecture 28 - block count of the allocation that `ptr` heads.
@@ -221,18 +248,37 @@ int multiheap_add_existing_heap(struct multiheap* mh, struct heap* heap, int fla
 int multiheap_add(struct multiheap* mh, void* saddr, void* eaddr, int flags){
     // L20 - dynamically build a new heap header + table for an
     // E820 region. Both live inside the starting heap.
+    // The book returned -ENOMEM without freeing whichever of
+    // the two allocations succeeded, never allocated the entries
+    // array the table points at, and leaked both if adding the
+    // node failed.
     struct heap*       heap  = heap_zalloc(mh->starting_heap, sizeof(struct heap));
     struct heap_table* table = heap_zalloc(mh->starting_heap, sizeof(struct heap_table));
+    size_t total = (size_t)((uintptr_t)eaddr - (uintptr_t)saddr) / SAMOS_HEAP_BLOCK_SIZE;
+    int res = -ENOMEM;
     if(!heap || !table){
-        return -ENOMEM;
+        goto fail;
     }
-    int res = heap_create(heap, saddr, eaddr, table);
+    table->total   = total;
+    table->entries = heap_zalloc(mh->starting_heap, total * sizeof(HEAP_BLOCK_TABLE_ENTRY));
+    if(!table->entries){
+        goto fail;
+    }
+    res = heap_create(heap, saddr, eaddr, table);
     if(res < 0){
-        heap_free(mh->starting_heap, heap);
-        heap_free(mh->starting_heap, table);
-        return res;
+        goto fail;
     }
-    return multiheap_add_heap(mh, heap, flags);
+    res = multiheap_add_heap(mh, heap, flags);
+    if(res < 0){
+        goto fail;
+    }
+    return 0;
+
+fail:
+    if(table && table->entries) heap_free(mh->starting_heap, table->entries);
+    if(table) heap_free(mh->starting_heap, table);
+    if(heap)  heap_free(mh->starting_heap, heap);
+    return res;
 }
 
 // Lecture 29 - was the all-heaps teardown; renamed to
@@ -270,17 +316,24 @@ void multiheap_free_heap(struct multiheap* mh){
 // implementation anyway. The path is wired here so L30 and
 // later can finish the picture without further plumbing in
 // multiheap.c.
-void multiheap_free(struct multiheap* mh, void* ptr){
+//
+// Fixes: the per-block address was `ptr + i * BLOCK` with `i`
+// the ABSOLUTE block index in the shadow heap, so every block after
+// the first was looked up far past the allocation. It is now the
+// offset from the first block. The result is -EINVARG (and nothing
+// changes) for a pointer that is not the start of a live allocation.
+int multiheap_free(struct multiheap* mh, void* ptr){
     struct multiheap_single_heap* paging_heap   = NULL;
     struct multiheap_single_heap* phys_heap     = NULL;
     void* real_phys_addr = NULL;
     multiheap_get_heap_and_paging_heap_for_address(mh, ptr, &phys_heap, &paging_heap, &real_phys_addr);
 
     if(paging_heap){
-        size_t total_blocks   = heap_allocation_block_count(paging_heap->paging_heap, ptr);
-        size_t starting_block = (size_t)heap_address_to_block(paging_heap->paging_heap, ptr);
-        size_t ending_block   = starting_block + total_blocks;
-        for(size_t i = starting_block; i < ending_block; i++){
+        size_t total_blocks = heap_allocation_block_count(paging_heap->paging_heap, ptr);
+        if(total_blocks == 0){
+            return -EINVARG;
+        }
+        for(size_t i = 0; i < total_blocks; i++){
             void* vaddr_for_block = (void*)((uintptr_t)ptr + (i * SAMOS_HEAP_BLOCK_SIZE));
             void* data_phys_addr  = paging_get_physical_address(paging_current_descriptor(),
                                                                  vaddr_for_block);
@@ -293,10 +346,12 @@ void multiheap_free(struct multiheap* mh, void* ptr){
         // Now release the virtual-arena range. The shadow heap's
         // free callback (multiheap_paging_heap_free_block) fires
         // per block and unmaps each PT entry.
-        heap_free(paging_heap->paging_heap, ptr);
-    } else if(phys_heap){
-        heap_free(phys_heap->heap, real_phys_addr);
+        return heap_free(paging_heap->paging_heap, ptr);
     }
+    if(phys_heap){
+        return heap_free(phys_heap->heap, real_phys_addr);
+    }
+    return -EINVARG;
 }
 
 static void* multiheap_alloc_first_pass(struct multiheap* mh, size_t size){
@@ -371,16 +426,25 @@ static void* multiheap_alloc_second_pass(struct multiheap* mh, size_t size){
         return NULL;
     }
 
+    // A physical block or a page table can run out part way
+    // (page tables come from the same physical memory). The book
+    // panicked on the first and ignored the second; both now unwind
+    // the blocks mapped so far and return NULL.
     void* vcur = vstart;
     for(size_t i = 0; i < total_blocks; i++){
         void* phys = heap_zalloc(chosen->heap, SAMOS_HEAP_BLOCK_SIZE);
-        if(!phys){
-            // Paging heap said yes, physical said no - the two
-            // bookkeeping pictures got out of sync. Hard bug.
-            panic("multiheap second pass: paging heap promised more blocks than physical has\n");
+        if(!phys || paging_map(desc, vcur, phys, PAGING_IS_WRITEABLE | PAGING_IS_PRESENT) < 0){
+            if(phys){
+                heap_free(chosen->heap, phys);
+            }
+            for(size_t j = 0; j < i; j++){
+                void* v = (char*)vstart + j * SAMOS_HEAP_BLOCK_SIZE;
+                heap_free(chosen->heap, paging_get_physical_address(desc, v));
+            }
+            // Releases the shadow range; its free callback unmaps.
+            heap_free(chosen->paging_heap, vstart);
+            return NULL;
         }
-        paging_map(desc, vcur, phys,
-                   PAGING_IS_WRITEABLE | PAGING_IS_PRESENT);
         vcur = (char*)vcur + SAMOS_HEAP_BLOCK_SIZE;
     }
     return vstart;
@@ -431,22 +495,34 @@ int multiheap_ready(struct multiheap* mh){
 
             // Shadow bitmap + heap header come out of the
             // starting heap (the multiheap bootstrap arena).
+            // Every allocation and heap_create result is
+            // checked. This runs once at boot, so failure panics.
             struct heap_table* sht = heap_zalloc(mh->starting_heap, sizeof(struct heap_table));
+            if(!sht){
+                panic("multiheap_ready: out of memory for shadow table\n");
+            }
             sht->entries = heap_zalloc(mh->starting_heap,
                                        cur->heap->table->total * sizeof(HEAP_BLOCK_TABLE_ENTRY));
+            if(!sht->entries){
+                panic("multiheap_ready: out of memory for shadow entries\n");
+            }
             sht->total   = cur->heap->table->total;
 
             // SamOs deviation: upstream calls a nonexistent
             // heap_kalloc here. Use heap_zalloc - same effect
             // (we want a zeroed struct heap anyway).
             struct heap* shadow = heap_zalloc(mh->starting_heap, sizeof(struct heap));
-            heap_create(shadow, vstart, vend, sht);
+            if(!shadow || heap_create(shadow, vstart, vend, sht) < 0){
+                panic("multiheap_ready: cannot create shadow heap\n");
+            }
 
             // Reserve the virtual range in the page tables but
             // mark not-present (flags=0). First access to a
             // shadow page faults; the alloc callback (later
             // lecture) will turn it on.
-            paging_map_to(paging_desc, vstart, vstart, vend, 0);
+            if(paging_map_to(paging_desc, vstart, vstart, vend, 0) < 0){
+                panic("multiheap_ready: cannot map the virtual arena\n");
+            }
 
             // Only the free side is hooked at L27 - it unmaps
             // the page on free.

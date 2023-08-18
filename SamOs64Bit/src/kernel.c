@@ -18,6 +18,7 @@
 #include "idt/idt.h"
 #include "memory/heap/kheap.h"
 #include "memory/heap/heap.h"
+#include "memory/heap/memtest.h"
 #include "memory/memory.h"
 #include "memory/paging/paging.h"
 #include "string/string.h"
@@ -193,13 +194,21 @@ void kernel_main(void)
     // follows: the early probes did their job in their lectures
     // and now multi-heap setup is the only thing happening before
     // the wait loop.
+    // kheap_init now builds the page-frame allocator from the
+    // memory map first; the E820 entries stay readable afterwards
+    // because the PFA reserves them.
     kheap_init();
     char* data = kmalloc(50);
+    if (!data)
+    {
+        panic("kmalloc failed right after kheap_init\n");
+    }
     data[0] = 'A';
     data[1] = 'B';
     data[2] = 'C';
     data[3] = 0x00;
     print(data);
+    kfree(data);
 
     // Lecture 21 - build a kernel paging descriptor and identity-map
     // every E820 usable region into it.
@@ -395,6 +404,9 @@ void kernel_main(void)
     // its dedicated marker slot; host-side tests in
     // tests64/e2e/feature-*.sh dump the markers and assert.
     kernel_selftest();
+
+    // Memory-manager self-tests (leak, stress, PFA, slabs).
+    memtest_run();
 
     // SamOs e2e (Phase 2): if a user-side selftest ELF is on the
     // primary FS, load it as the first task and drop into ring 3

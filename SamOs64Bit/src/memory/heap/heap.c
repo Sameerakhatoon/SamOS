@@ -55,9 +55,11 @@ int heap_create(struct heap* heap, void* ptr, void* end, struct heap_table* tabl
     heap->table = table;
 
     // Lecture 30 - block accounting. Fresh heap is fully free.
-    heap->total_blocks = table->total;
-    heap->free_blocks  = table->total;
-    heap->used_blocks  = 0;
+    heap->total_blocks    = table->total;
+    heap->free_blocks     = table->total;
+    heap->used_blocks     = 0;
+    heap->reserved_blocks = 0;
+    heap->search_hint     = 0;
 
     res = heap_validate_table(ptr, end, table);
     if(res < 0){
@@ -95,11 +97,14 @@ static int heap_get_entry_type(HEAP_BLOCK_TABLE_ENTRY entry){
     return entry & 0x0F;
 }
 
-// Lecture 25 - inclusive range check. eaddr is the END boundary
-// recorded by heap_create (one past the last byte), so `ptr ==
-// eaddr` is a sentinel and treated as belonging to this heap.
+// Lecture 25 - range check. eaddr is the END boundary recorded by
+// heap_create (one past the last byte).
+//
+// The book treats `ptr == eaddr` as inside, but that address
+// is the first byte of whatever follows the heap - for two adjacent
+// sub-heaps it belongs to the next one. Half-open range instead.
 bool heap_is_address_within_heap(struct heap* heap, void* ptr){
-    return ptr >= heap->saddr && ptr <= heap->eaddr;
+    return ptr >= heap->saddr && ptr < heap->eaddr;
 }
 
 // Lecture 26 - install per-block callbacks on a heap. Either
@@ -125,12 +130,18 @@ void heap_callbacks_set(struct heap* heap,
 //      heap_free would stop one block short of the allocation.
 //      Correct condition is `i != end_block` (only the very last
 //      block lacks HAS_NEXT).
+//      Point 2 was wrong: see heap_mark_blocks_taken.
 static int64_t heap_get_start_block(struct heap* heap, uintptr_t total_blocks){
     struct heap_table* table = heap->table;
     int64_t bc = 0;
     int64_t bs = -1;
 
-    for(size_t i = 0; i < table->total; i++){
+    if(total_blocks == 0 || total_blocks > heap->free_blocks){
+        return -ENOMEM;
+    }
+
+    // Start at the search hint; everything below it is taken.
+    for(size_t i = heap->search_hint; i < table->total; i++){
         if(heap_get_entry_type(table->entries[i]) != HEAP_BLOCK_TABLE_ENTRY_FREE){
             bc = 0;
             bs = -1;
@@ -157,21 +168,26 @@ static void* heap_block_to_address(struct heap* heap, int64_t block){
     return heap->saddr + (block * SAMOS_HEAP_BLOCK_SIZE);
 }
 
+// The L23 "fix" above was itself the bug. The old loop wrote
+// entries[i] and then built the entry for block i+1, setting HAS_NEXT
+// when `i != end_block` - which is true for every i that has a
+// successor, so the LAST block got HAS_NEXT. heap_free then walked
+// into the neighbouring allocation and released its first block. The
+// 32-bit code (`i != end_block - 1` in that shape) was right. We now
+// compute each block's own entry directly: HAS_NEXT on every block
+// except the last, IS_FIRST on the first.
 static void heap_mark_blocks_taken(struct heap* heap, int64_t start_block, int64_t total_blocks){
     int64_t end_block = (start_block + total_blocks) - 1;
 
-    HEAP_BLOCK_TABLE_ENTRY entry = HEAP_BLOCK_TABLE_ENTRY_TAKEN | HEAP_BLOCK_IS_FIRST;
-    if(total_blocks > 1){
-        entry |= HEAP_BLOCK_HAS_NEXT;
-    }
-
     for(int64_t i = start_block; i <= end_block; i++){
-        heap->table->entries[i] = entry;
-        entry = HEAP_BLOCK_TABLE_ENTRY_TAKEN;
-        // L23 fix: was `i != end_block - 1`, off by one.
+        HEAP_BLOCK_TABLE_ENTRY entry = HEAP_BLOCK_TABLE_ENTRY_TAKEN;
+        if(i == start_block){
+            entry |= HEAP_BLOCK_IS_FIRST;
+        }
         if(i != end_block){
             entry |= HEAP_BLOCK_HAS_NEXT;
         }
+        heap->table->entries[i] = entry;
 
         // Lecture 26 - fire the per-block alloc callback if any.
         // Callbacks see one block at a time, even for multi-block
@@ -198,6 +214,9 @@ static void* heap_malloc_blocks(struct heap* heap, uintptr_t total_blocks){
     // Lecture 30 - bump the running counts.
     heap->used_blocks += total_blocks;
     heap->free_blocks -= total_blocks;
+    if((size_t)start_block == heap->search_hint){
+        heap->search_hint = start_block + total_blocks;
+    }
 
 out:
     return address;
@@ -227,6 +246,9 @@ static void heap_mark_blocks_free(struct heap* heap, int64_t starting_block){
     // Lecture 30 - decrement used count by what we actually freed.
     heap->used_blocks -= total_blocks_freed;
     heap->free_blocks += total_blocks_freed;
+    if((size_t)starting_block < heap->search_hint){
+        heap->search_hint = starting_block;
+    }
 }
 
 // L29 - exposed (was static). multiheap_free walks per-block
@@ -237,8 +259,13 @@ int64_t heap_address_to_block(struct heap* heap, void* address){
 
 // Lecture 80 - inclusive "are blocks [start..end] all free?"
 // check, used by heap_realloc's in-place grow path.
+// A range that runs past the table is not free (the book
+// read entries[] out of bounds here).
 bool heap_is_block_range_free(struct heap* heap, size_t starting_block, size_t ending_block){
     struct heap_table* table = heap->table;
+    if(ending_block < starting_block || ending_block >= table->total){
+        return false;
+    }
     for(size_t i = starting_block; i <= ending_block; i++){
         if(table->entries[i] & HEAP_BLOCK_TABLE_ENTRY_TAKEN){
             return false;
@@ -247,17 +274,98 @@ bool heap_is_block_range_free(struct heap* heap, size_t starting_block, size_t e
     return true;
 }
 
+// The only pointers heap_free / heap_realloc accept: inside
+// the pool, block aligned, and the FIRST block of a live (not
+// reserved) allocation.
+bool heap_is_allocation_start(struct heap* heap, void* ptr){
+    if(!heap_is_address_within_heap(heap, ptr) || !heap_validate_alignment(ptr)){
+        return false;
+    }
+    HEAP_BLOCK_TABLE_ENTRY entry = heap->table->entries[heap_address_to_block(heap, ptr)];
+    return (entry & HEAP_BLOCK_TABLE_ENTRY_TAKEN) &&
+           (entry & HEAP_BLOCK_IS_FIRST) &&
+           !(entry & HEAP_BLOCK_RESERVED);
+}
+
+bool heap_is_block_reserved(struct heap* heap, void* ptr){
+    if(!heap_is_address_within_heap(heap, ptr)){
+        return false;
+    }
+    return heap->table->entries[heap_address_to_block(heap, ptr)] & HEAP_BLOCK_RESERVED;
+}
+
+// Clamp [start, end) to the pool and convert to block indexes.
+// `outward` picks reserve rounding (cover every touched block) over
+// unreserve rounding (only whole blocks).
+static bool heap_range_to_blocks(struct heap* heap, uintptr_t start, uintptr_t end, bool outward,
+                                 size_t* first, size_t* last_excl){
+    uintptr_t saddr = (uintptr_t)heap->saddr;
+    uintptr_t eaddr = (uintptr_t)heap->eaddr;
+    if(start < saddr) start = saddr;
+    if(end > eaddr)   end   = eaddr;
+    if(end <= start){
+        return false;
+    }
+    if(outward){
+        start = heap_align_value_to_lower(start - saddr);
+        end   = heap_align_value_to_upper(end - saddr);
+    } else {
+        start = heap_align_value_to_upper(start - saddr);
+        end   = heap_align_value_to_lower(end - saddr);
+    }
+    if(end <= start){
+        return false;
+    }
+    *first     = start / SAMOS_HEAP_BLOCK_SIZE;
+    *last_excl = end / SAMOS_HEAP_BLOCK_SIZE;
+    return true;
+}
+
+void heap_reserve_range(struct heap* heap, uintptr_t start, uintptr_t end){
+    size_t first, last;
+    if(!heap_range_to_blocks(heap, start, end, true, &first, &last)){
+        return;
+    }
+    for(size_t i = first; i < last; i++){
+        if(heap->table->entries[i] != HEAP_BLOCK_TABLE_ENTRY_FREE){
+            continue;
+        }
+        heap->table->entries[i] = HEAP_BLOCK_TABLE_ENTRY_TAKEN | HEAP_BLOCK_RESERVED;
+        heap->free_blocks--;
+        heap->reserved_blocks++;
+    }
+}
+
+void heap_unreserve_range(struct heap* heap, uintptr_t start, uintptr_t end){
+    size_t first, last;
+    if(!heap_range_to_blocks(heap, start, end, false, &first, &last)){
+        return;
+    }
+    for(size_t i = first; i < last; i++){
+        if(!(heap->table->entries[i] & HEAP_BLOCK_RESERVED)){
+            continue;
+        }
+        heap->table->entries[i] = HEAP_BLOCK_TABLE_ENTRY_FREE;
+        heap->free_blocks++;
+        heap->reserved_blocks--;
+    }
+    if(first < heap->search_hint){
+        heap->search_hint = first;
+    }
+}
+
 // Lecture 28 - count the TAKEN blocks starting at `starting_address`.
 // Stops at the first block without HAS_NEXT (the terminator of
-// the run). Returns 0 if `starting_address` is outside the heap
-// or hits a free block immediately.
+// the run). Returns 0 if `starting_address` is not the start of a
+// live allocation (the book only checked for a negative
+// block index).
 size_t heap_allocation_block_count(struct heap* heap, void* starting_address){
     size_t count = 0;
     struct heap_table* table = heap->table;
-    int64_t starting_block = heap_address_to_block(heap, starting_address);
-    if(starting_block < 0){
+    if(!heap_is_allocation_start(heap, starting_address)){
         goto out;
     }
+    int64_t starting_block = heap_address_to_block(heap, starting_address);
 
     for(int64_t i = starting_block; i < (int64_t)table->total; i++){
         HEAP_BLOCK_TABLE_ENTRY entry = table->entries[i];
@@ -273,6 +381,12 @@ out:
 }
 
 void* heap_malloc(struct heap* heap, size_t size){
+    // heap_align_value_to_upper wraps to 0 for sizes within a
+    // block of SIZE_MAX, so reject anything bigger than the pool
+    // before rounding.
+    if(size == 0 || size > heap_total_size(heap)){
+        return NULL;
+    }
     size_t  aligned_size = heap_align_value_to_upper(size);
     int64_t total_blocks = aligned_size / SAMOS_HEAP_BLOCK_SIZE;
     return heap_malloc_blocks(heap, total_blocks);
@@ -287,12 +401,27 @@ void* heap_malloc(struct heap* heap, size_t size){
 //      allocation are free, claim them.
 //   3. Grow with move: zalloc a new region, memcpy old data
 //      over, free the old region.
+//
+// Fixes:
+//   - `old_ptr` must be the start of a live allocation; anything
+//     else returns NULL and changes nothing (the book trusted it).
+//   - Shrink counted the freed blocks twice: heap_mark_blocks_free
+//     already moves them from used to free, and the book then did
+//     it again, so used_blocks drifted down and free_blocks up.
+//   - Grow-in-place had no bounds check and could claim "free"
+//     blocks past the end of the table.
 void* heap_realloc(struct heap* heap, void* old_ptr, size_t new_size){
     if(!old_ptr){
         return heap_malloc(heap, new_size);
     }
+    if(!heap_is_allocation_start(heap, old_ptr)){
+        return NULL;
+    }
     if(new_size == 0){
         heap_free(heap, old_ptr);
+        return NULL;
+    }
+    if(new_size > heap_total_size(heap)){
         return NULL;
     }
 
@@ -311,13 +440,7 @@ void* heap_realloc(struct heap* heap, void* old_ptr, size_t new_size){
         }
         int64_t block_to_free = starting_block + new_total_blocks;
         heap_mark_blocks_free(heap, block_to_free);
-
-        if(new_total_blocks > 0){
-            heap->table->entries[starting_block + new_total_blocks - 1] &= ~HEAP_BLOCK_HAS_NEXT;
-        }
-        size_t freed_blocks = current_alloc_blocks - new_total_blocks;
-        heap->used_blocks -= freed_blocks;
-        heap->free_blocks += freed_blocks;
+        heap->table->entries[block_to_free - 1] &= ~HEAP_BLOCK_HAS_NEXT;
         return old_ptr;
     }
 
@@ -337,40 +460,44 @@ void* heap_realloc(struct heap* heap, void* old_ptr, size_t new_size){
     }
 
     // Move.
-    void* new_addr = heap_zalloc(heap, new_size_aligned);
+    void* new_addr = heap_malloc(heap, new_size_aligned);
     if(!new_addr){
         return NULL;
     }
     memcpy(new_addr, old_ptr, old_total_size);
+    memset((char*)new_addr + old_total_size, 0, new_size_aligned - old_total_size);
     heap_free(heap, old_ptr);
     return new_addr;
 }
 
-void heap_free(struct heap* heap, void* ptr){
+// The book passed any pointer straight to the block walk, so
+// a pointer into the middle of an allocation freed its tail, and a
+// double free or a foreign pointer walked whatever the table held
+// there. Now only the start of a live allocation is accepted.
+int heap_free(struct heap* heap, void* ptr){
+    if(!heap_is_allocation_start(heap, ptr)){
+        return -EINVARG;
+    }
     heap_mark_blocks_free(heap, heap_address_to_block(heap, ptr));
+    return 0;
 }
 
 // Lecture 16 - bookkeeping helpers. Used by kheap_get callers to
 // print usage stats (kernel_main) and, later, by the multi-heap
 // orchestrator (L20+) to pick which sub-heap has room.
+// Read from the running counts; reserved blocks are neither
+// used nor available.
 
 size_t heap_total_size(struct heap* heap){
     return heap->table->total * SAMOS_HEAP_BLOCK_SIZE;
 }
 
 size_t heap_total_used(struct heap* heap){
-    size_t total = 0;
-    struct heap_table* table = heap->table;
-    for(size_t i = 0; i < table->total; i++){
-        if(heap_get_entry_type(table->entries[i]) == HEAP_BLOCK_TABLE_ENTRY_TAKEN){
-            total += SAMOS_HEAP_BLOCK_SIZE;
-        }
-    }
-    return total;
+    return heap->used_blocks * SAMOS_HEAP_BLOCK_SIZE;
 }
 
 size_t heap_total_available(struct heap* heap){
-    return heap_total_size(heap) - heap_total_used(heap);
+    return heap->free_blocks * SAMOS_HEAP_BLOCK_SIZE;
 }
 
 // Lecture 20 - per-heap zalloc. The kheap-level kzalloc currently

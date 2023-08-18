@@ -69,7 +69,8 @@ void* multiheap_palloc(struct multiheap* mh, size_t size);
 // is now multiheap_free_heap; per-allocation free takes the
 // short name to match kfree's expected wiring shape.
 void  multiheap_free_heap(struct multiheap* mh);
-void  multiheap_free(struct multiheap* mh, void* ptr);
+// 0, or -EINVARG when `ptr` is not a live allocation.
+int   multiheap_free(struct multiheap* mh, void* ptr);
 // Lecture 80 - realloc through the multi-heap dispatch.
 void* multiheap_realloc(struct multiheap* mh, void* old_ptr, size_t new_size);
 

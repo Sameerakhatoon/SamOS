@@ -712,7 +712,8 @@ struct graphics_info* graphics_info_create_relative(struct graphics_info* source
     new_graphics->framebuffer           = source_graphics->framebuffer;
     new_graphics->parent                = source_graphics;
     new_graphics->children              = vector_new(sizeof(struct graphics_info*), 4, 0);
-    new_graphics->pixels                = kzalloc(new_graphics->width
+    // Whole pages: process windows map these into user space.
+    new_graphics->pixels                = kpage_zalloc(new_graphics->width
                                                * new_graphics->height
                                                * sizeof(struct framebuffer_pixel));
     if(!new_graphics->pixels){

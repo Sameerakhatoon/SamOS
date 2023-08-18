@@ -414,7 +414,7 @@ static int process_load_binary(const char* filename, struct process* process){
         goto out;
     }
 
-    program_data_ptr = kzalloc(stat.filesize);
+    program_data_ptr = kpage_zalloc(stat.filesize);   // Mapped at 0x400000
     if(!program_data_ptr){
         res = -ENOMEM;
         goto out;
@@ -797,7 +797,8 @@ out:
 
 void* process_malloc(struct process* process, size_t size){
     int   res = 0;
-    void* ptr = kzalloc(size);
+    // Identity-mapped per page into the process: never a slab object.
+    void* ptr = kpage_zalloc(size);
     if(!ptr){
         res = -ENOMEM;
         goto out_err;

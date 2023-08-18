@@ -51,25 +51,13 @@
 
 #define SAMOS_TOTAL_INTERRUPTS  512
 
-// Lecture 24 - this is the MINIMUM heap size: we refuse to bring
-// up the kernel if no E820 type-1 region is at least this big.
-// The actual minimal-heap data pool size is computed at runtime
-// from the chosen region's length (see kheap_init).
-#define SAMOS_HEAP_MINIMUM_SIZE_BYTES   104857600
 #define SAMOS_HEAP_BLOCK_SIZE           4096
 
-// Lecture 20 - multi-heap layout. The minimal kernel heap is built
-// from the first E820-type-1 region whose length covers
-// SAMOS_HEAP_SIZE_BYTES. The bitmap goes at a fixed kernel address
-// (MINIMAL_HEAP_TABLE_ADDRESS, 16 MiB - well above the kernel
-// image at 1 MiB and outside the 0x7E00 E820 dump area, so kheap
-// init no longer clobbers the E820 entries). The heap data pool
-// starts MINIMAL_HEAP_TABLE_SIZE bytes later. After the minimal
-// heap is live, any other E820 type-1 regions get added as
-// additional sub-heaps via multiheap_add.
-#define SAMOS_MINIMAL_HEAP_TABLE_ADDRESS        0x01000000
-#define SAMOS_MINIMAL_HEAP_ADDRESS              0x01100000
-#define SAMOS_MINIMAL_HEAP_TABLE_SIZE           (SAMOS_MINIMAL_HEAP_ADDRESS - SAMOS_MINIMAL_HEAP_TABLE_ADDRESS)
+// The book's SAMOS_HEAP_MINIMUM_SIZE_BYTES (one region of
+// 100 MiB or more) and the fixed minimal-heap bitmap at 0x01000000
+// are gone: the page-frame allocator (memory/pfa.c) manages every
+// usable region and places its own table. It reserves
+// [SAMOS_KERNEL_LOCATION, max(end of image, SAMOS_BOOT_STACK_TOP)).
 
 #define SAMOS_SECTOR_SIZE       512
 

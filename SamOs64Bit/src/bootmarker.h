@@ -224,7 +224,19 @@ typedef enum {
     BM_USER_PARSE_CMD_OK      = 83,  // samos_parse_command returned a non-NULL list
     BM_USER_PROC_ARGS_OK      = 84,  // samos_process_get_arguments round trip
 
-    BM_STAGE_MAX              = 176,
+    // The memory manager work memory-manager self-tests (src/memory/heap/memtest.c).
+    // Value 1 = pass; any other value is the failing check's line
+    // in memtest.c.
+    BM_FEATURE_MEM_PFA        = 176, // frame table reserves kernel, stack, map, itself
+    BM_FEATURE_MEM_HEAP_UNIT  = 177, // heap.c: HAS_NEXT, realloc accounting/bounds, bad frees
+    BM_FEATURE_MEM_SLAB       = 178, // kmalloc(<=2 KiB) comes from slabs; bad kfree rejected
+    BM_FEATURE_MEM_STEADY     = 179, // 1000 alloc/free cycles leave the heap unchanged
+    BM_FEATURE_MEM_STRESS     = 180, // randomised alloc/realloc/free with content checks
+    BM_FEATURE_MEM_RAM_MIB    = 181, // value = MiB of RAM the frame allocator manages
+    BM_FEATURE_MEM_PROCESS    = 182, // process create/exit cycles: frames steady, leak constant
+    BM_FEATURE_MEM_PROCESS_LEAK = 183, // value = slab objects leaked per process cycle
+
+    BM_STAGE_MAX              = 184,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.

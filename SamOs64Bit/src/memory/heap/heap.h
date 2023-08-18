@@ -11,6 +11,10 @@
 
 #define HEAP_BLOCK_HAS_NEXT             0b10000000
 #define HEAP_BLOCK_IS_FIRST             0b01000000
+// A TAKEN block that is not an allocation: a hole in the
+// physical map, the kernel image, the frame table itself. Never
+// handed out, and heap_free refuses it.
+#define HEAP_BLOCK_RESERVED             0b00100000
 
 typedef unsigned char HEAP_BLOCK_TABLE_ENTRY;
 
@@ -51,6 +55,12 @@ struct heap {
     size_t total_blocks;
     size_t free_blocks;
     size_t used_blocks;
+    // Blocks marked HEAP_BLOCK_RESERVED. Invariant:
+    // free_blocks + used_blocks + reserved_blocks == total_blocks.
+    size_t reserved_blocks;
+    // Every block below this index is taken, so the first-
+    // fit scan starts here instead of at block 0. Lowered on free.
+    size_t search_hint;
 
     // Lecture 26 - per-block callbacks. NULL == no callback for
     // this heap (the default; the minimal heap and ordinary
@@ -69,7 +79,18 @@ void heap_callbacks_set(struct heap* heap,
 int    heap_create(struct heap* heap, void* ptr, void* end, struct heap_table* table);
 void*  heap_malloc(struct heap* heap, size_t size);
 void*  heap_zalloc(struct heap* heap, size_t size);
-void   heap_free(struct heap* heap, void* ptr);
+// Returns 0, or -EINVARG (and changes nothing) when `ptr` is
+// not the start of a live allocation in this heap.
+int    heap_free(struct heap* heap, void* ptr);
+// True when `ptr` is the first block of a live allocation.
+bool   heap_is_allocation_start(struct heap* heap, void* ptr);
+// Reserve / release whole blocks. reserve rounds outward
+// (any block the range touches), unreserve rounds inward (only
+// blocks entirely inside the range), so a partial block is never
+// made free. Allocated blocks are left alone by both.
+void   heap_reserve_range(struct heap* heap, uintptr_t start, uintptr_t end);
+void   heap_unreserve_range(struct heap* heap, uintptr_t start, uintptr_t end);
+bool   heap_is_block_reserved(struct heap* heap, void* ptr);
 size_t heap_total_size(struct heap* heap);
 size_t heap_total_used(struct heap* heap);
 size_t heap_total_available(struct heap* heap);

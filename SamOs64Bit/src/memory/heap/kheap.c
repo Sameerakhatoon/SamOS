@@ -1,152 +1,65 @@
 // Lecture 20 - kheap rewritten on top of the multiheap.
 //
-// Boot sequence:
-//   1. Find the first E820 type-1 region big enough for the
-//      minimal heap (SAMOS_HEAP_SIZE_BYTES).
-//   2. Place the minimal heap's table at a fixed kernel address
-//      (SAMOS_MINIMAL_HEAP_TABLE_ADDRESS = 16 MiB). The data
-//      pool starts MINIMAL_HEAP_TABLE_SIZE bytes later.
-//   3. Build the multiheap, register the minimal heap as the
-//      "starting heap" (so multiheap node allocations land in it).
-//   4. Walk the remaining E820 type-1 regions and register each
-//      as an additional sub-heap.
+// The kernel heap now sits on the page-frame allocator:
 //
-// kmalloc -> multiheap_alloc (first-pass: try each sub-heap in
-// order). kzalloc and kfree are STUBS at L20 (return NULL /
-// no-op) because the multiheap-level versions are not built yet -
-// upstream commits these as TODOs and patches them in later
-// lectures. We do the same.
+//   1. pfa_init builds the frame table from the firmware memory map
+//      (memory/pfa.c). It replaces the book's minimal heap, which
+//      needed one E820 region over 100 MiB and kept its bitmap at a
+//      fixed 0x01000000 that nothing reserved.
+//   2. The multiheap gets the frame table as its one sub-heap (and
+//      its bootstrap heap), still flagged for the paging-defragment
+//      second pass, so kpalloc keeps working when RAM is fragmented.
+//   3. Requests up to SLAB_MAX_SIZE (2 KiB) go to the slab layer
+//      (slab.c); bigger ones take whole frames from the multiheap.
+//
+// kfree is real: slab objects go back to their slab, everything
+// else to multiheap_free. Pointers the allocator does not own, and
+// double frees, are rejected and counted instead of corrupting the
+// tables.
 
 #include "kheap.h"
 #include "heap.h"
 #include "multiheap.h"
+#include "slab.h"
 #include "config.h"
 #include "kernel.h"
 #include "memory/memory.h"
+#include "memory/pfa.h"
 #include "memory/paging/paging.h"
 
-struct heap       kernel_minimal_heap;
-struct heap_table kernel_minimal_heap_table;
 struct multiheap* kernel_multiheap = NULL;
-
-static struct e820_entry* kheap_get_allowable_region_for_minimal_heap(void){
-    size_t total = e820_total_entries();
-    for(size_t i = 0; i < total; i++){
-        struct e820_entry* cur = e820_entry(i);
-        // L24 - the threshold is now a MINIMUM, not a fixed size.
-        if(cur->type == 1 && cur->length > SAMOS_HEAP_MINIMUM_SIZE_BYTES){
-            return cur;
-        }
-    }
-    return NULL;
-}
+static size_t kheap_bad_free_count = 0;
 
 void kheap_init(void){
-    struct e820_entry* entry = kheap_get_allowable_region_for_minimal_heap();
-    if(!entry){
-        panic("Installed RAM does not meet the requirements for multiheap\n");
+    pfa_init();
+
+    // Bootstrap: the multiheap header and node come out of the
+    // frame table itself, which pfa_init has just built.
+    kernel_multiheap = multiheap_new(pfa_heap());
+    if(!kernel_multiheap){
+        panic("kheap: cannot allocate the multiheap\n");
     }
-
-    // Clamp the heap-table address up to SAMOS_MINIMAL_HEAP_TABLE_ADDRESS
-    // so the bitmap never lands on top of the kernel image (loaded
-    // at 1 MiB) or on top of the E820 buffer at 0x7E00.
-    void* address     = (void*)(uintptr_t)entry->base_addr;
-    void* end_address = (void*)(uintptr_t)(entry->base_addr + entry->length);
-    void* heap_table_address = address;
-    if(heap_table_address < (void*)SAMOS_MINIMAL_HEAP_TABLE_ADDRESS){
-        heap_table_address = (void*)SAMOS_MINIMAL_HEAP_TABLE_ADDRESS;
+    if(multiheap_add_existing_heap(kernel_multiheap, pfa_heap(),
+                                   MULTIHEAP_HEAP_FLAG_DEFRAGMENT_WITH_PAGING) < 0){
+        panic("kheap: cannot register the frame table\n");
     }
-
-    // Lecture 24 - compute the bitmap size from the actual heap
-    // region length instead of using the fixed
-    // SAMOS_MINIMAL_HEAP_TABLE_SIZE (1 MiB) budget.
-    //
-    // Two-pass sizing because the bitmap eats into the same
-    // region as the data pool: an entry exists per BLOCK of the
-    // pool, and the pool is the region MINUS the bitmap. So:
-    //   pass 1: assume bitmap covers entire region, compute its
-    //           size as if every byte were a block
-    //   pass 2: subtract pass-1 bitmap from region; recompute
-    //           the bitmap to cover only the remaining data
-    //           pool
-    // This gets the bitmap-to-data ratio right to within one
-    // block, which is good enough for kheap.
-    size_t total_heap_size            = (size_t)((char*)end_address - (char*)heap_table_address);
-    size_t total_heap_blocks_est      = total_heap_size / SAMOS_HEAP_BLOCK_SIZE;
-    size_t total_heap_entry_table_est = sizeof(HEAP_BLOCK_TABLE_ENTRY) * total_heap_blocks_est;
-    size_t heap_data_size             = total_heap_size - total_heap_entry_table_est;
-    size_t total_heap_data_blocks     = heap_data_size / SAMOS_HEAP_BLOCK_SIZE;
-    size_t total_heap_entry_table_size = sizeof(HEAP_BLOCK_TABLE_ENTRY) * total_heap_data_blocks;
-
-    void* heap_address     = (char*)heap_table_address + total_heap_entry_table_size;
-    void* heap_end_address = end_address;
-
-    // L22 - the heap region has to be page-aligned at both ends so
-    // a future paging-defragment second pass can map/remap whole
-    // pages without slicing a block. Round base UP, end DOWN.
-    if(!paging_is_aligned(heap_address)){
-        heap_address = paging_align_address(heap_address);
-    }
-    if(!paging_is_aligned(heap_end_address)){
-        heap_end_address = paging_align_to_lower_page(heap_end_address);
-    }
-
-    size_t size = (size_t)((char*)heap_end_address - (char*)heap_address);
-    size_t total_table_entries = size / SAMOS_HEAP_BLOCK_SIZE;
-
-    kernel_minimal_heap_table.entries = (HEAP_BLOCK_TABLE_ENTRY*)heap_table_address;
-    kernel_minimal_heap_table.total   = total_table_entries;
-
-    int res = heap_create(&kernel_minimal_heap, heap_address, heap_end_address, &kernel_minimal_heap_table);
-    if(res < 0){
-        panic("Failed to initialize minimal heap\n");
-    }
-
-    // Bootstrap: the multiheap header + node allocs come from the
-    // minimal heap itself, which has just been initialised.
-    kernel_multiheap = multiheap_new(&kernel_minimal_heap);
-    multiheap_add_existing_heap(kernel_multiheap, &kernel_minimal_heap,
-                                MULTIHEAP_HEAP_FLAG_EXTERNALLY_OWNED);
-
-    // Register every OTHER usable E820 region as an additional
-    // sub-heap. These get full multiheap ownership (heap header +
-    // table allocated dynamically inside the minimal heap).
-    size_t total = e820_total_entries();
-    for(size_t i = 0; i < total; i++){
-        struct e820_entry* cur = e820_entry(i);
-        if(cur == entry || cur->type != 1){
-            continue;
-        }
-
-        // L22 - page-align both ends. Round base UP, end DOWN.
-        void* base_addr = (void*)(uintptr_t)cur->base_addr;
-        void* end_addr  = (void*)(uintptr_t)(cur->base_addr + cur->length);
-        if(!paging_is_aligned(base_addr)){
-            base_addr = paging_align_address(base_addr);
-        }
-        if(!paging_is_aligned(end_addr)){
-            end_addr = paging_align_to_lower_page(end_addr);
-        }
-
-        // L23 - skip any portion that would overlap the minimal
-        // heap. Clamp base UP to MINIMAL_HEAP_ADDRESS; if the
-        // region ends below that, drop it entirely.
-        if(base_addr < (void*)SAMOS_MINIMAL_HEAP_ADDRESS){
-            base_addr = (void*)SAMOS_MINIMAL_HEAP_ADDRESS;
-        }
-        if(end_addr <= base_addr){
-            continue;
-        }
-
-        multiheap_add(kernel_multiheap, base_addr, end_addr,
-                      MULTIHEAP_HEAP_FLAG_DEFRAGMENT_WITH_PAGING);
-    }
+    slab_init(kernel_multiheap);
 }
 
 void* kmalloc(size_t size){
     // L23 - drop the panic-on-null. Callers that NEED non-null
     // can check, and the OOM-drain demo in kernel_main relies
     // on kmalloc returning NULL when the multiheap is exhausted.
+    if(size == 0 || !kernel_multiheap){
+        return NULL;
+    }
+    if(size <= SLAB_MAX_SIZE){
+        void* ptr = slab_alloc(size);
+        if(ptr){
+            return ptr;
+        }
+        // No slab page to be had; a whole frame still works.
+    }
     return multiheap_alloc(kernel_multiheap, size);
 }
 
@@ -170,10 +83,15 @@ void* kzalloc(size_t size){
 
 // Lecture 22 - "paging-allowed" allocators. Use the multiheap
 // palloc path (first-pass, then second-pass paging-defragment).
-// The second pass is still a NULL stub at L22; these will start
-// returning more aggressive results once the defragmenter lands.
+// Small sizes come from the slabs like kmalloc.
 void* kpalloc(size_t size){
-    void* ptr = multiheap_palloc(kernel_multiheap, size);
+    void* ptr = NULL;
+    if(size > 0 && size <= SLAB_MAX_SIZE){
+        ptr = slab_alloc(size);
+    }
+    if(!ptr){
+        ptr = multiheap_palloc(kernel_multiheap, size);
+    }
     if(!ptr){
         panic("Failed to allocate memory\n");
     }
@@ -189,14 +107,79 @@ void* kpzalloc(size_t size){
     return ptr;
 }
 
-// L20 - still stubbed pending later-lecture multiheap_free.
+void* kpage_zalloc(size_t size){
+    if(size == 0 || !kernel_multiheap){
+        return NULL;
+    }
+    void* ptr = multiheap_alloc(kernel_multiheap, size);
+    if(ptr){
+        memset(ptr, 0x00, size);
+    }
+    return ptr;
+}
+
+static void kheap_reject_free(void){
+    kheap_bad_free_count++;
+    if(kheap_bad_free_count <= 8){
+        print("kfree: ignoring a pointer that is not a live allocation\n");
+    }
+}
+
+// The book left kfree a no-op ("pending multiheap_free"),
+// so every kernel free leaked. kfree(NULL) stays a no-op.
 void kfree(void* ptr){
-    (void)ptr;
+    if(!ptr || !kernel_multiheap){
+        return;
+    }
+    int res = slab_owns(ptr) ? slab_free(ptr) : multiheap_free(kernel_multiheap, ptr);
+    if(res < 0){
+        kheap_reject_free();
+    }
 }
 
 // Lecture 80 - real krealloc. Drops the L78 stub.
 // Routes through multiheap_realloc which finds the owning
 // sub-heap and calls heap_realloc.
+// A slab object stays put while the new size fits its
+// class, and otherwise moves to a fresh allocation.
 void* krealloc(void* old_ptr, size_t new_size){
+    if(!old_ptr){
+        return kmalloc(new_size);
+    }
+    if(new_size == 0){
+        kfree(old_ptr);
+        return NULL;
+    }
+    if(slab_owns(old_ptr)){
+        size_t old_size = slab_object_size(old_ptr);
+        if(old_size == 0){
+            kheap_reject_free();
+            return NULL;
+        }
+        if(new_size <= old_size){
+            return old_ptr;
+        }
+        void* new_ptr = kmalloc(new_size);
+        if(!new_ptr){
+            return NULL;
+        }
+        memcpy(new_ptr, old_ptr, (int)old_size);
+        slab_free(old_ptr);
+        return new_ptr;
+    }
     return multiheap_realloc(kernel_multiheap, old_ptr, new_size);
+}
+
+void kheap_get_stats(struct kheap_stats* out){
+    memset(out, 0, sizeof(*out));
+    out->frames_total    = pfa_total_frames();
+    out->frames_free     = pfa_free_frame_count();
+    out->frames_used     = pfa_used_frame_count();
+    out->frames_reserved = pfa_reserved_frame_count();
+    struct slab_stats s;
+    slab_get_stats(&s);
+    out->slab_chunks         = s.chunks;
+    out->slab_pages_in_use   = s.pages_in_use;
+    out->slab_objects_in_use = s.objects_in_use;
+    out->bad_frees           = kheap_bad_free_count;
 }
