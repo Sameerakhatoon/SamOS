@@ -215,6 +215,12 @@ int font_draw_text(struct graphics_info* graphics_info, struct font* font,
     int res = 0;
     int x = screen_x;
     int y = screen_y;
+    // Lecture 95 - NULL font means "the system font" (sysfont.bmp,
+    // loaded at font_system_init). Callers do not have to thread
+    // a font handle through the call sites that draw status text.
+    if(!font){
+        font = font_get_system_font();
+    }
     while(*str != 0){
         res = font_draw(graphics_info, font, x, y, *str, font_color);
         if(res < 0){
