@@ -3,7 +3,7 @@
 // Lecture 92 + 94 - bitmap font subsystem.
 //
 // Identifier-typo notes preserved verbatim from upstream:
-//   bits_height_per_chracter (missing the second `a` in
+//   bits_height_per_character (missing the second `a` in
 //   "character"), subtract_from_ascii_char_index_for_drawing.
 
 #include <stdint.h>
@@ -21,7 +21,9 @@ struct font {
     size_t   character_count;
     uint8_t* character_data;
     size_t   bits_width_per_character;
-    size_t   bits_height_per_chracter;          // sic - upstream typo
+    // Lecture 97 - upstream finally renamed the field from the
+    // `bits_height_per_chracter` typo to `bits_height_per_character`.
+    size_t   bits_height_per_character;
     uint8_t  subtract_from_ascii_char_index_for_drawing;
     char     filename[SAMOS_MAX_PATH];
 };
@@ -34,7 +36,7 @@ struct font* font_get_system_font(void);
 struct font* font_create(uint8_t* character_data,
                          size_t  character_count,
                          size_t  bits_width_per_character,
-                         size_t  bits_height_per_chracter,
+                         size_t  bits_height_per_character,
                          uint8_t subtract_from_ascii_char_index_for_drawing);
 int          font_draw(struct graphics_info* g, struct font* font,
                        int screen_x, int screen_y,
