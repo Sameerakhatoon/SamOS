@@ -58,4 +58,24 @@ int               terminal_cursor_col(struct terminal* terminal);
 int               terminal_total_cols(struct terminal* terminal);
 int               terminal_total_rows(struct terminal* terminal);
 
+// Lecture 98 - write path + drawing helpers.
+int               terminal_write(struct terminal* terminal, int c);
+int               terminal_print(struct terminal* terminal, const char* message);
+int               terminal_backspace(struct terminal* terminal);
+
+int               terminal_pixel_set(struct terminal* terminal, size_t x, size_t y,
+                                     struct framebuffer_pixel pixel_color);
+int               terminal_draw_image(struct terminal* terminal,
+                                      uint32_t x, uint32_t y, struct image* img);
+int               terminal_draw_rect(struct terminal* terminal,
+                                     uint32_t x, uint32_t y,
+                                     size_t width, size_t height,
+                                     struct framebuffer_pixel pixel_color);
+void              terminal_transparency_key_set(struct terminal* terminal,
+                                                struct framebuffer_pixel pixel_color);
+void              terminal_transparency_key_remove(struct terminal* terminal);
+void              terminal_ignore_color(struct terminal* terminal,
+                                        struct framebuffer_pixel pixel_color);
+void              terminal_ignore_color_finish(struct terminal* terminal);
+
 #endif
