@@ -87,12 +87,19 @@ void                  graphics_draw_pixel(struct graphics_info* g, uint32_t x, u
 // corner at (x, y). NULL surface means the screen.
 void                  graphics_draw_image(struct graphics_info* g,
                                           struct image* image, int x, int y);
-// Lecture 98 - draw an axis-aligned filled rectangle. The L98
-// stub is a no-op; the real implementation lands in L99.
+// Lecture 98 - draw an axis-aligned filled rectangle. Real body
+// landed in L99.
 void                  graphics_draw_rect(struct graphics_info* g,
                                          uint32_t abs_x, uint32_t abs_y,
                                          size_t width, size_t height,
                                          struct framebuffer_pixel color);
+// Lecture 99 - per-surface paint/composite-time colour filters.
+void                  graphics_ignore_color(struct graphics_info* g,
+                                            struct framebuffer_pixel pixel_color);
+void                  graphics_ignore_color_finish(struct graphics_info* g);
+void                  graphics_transparency_key_set(struct graphics_info* g,
+                                                    struct framebuffer_pixel pixel_color);
+void                  graphics_transparency_key_remove(struct graphics_info* g);
 // Lecture 93 - regional redraw + screen-space wrapper.
 void                  graphics_redraw_region(struct graphics_info* g,
                                              uint32_t local_x, uint32_t local_y,
