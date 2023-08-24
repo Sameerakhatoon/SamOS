@@ -34,6 +34,7 @@
 #include "graphics/graphics.h"   // L87 - root surface struct + API
 #include "graphics/image/image.h" // L90 - graphics_image_load
 #include "graphics/font.h"        // L95 - font_system_init / font_draw_text
+#include "graphics/terminal.h"    // L100 - system_terminal handle
 
 // L87 - bss-resident default_graphics_info lives in kernel.asm;
 // the long-mode entry stashes the UEFI framebuffer params into it
@@ -43,82 +44,22 @@ extern struct graphics_info default_graphics_info;
 #include "config.h"
 #include "status.h"
 
-uint16_t* video_mem = 0;
-uint16_t terminal_row = 0;
-uint16_t terminal_col = 0;
-
-uint16_t terminal_make_char(char c, char colour)
-{
-    return (colour << 8) | c;
-}
-
-void terminal_putchar(int x, int y, char c, char colour)
-{
-    video_mem[(y * VGA_WIDTH) + x] = terminal_make_char(c, colour);
-}
-
-// Lecture 98 rename - the legacy VGA-text terminal backspace
-// was just called `terminal_backspace`. L98 introduces a
-// `terminal_backspace(struct terminal*)` in the graphics
-// terminal module; the names collide at link time. The legacy
-// path is no longer reachable post-L74 (UEFI pivot dropped
-// the BIOS VGA text mode), so rename to vga_terminal_backspace
-// to keep the symbol around for diff-ability but out of the
-// graphics terminal's namespace.
-void vga_terminal_backspace(void)
-{
-    if (terminal_row == 0 && terminal_col == 0)
-    {
-        return;
-    }
-
-    if (terminal_col == 0)
-    {
-        terminal_row -= 1;
-        terminal_col = VGA_WIDTH;
-    }
-
-    terminal_col -= 1;
-    terminal_writechar(' ', 15);
-    terminal_col -= 1;
-}
+// Lecture 100 - the legacy VGA-text terminal (video_mem at 0xB8000,
+// VGA_WIDTH x VGA_HEIGHT cell grid, the L1-L13 terminal_writechar
+// path) is gone. The post-UEFI-pivot replacement is a single
+// system_terminal handle into the graphics terminal module; the
+// kernel-side terminal_writechar becomes a thin forwarder to
+// terminal_write.
+struct terminal* system_terminal = NULL;
 
 void terminal_writechar(char c, char colour)
 {
-    if (c == '\n')
+    (void)colour;   // L100 - the graphics terminal carries its own colour.
+    if (!system_terminal)
     {
-        terminal_row += 1;
-        terminal_col = 0;
         return;
     }
-
-    if (c == 0x08)
-    {
-        vga_terminal_backspace();
-        return;
-    }
-
-    terminal_putchar(terminal_col, terminal_row, c, colour);
-    terminal_col += 1;
-    if (terminal_col >= VGA_WIDTH)
-    {
-        terminal_col = 0;
-        terminal_row += 1;
-    }
-}
-
-void terminal_initialize()
-{
-    video_mem = (uint16_t*)(0xB8000);
-    terminal_row = 0;
-    terminal_col = 0;
-    for (int y = 0; y < VGA_HEIGHT; y++)
-    {
-        for (int x = 0; x < VGA_WIDTH; x++)
-        {
-            terminal_putchar(x, y, ' ', 0);
-        }
-    }
+    terminal_write(system_terminal, c);
 }
 
 void print(const char* str)
@@ -178,7 +119,10 @@ struct paging_desc* kernel_desc(){
 
 void kernel_main(void)
 {
-    terminal_initialize();
+    // Lecture 100 - terminal_initialize() (VGA-text grid setup)
+    // is gone; system_terminal is created later, after the
+    // framebuffer-side graphics_setup and font_system_init.
+    struct graphics_info* screen_info = NULL;
     print("Hello 64-bit!\n");
 
     // Lecture 18 - read the E820 memory map BEFORE kheap_init.
@@ -240,9 +184,11 @@ void kernel_main(void)
 
     // Lecture 87 - bring up the graphics subsystem. The struct
     // was filled in by long-mode entry from the UEFI handoff
-    // regs. Lecture 90 replaces the red-square smoke test with a
-    // real BMP draw once disks are up; see further below.
+    // regs. Lecture 100 stashes the resolved screen_info now so
+    // terminal_create can size the system terminal to the full
+    // framebuffer below.
     graphics_setup(&default_graphics_info);
+    screen_info = graphics_screen_info();
 
     // Lecture 50 - bring up IDT, then build a TSS so future
     // ring-3 traps have a kernel-side stack to land on. The
@@ -267,6 +213,26 @@ void kernel_main(void)
     // system_font NULL and font_draw_text picks up the absence
     // by returning early when the lookup fails.
     font_system_init();
+
+    // Lecture 100 - set up the terminal module and build the
+    // system terminal that covers the whole screen surface.
+    // upstream panics when the font load failed; we do too,
+    // matching the post-L74 boot model where graphics is
+    // mandatory.
+    terminal_system_setup();
+    struct font* system_font_local = font_get_system_font();
+    if(!system_font_local){
+        panic("Failed to load system font\n");
+    }
+    struct framebuffer_pixel font_color = {0};
+    font_color.red = 0xff;
+    system_terminal = terminal_create(screen_info, 0, 0,
+                                      screen_info->width, screen_info->height,
+                                      system_font_local, font_color,
+                                      TERMINAL_FLAG_BACKSPACE_ALLOWED);
+    if(!system_terminal){
+        panic("Failed to create system terminal\n");
+    }
 
     // Allocate a 1 MiB kernel stack for ring transitions.
     // kzalloc lays it out low-to-high; rsp0 needs the TOP of
@@ -349,17 +315,9 @@ void kernel_main(void)
     // script will let us flip to BLANK.ELF without timing out.
     // Lecture 81 - "@" resolves to the primary filesystem disk
     // through pparser_get_drive_by_path. Drops the literal "0:".
-    // Lecture 95 - upstream swaps the bkground.bmp draw for a
-    // white "Hello world" rendered via the L94 font system.
-    // We keep the same behaviour: a one-line text smoke test
-    // proves the font loaded and the draw -> redraw_all path
-    // composites without blowing up.
-    struct framebuffer_pixel white = {0};
-    white.red   = 0xff;
-    white.blue  = 0xff;
-    white.green = 0xff;
-    font_draw_text(graphics_screen_info(), NULL, 0, 0, "Hello world", white);
-    graphics_redraw_all();
+    // Lecture 100 - the L95 standalone Hello-world draw is gone;
+    // the system_terminal now owns the screen and `print` routes
+    // through it via terminal_writechar -> terminal_write.
 
     int res = process_load_switch("@:/SIMPLE.BIN", &p);
     if(res != SAMOS_ALL_OK){
