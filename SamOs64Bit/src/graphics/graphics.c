@@ -366,4 +366,10 @@ void graphics_setup(struct graphics_info* main_graphics_info){
 
     // Lecture 88 part 2 - registry init now that the screen is up.
     graphics_image_formats_init();
+
+    // Lecture 101 - clear the framebuffer to whatever the back
+    // buffer says (zeroed by L87's draw_pixel loop, i.e. black).
+    // Without this the screen keeps the L86 green sanity paint
+    // until something else triggers a redraw.
+    graphics_redraw_all();
 }
