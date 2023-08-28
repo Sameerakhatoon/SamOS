@@ -1,28 +1,33 @@
 // Lecture 78 - disk layer restructured around a vector of disks.
 //
-// Old: fixed `struct disk disk_array[4]` with one entry.
-// New: dynamic `struct vector* disk_vector` of struct disk*.
+// disk_create_new pushes a new disk onto the vector. Callers:
+//   1. disk drivers (PATA, AHCI, NVMe) create one TYPE_REAL disk
+//      per physical drive from their mount op.
+//   2. the partition scanners (gpt.c, mbr.c) create one
+//      TYPE_PARTITION disk per partition.
 //
-// disk_create_new pushes a new disk onto the vector. Three callers:
-//   1. disk_search_and_init: creates one TYPE_REAL disk for the
-//      physical ATA primary.
-//   2. gpt_mount_partitions: creates one TYPE_PARTITION per GPT
-//      entry.
-//   3. (future: anything else that wants a virtual disk view)
-//
-// Each disk has starting_lba / ending_lba bounds. disk_read_block
-// adds the starting LBA so virtual disks see their own
-// zero-based LBA space, and rejects reads beyond ending_lba.
-// The primary disk uses zero/zero to skip bounds checks entirely.
-//
-// SamOs DEVIATION: this file depends on the vector library
-// (which itself depends on L80's krealloc) and the filesystem
-// volume_name vtable entry (L84). Not in the build at L78.
+// Rework:
+//   - LBAs and sizes are 64-bit everywhere (the old int/unsigned
+//     int signatures capped disks at 2 GiB of byte offset).
+//   - Every read and write goes through the HARDWARE disk's
+//     driver with an absolute LBA. The old driverless fallback
+//     that hard-coded the primary IDE ports at 0x1F0 is gone, so
+//     NVMe and AHCI partitions work.
+//   - disk_search_and_init scans every REAL disk, not just
+//     disk 0: GPT first, then a filesystem on the whole disk
+//     ("superfloppy"), then an MBR partition table.
+//   - Writes exist, and obey the read-only policy in
+//     storage_policy.h.
 
 #include "disk.h"
+#include "gpt.h"
+#include "mbr.h"
+#include "storage_policy.h"
 #include "io/io.h"
+#include "io/cpuid.h"
 #include "config.h"
 #include "status.h"
+#include "kernel.h"
 #include "memory/memory.h"
 #include "memory/heap/kheap.h"
 #include "string/string.h"
@@ -31,37 +36,32 @@
 
 struct vector* disk_vector = NULL;
 
-// Pointer to the primary hard disk (LBA 0..end, no bounds check).
+// Pointer to the first REAL disk.
 struct disk* disk_primary_handle = NULL;
 
-// Lecture 78 - pointer to the virtual disk whose volume name
-// matches SAMOS_KERNEL_FILESYSTEM_NAME. This is the disk where
-// the kernel finds its own files (kernel.bin, blank.elf, etc).
+// Lecture 78 - the disk whose volume name matches
+// SAMOS_KERNEL_FILESYSTEM_NAME. The kernel finds its own files
+// there ("@:/"). Falls back to the first disk with any
+// filesystem.
 struct disk* primary_fs_disk = NULL;
+static struct disk* first_fs_disk = NULL;
 
-int disk_read_sector(int lba, int total, void* buf){
-    while(insb(0x1F7) & 0x80){}
+bool disk_running_on_hypervisor(void){
+    uint32_t eax, ebx, ecx, edx;
+    cpuid(1, 0, &eax, &ebx, &ecx, &edx);
+    return (ecx >> 31) & 1;
+}
 
-    outb(0x1F6, 0xE0 | ((lba >> 24) & 0x0F));
-    outb(0x1F2, (unsigned char)total);
-    outb(0x1F3, (unsigned char)(lba & 0xff));
-    outb(0x1F4, (unsigned char)((lba >> 8) & 0xff));
-    outb(0x1F5, (unsigned char)((lba >> 16) & 0xff));
-    outb(0x1F7, 0x20);
-
-    unsigned short* ptr = (unsigned short*)buf;
-    for(int b = 0; b < total; b++){
-        while(insb(0x1F7) & 0x80){}
-        char status = insb(0x1F7);
-        if(status & 0x01){
-            return -EIO;
-        }
-        while(!(insb(0x1F7) & 0x08)){}
-        for(int word = 0; word < 256; word++){
-            *ptr++ = insw(0x1F0);
-        }
+// The read-only policy for a new REAL disk. See
+// storage_policy.h.
+static bool disk_policy_read_only(void){
+    if(SAMOS_STORAGE_FORCE_READ_ONLY){
+        return true;
     }
-    return 0;
+    if(SAMOS_STORAGE_WRITE_REAL_HW){
+        return false;
+    }
+    return !disk_running_on_hypervisor();
 }
 
 // Lecture 183 - return the hardware-disk back-pointer.
@@ -69,49 +69,47 @@ struct disk* disk_hardware_disk(struct disk* disk){
     return disk->hardware_disk;
 }
 
-// Lecture 188 - per-disk driver private accessor. Upstream's
-// decl lands at L189; SamOs lands the body now so the L188
-// PATA driver source links.
 void* disk_private_data_driver(struct disk* disk){
     return disk->driver_private;
 }
 
-// Lecture 206 - absolute-LBA + byte-offset helpers used by the
-// stream cache lookup.
-long disk_real_sector(struct disk* idisk, unsigned int lba){
-    size_t absolute_lba = idisk->starting_lba + lba;
-    return absolute_lba;
+uint64_t disk_real_sector(struct disk* idisk, uint64_t lba){
+    return idisk->starting_lba + lba;
 }
 
-long disk_real_offset(struct disk* idisk, unsigned int lba){
-    size_t absolute_lba = disk_real_sector(idisk, lba);
-    return absolute_lba * idisk->sector_size;
+uint64_t disk_real_offset(struct disk* idisk, uint64_t lba){
+    return disk_real_sector(idisk, lba) * (uint64_t)idisk->sector_size;
 }
 
-// Lecture 186 - delegate partition creation to the disk's
-// driver. The driver vtable is responsible for spinning up the
-// virtual disk that maps starting_lba..ending_lba.
-int disk_create_partition(struct disk* disk, int starting_lba, int ending_lba,
+int disk_create_partition(struct disk* disk, uint64_t starting_lba, uint64_t ending_lba,
                           struct disk** partition_disk_out){
-    return disk_driver_mount_partition(disk->driver, disk, starting_lba, ending_lba,
-                                       partition_disk_out);
+    if(!disk || disk->type != SAMOS_DISK_TYPE_REAL || ending_lba < starting_lba){
+        return -EINVARG;
+    }
+    if(disk->total_sectors && ending_lba >= disk->total_sectors){
+        return -EOUTOFRANGE;
+    }
+    return disk_create_new(disk->driver, disk, SAMOS_DISK_TYPE_PARTITION,
+                           starting_lba, ending_lba - starting_lba + 1,
+                           disk->sector_size, disk->driver_private,
+                           partition_disk_out);
 }
 
-// Lecture 186 - extracted FS-mount step. disk_create_new used
-// to inline this; L186 splits it so callers can choose when to
-// run fs_resolve relative to driver-side mount work.
+// Lecture 186 - run every registered filesystem's resolve over
+// the disk. Returns 0 when one claimed it.
 int disk_filesystem_mount(struct disk* disk){
     disk->filesystem = fs_resolve(disk);
-    if(disk->filesystem){
-        char fs_name[11] = {0};
-        char primary_drive_fs_name[11] = {0};
-        strncpy(primary_drive_fs_name, SAMOS_KERNEL_FILESYSTEM_NAME,
-                strlen(SAMOS_KERNEL_FILESYSTEM_NAME));
-        if(disk->filesystem->volume_name){
-            disk->filesystem->volume_name(disk->fs_private, fs_name, sizeof(fs_name));
-            if(strncmp(fs_name, primary_drive_fs_name, sizeof(fs_name)) == 0){
-                primary_fs_disk = disk;
-            }
+    if(!disk->filesystem){
+        return -EFSNOTUS;
+    }
+    if(!first_fs_disk){
+        first_fs_disk = disk;
+    }
+    if(disk->filesystem->volume_name && !primary_fs_disk){
+        char fs_name[12] = {0};
+        disk->filesystem->volume_name(disk->fs_private, fs_name, sizeof(fs_name));
+        if(strncmp(fs_name, SAMOS_KERNEL_FILESYSTEM_NAME, 11) == 0){
+            primary_fs_disk = disk;
         }
     }
     return 0;
@@ -119,85 +117,79 @@ int disk_filesystem_mount(struct disk* disk){
 
 int disk_create_new(struct disk_driver* driver,
                     struct disk* hardware_disk,
-                    int type, int starting_lba, int ending_lba,
+                    int type, uint64_t starting_lba, uint64_t total_sectors,
                     size_t sector_size, void* driver_private_data,
                     struct disk** disk_out){
     int res = 0;
-    struct disk* disk = kzalloc(sizeof(struct disk));
-    if(!disk){
-        res = -ENOMEM;
-        goto out;
+    if(!disk_vector){
+        return -EIO;
+    }
+    // Lecture 183 - REAL disks own themselves; a partition disk
+    // must point at a REAL backing disk.
+    if(hardware_disk && type == SAMOS_DISK_TYPE_REAL){
+        return -EINVARG;
+    }
+    if(type != SAMOS_DISK_TYPE_REAL &&
+       (!hardware_disk || hardware_disk->type != SAMOS_DISK_TYPE_REAL)){
+        return -EINVARG;
+    }
+    if(sector_size == 0 || sector_size > 4096){
+        return -EINVARG;
     }
 
-    // Lecture 183 - REAL disks own themselves; passing in a
-    // separate hardware_disk for a REAL disk is illegal. A
-    // partition disk must point at a REAL backing disk.
-    if(hardware_disk && type == SAMOS_DISK_TYPE_REAL){
-        res = -EINVARG;
-        goto out;
+    struct disk* disk = kzalloc(sizeof(struct disk));
+    if(!disk){
+        return -ENOMEM;
     }
     if(type == SAMOS_DISK_TYPE_REAL){
-        hardware_disk = disk;
-    }
-    if(hardware_disk == NULL){
-        res = -EINVARG;
-        goto out;
-    }
-    if(hardware_disk->type != SAMOS_DISK_TYPE_REAL){
-        res = -EINVARG;
-        goto out;
+        hardware_disk  = disk;
+        disk->cache    = diskstreamer_cache_new();
+        disk->read_only = disk_policy_read_only();
+    } else {
+        disk->cache     = hardware_disk->cache;
+        disk->read_only = hardware_disk->read_only;
     }
 
     disk->type           = type;
     disk->id             = vector_count(disk_vector);
     disk->sector_size    = sector_size;
     disk->starting_lba   = starting_lba;
-    disk->ending_lba     = ending_lba;
+    disk->total_sectors  = total_sectors;
+    disk->ending_lba     = total_sectors ? starting_lba + total_sectors - 1 : 0;
     disk->driver         = driver;
     disk->driver_private = driver_private_data;
     disk->hardware_disk  = hardware_disk;
-    // Lecture 206 - allocate the per-disk stream cache eagerly.
-    disk->cache          = diskstreamer_cache_new();
-
-    // Lecture 186 - filesystem mount moves out of this function
-    // into disk_filesystem_mount. Callers run it after the
-    // driver-side mount work completes. SamOs DEVIATION: the
-    // bootstrap caller still has no driver registered (L189
-    // wires PATA), so we run fs_resolve inline when the disk
-    // arrived without a driver to keep the kernel boot path
-    // alive until then. Upstream drops the inline call and
-    // crashes during early boot, since fs_resolve is normally
-    // called from disk_filesystem_mount that the L189 PATA
-    // bootstrap will invoke.
-    if(!driver){
-        disk_filesystem_mount(disk);
-        if(primary_fs_disk == NULL){
-            primary_fs_disk = disk;
-        }
-    }
 
     if(disk_out){
         *disk_out = disk;
     }
-    vector_push(disk_vector, &disk);
-out:
-    return res;
+    res = vector_push(disk_vector, &disk);
+    return res < 0 ? res : 0;
 }
 
-// Lecture 189 - run every registered disk driver's mount op.
 int disk_mount_all(){
-    int res = 0;
-    res = disk_driver_mount_all();
-    return res;
+    return disk_driver_mount_all();
 }
 
-// Lecture 189 - boot-time disk init now drives the driver
-// registry: disk_driver_system_init populates the registry
-// (which inserts the PATA driver), allocate the disk vector,
-// then mount-all. The legacy disk_create_new for disk0 is
-// gone; PATA's mount handler creates the REAL disk itself.
+// Find the filesystems on one REAL disk.
+static void disk_scan_one(struct disk* disk){
+    int partitions = gpt_scan_disk(disk);
+    if(partitions > 0){
+        return;
+    }
+    if(disk_filesystem_mount(disk) == 0){
+        return;
+    }
+    mbr_scan_disk(disk);
+}
+
 int disk_search_and_init(){
     int res = 0;
+
+    disk_vector = vector_new(sizeof(struct disk*), 4, 0);
+    if(!disk_vector){
+        return -ENOMEM;
+    }
 
     res = disk_driver_system_init();
     if(res < 0){
@@ -205,20 +197,29 @@ int disk_search_and_init(){
         goto out;
     }
 
-    disk_vector = vector_new(sizeof(struct disk*), 4, 0);
-    if(!disk_vector){
-        res = -ENOMEM;
-        goto out;
+    disk_mount_all();
+
+    // Only the REAL disks the drivers created; the scanners
+    // append partition disks behind them.
+    int total = disk_count();
+    for(int i = 0; i < total; i++){
+        struct disk* disk = disk_get(i);
+        if(disk && disk->type == SAMOS_DISK_TYPE_REAL){
+            disk_scan_one(disk);
+        }
+    }
+    // Partition disks were created by the scan; mount theirs.
+    total = disk_count();
+    for(int i = 0; i < total; i++){
+        struct disk* disk = disk_get(i);
+        if(disk && disk->type == SAMOS_DISK_TYPE_PARTITION && !disk->filesystem){
+            disk_filesystem_mount(disk);
+        }
     }
 
-    res = disk_mount_all();
-    if(res < 0){
-        goto out;
+    if(!primary_fs_disk){
+        primary_fs_disk = first_fs_disk;
     }
-
-    // SamOs DEVIATION: cache disk_primary_handle so disk_primary()
-    // keeps working. PATA's mount inserts the new REAL disk at
-    // index 0; we read it back.
     disk_primary_handle = disk_get(0);
 out:
     return res;
@@ -232,9 +233,12 @@ struct disk* disk_primary_fs_disk(void){
     return primary_fs_disk;
 }
 
+int disk_count(void){
+    return disk_vector ? (int)vector_count(disk_vector) : 0;
+}
+
 struct disk* disk_get(int index){
-    size_t total_disks = vector_count(disk_vector);
-    if(index >= (int)total_disks){
+    if(index < 0 || index >= disk_count()){
         return NULL;
     }
     struct disk* disk = NULL;
@@ -242,24 +246,48 @@ struct disk* disk_get(int index){
     return disk;
 }
 
-int disk_read_block(struct disk* idisk, unsigned int lba, int total, void* buf){
-    size_t absolute_lba        = idisk->starting_lba + lba;
-    size_t absolute_ending_lba = absolute_lba + total;
-    if(absolute_ending_lba > idisk->ending_lba){
-        // Bypass bounds check for the primary disk.
-        if(idisk->starting_lba != 0 && idisk->ending_lba != 0){
-            return -EIO;
-        }
+static int disk_check_range(struct disk* idisk, uint64_t lba, int total){
+    if(total <= 0){
+        return -EINVARG;
     }
-    // Lecture 186 - route through the disk-driver vtable when
-    // a driver is registered. SamOs DEVIATION: fall back to the
-    // direct ATA path when the disk predates L189's PATA driver
-    // registration so the bootstrap disk0 keeps working.
-    if(idisk->driver){
-        if(!idisk->driver->functions.read){
-            return -EIO;
-        }
-        return idisk->driver->functions.read(idisk, absolute_lba, total, buf);
+    if(idisk->total_sectors &&
+       (lba >= idisk->total_sectors || (uint64_t)total > idisk->total_sectors - lba)){
+        return -EIO;
     }
-    return disk_read_sector(absolute_lba, total, buf);
+    struct disk* hw = idisk->hardware_disk;
+    if(!hw || !hw->driver){
+        return -EIO;
+    }
+    return 0;
+}
+
+int disk_read_block(struct disk* idisk, uint64_t lba, int total, void* buf){
+    int res = disk_check_range(idisk, lba, total);
+    if(res < 0){
+        return res;
+    }
+    struct disk* hw = idisk->hardware_disk;
+    if(!hw->driver->functions.read){
+        return -EIO;
+    }
+    return hw->driver->functions.read(hw, disk_real_sector(idisk, lba), total, buf);
+}
+
+int disk_write_block(struct disk* idisk, uint64_t lba, int total, const void* buf){
+    int res = disk_check_range(idisk, lba, total);
+    if(res < 0){
+        return res;
+    }
+    if(idisk->read_only){
+        return -ERDONLY;
+    }
+    struct disk* hw = idisk->hardware_disk;
+    if(!hw->driver->functions.write){
+        return -ERDONLY;
+    }
+    uint64_t abs_lba = disk_real_sector(idisk, lba);
+    res = hw->driver->functions.write(hw, abs_lba, total, (void*)buf);
+    // Keep the sector cache coherent with direct block writes.
+    diskstreamer_cache_update(hw, abs_lba, total, buf, res == 0);
+    return res;
 }

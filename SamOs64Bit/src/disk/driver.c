@@ -8,6 +8,7 @@
 #include "memory/memory.h"
 #include "drivers/pata.h"      // L188 - pata_driver_init
 #include "drivers/nvme.h"      // L195 - nvme_driver_init
+#include "drivers/ahci.h"      // ahci_driver_init
 #include "status.h"
 
 struct vector* disk_driver_vec = NULL;
@@ -21,6 +22,11 @@ int disk_driver_system_load_drivers(){
     }
     // Lecture 195 - register the NVME driver.
     res = disk_driver_register(nvme_driver_init());
+    if(res < 0){
+        goto out;
+    }
+    // Register the AHCI (SATA) driver for q35 / real PCs.
+    res = disk_driver_register(ahci_driver_init());
 out:
     return res;
 }
@@ -36,23 +42,6 @@ int disk_driver_system_init(){
     if(res < 0){
         goto out;
     }
-out:
-    return res;
-}
-
-int disk_driver_mount_partition(struct disk_driver* driver, struct disk* disk,
-                                int starting_lba, int ending_lba,
-                                struct disk** partition_disk_out){
-    int res = 0;
-    if(driver != disk->driver || disk->driver == NULL){
-        res = -EINVARG;
-        goto out;
-    }
-    if(disk->type != SAMOS_DISK_TYPE_REAL){
-        res = -EUNIMP;
-        goto out;
-    }
-    res = disk->driver->functions.mount_partition(disk, starting_lba, ending_lba, partition_disk_out);
 out:
     return res;
 }

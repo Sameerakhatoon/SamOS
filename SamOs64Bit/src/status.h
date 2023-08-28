@@ -16,5 +16,10 @@
 #define ETIMEOUT       12  // L137 - PS/2 mouse wait timeout
 #define EINVAL         13  // L178 - PCI ECAM/MCFG invalid args
 #define ENOENT         14  // L178 - PCI ECAM no ranges installed
+#define ENOSPC         15  // Filesystem or directory full
+#define EEXIST         16  // Name already exists
+#define ENOTDIR        17  // Path component is not a directory
+#define EISDIR         18  // File operation on a directory
+#define ENOTEMPTY      19  // Directory not empty
 
 #endif

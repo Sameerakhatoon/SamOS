@@ -14,9 +14,12 @@
 # we substitute the mformat/mcopy pipeline used by SamOs since it
 # does not need sudo or a real mount point.
 
-FILES = ./build/kernel.asm.o ./build/kernel.o ./build/early_fault.o ./build/kernel_selftest.o ./build/string/string.o ./build/memory/memory.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/heap/multiheap.o ./build/memory/pfa.o ./build/memory/heap/slab.o ./build/memory/heap/memtest.o ./build/memory/paging/paging.o ./build/memory/paging/paging.asm.o ./build/io/io.asm.o ./build/io/cpuid.o ./build/io/tsc.o ./build/io/tsc.asm.o ./build/io/serial.o ./build/io/pci.o ./build/idt/idt.o ./build/idt/idt.asm.o ./build/idt/irq.o ./build/task/task.o ./build/task/task.asm.o ./build/task/process.o ./build/task/userlandptr.o ./build/task/tss.asm.o ./build/fs/file.o ./build/fs/pparser.o ./build/fs/fat/fat16.o ./build/disk/disk.o ./build/disk/driver.o ./build/disk/drivers/pata.o ./build/disk/drivers/nvme.o ./build/disk/streamer.o ./build/disk/gpt.o ./build/graphics/graphics.o ./build/graphics/font.o ./build/graphics/terminal.o ./build/graphics/window.o ./build/graphics/image/image.o ./build/graphics/image/bmp.o ./build/mouse/mouse.o ./build/mouse/ps2mouse.o ./build/gdt/gdt.o ./build/keyboard/keyboard.o ./build/keyboard/classic.o ./build/isr80h/isr80h.o ./build/isr80h/io.o ./build/isr80h/heap.o ./build/isr80h/misc.o ./build/isr80h/window.o ./build/isr80h/graphics.o ./build/isr80h/time.o ./build/isr80h/file.o ./build/isr80h/process.o ./build/loader/formats/elf.o ./build/loader/formats/elfloader.o ./build/lib/vector/vector.o
+FILES = ./build/kernel.asm.o ./build/kernel.o ./build/early_fault.o ./build/kernel_selftest.o ./build/string/string.o ./build/memory/memory.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/heap/multiheap.o ./build/memory/pfa.o ./build/memory/heap/slab.o ./build/memory/heap/memtest.o ./build/memory/paging/paging.o ./build/memory/paging/paging.asm.o ./build/io/io.asm.o ./build/io/cpuid.o ./build/io/tsc.o ./build/io/tsc.asm.o ./build/io/serial.o ./build/io/pci.o ./build/idt/idt.o ./build/idt/idt.asm.o ./build/idt/irq.o ./build/task/task.o ./build/task/task.asm.o ./build/task/process.o ./build/task/userlandptr.o ./build/task/tss.asm.o ./build/fs/file.o ./build/fs/pparser.o ./build/fs/fat/fat.o ./build/fs/storage_selftest.o ./build/disk/disk.o ./build/disk/driver.o ./build/disk/drivers/pata.o ./build/disk/drivers/nvme.o ./build/disk/drivers/ahci.o ./build/disk/mbr.o ./build/disk/streamer.o ./build/disk/gpt.o ./build/graphics/graphics.o ./build/graphics/font.o ./build/graphics/terminal.o ./build/graphics/window.o ./build/graphics/image/image.o ./build/graphics/image/bmp.o ./build/mouse/mouse.o ./build/mouse/ps2mouse.o ./build/gdt/gdt.o ./build/keyboard/keyboard.o ./build/keyboard/classic.o ./build/isr80h/isr80h.o ./build/isr80h/io.o ./build/isr80h/heap.o ./build/isr80h/misc.o ./build/isr80h/window.o ./build/isr80h/graphics.o ./build/isr80h/time.o ./build/isr80h/file.o ./build/isr80h/process.o ./build/loader/formats/elf.o ./build/loader/formats/elfloader.o ./build/lib/vector/vector.o
 INCLUDES = -I./src
 FLAGS = -g -ffreestanding -falign-jumps -falign-functions -falign-labels -falign-loops -fstrength-reduce -fomit-frame-pointer -finline-functions -Wno-unused-function -fno-builtin -Werror -Wno-unused-label -Wno-cpp -Wno-unused-parameter -nostdlib -nostartfiles -nodefaultlibs -Wall -O0 -Iinc
+# Extra defines from the command line, e.g.
+#   make EXTRA_CFLAGS=-DSAMOS_STORAGE_WRITE_REAL_HW=1
+FLAGS += $(EXTRA_CFLAGS)
 # Lecture 200 - declare phony targets so the recursive-make
 # invocations do not get short-circuited by the filesystem.
 .PHONY: all clean user_programs user_programs_clean
@@ -124,8 +127,12 @@ user_programs_clean:
 ./build/fs/pparser.o: ./src/fs/pparser.c
 	x86_64-elf-gcc $(INCLUDES) -I./src/fs $(FLAGS) -std=gnu99 -c ./src/fs/pparser.c -o ./build/fs/pparser.o
 
-./build/fs/fat/fat16.o: ./src/fs/fat/fat16.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/fs -I./src/fs/fat $(FLAGS) -std=gnu99 -c ./src/fs/fat/fat16.c -o ./build/fs/fat/fat16.o
+./build/fs/fat/fat.o: ./src/fs/fat/fat.c
+	mkdir -p ./build/fs/fat
+	x86_64-elf-gcc $(INCLUDES) -I./src/fs -I./src/fs/fat $(FLAGS) -std=gnu99 -c ./src/fs/fat/fat.c -o ./build/fs/fat/fat.o
+
+./build/fs/storage_selftest.o: ./src/fs/storage_selftest.c
+	x86_64-elf-gcc $(INCLUDES) -I./src/fs $(FLAGS) -std=gnu99 -c ./src/fs/storage_selftest.c -o ./build/fs/storage_selftest.o
 
 ./build/disk/disk.o: ./src/disk/disk.c
 	x86_64-elf-gcc $(INCLUDES) -I./src/disk $(FLAGS) -std=gnu99 -c ./src/disk/disk.c -o ./build/disk/disk.o
@@ -140,6 +147,13 @@ user_programs_clean:
 ./build/disk/drivers/nvme.o: ./src/disk/drivers/nvme.c
 	mkdir -p ./build/disk/drivers
 	x86_64-elf-gcc $(INCLUDES) -I./src/disk -I./src/disk/drivers $(FLAGS) -std=gnu99 -c ./src/disk/drivers/nvme.c -o ./build/disk/drivers/nvme.o
+
+./build/disk/drivers/ahci.o: ./src/disk/drivers/ahci.c
+	mkdir -p ./build/disk/drivers
+	x86_64-elf-gcc $(INCLUDES) -I./src/disk -I./src/disk/drivers $(FLAGS) -std=gnu99 -c ./src/disk/drivers/ahci.c -o ./build/disk/drivers/ahci.o
+
+./build/disk/mbr.o: ./src/disk/mbr.c
+	x86_64-elf-gcc $(INCLUDES) -I./src/disk $(FLAGS) -std=gnu99 -c ./src/disk/mbr.c -o ./build/disk/mbr.o
 
 ./build/disk/streamer.o: ./src/disk/streamer.c
 	x86_64-elf-gcc $(INCLUDES) -I./src/disk $(FLAGS) -std=gnu99 -c ./src/disk/streamer.c -o ./build/disk/streamer.o

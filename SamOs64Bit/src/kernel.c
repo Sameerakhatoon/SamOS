@@ -30,6 +30,7 @@
 #include "io/pci.h"           // L180 - pci_init
 #include "bootmarker.h"       // e2e: stage markers for runtime tests
 #include "kernel_selftest.h"  // e2e: feature-level runtime self-tests
+#include "fs/storage_selftest.h"  // Storage self-test
 #include "keyboard/keyboard.h"
 #include "fs/file.h"
 #include "fs/pparser.h"
@@ -404,6 +405,8 @@ void kernel_main(void)
     // its dedicated marker slot; host-side tests in
     // tests64/e2e/feature-*.sh dump the markers and assert.
     kernel_selftest();
+    // Only writes to disks labelled SMTEST (test images).
+    storage_selftest();
 
     // Memory-manager self-tests (leak, stress, PFA, slabs).
     memtest_run();

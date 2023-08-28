@@ -4,7 +4,7 @@
 #include "memory/heap/kheap.h"
 #include "status.h"
 #include "kernel.h"
-#include "fat/fat16.h"
+#include "fat/fat.h"
 #include "string/string.h"
 #include "disk/disk.h"
 
@@ -38,7 +38,7 @@ void fs_insert_filesystem(struct filesystem* filesystem){
 }
 
 static void fs_static_load(){
-    fs_insert_filesystem(fat16_init());
+    fs_insert_filesystem(fat_init());
 }
 
 static void fs_load(){
@@ -56,6 +56,9 @@ static int file_new_descriptor(struct file_descriptor** desc_out){
     for(int i = 0; i < SAMOS_MAX_FILE_DESCRIPTORS; i++){
         if(file_descriptors[i] == 0){
             struct file_descriptor* desc = kzalloc(sizeof(struct file_descriptor));
+            if(!desc){
+                return -ENOMEM;
+            }
             // Descriptors start at 1.
             desc->index = i + 1;
             file_descriptors[i] = desc;
@@ -68,7 +71,7 @@ static int file_new_descriptor(struct file_descriptor** desc_out){
 }
 
 static struct file_descriptor* file_get_descriptor(int fd){
-    if(fd <= 0 || fd >= SAMOS_MAX_FILE_DESCRIPTORS){
+    if(fd <= 0 || fd > SAMOS_MAX_FILE_DESCRIPTORS){
         return 0;
     }
     int index = fd - 1;
@@ -98,11 +101,37 @@ static FILE_MODE file_get_mode_by_string(const char* str){
     return mode;
 }
 
+// Parse a path and find its disk. On success the caller
+// owns *root_out and must pathparser_free it.
+static int file_resolve_path(const char* path, struct path_root** root_out, struct disk** disk_out){
+    struct path_root* root_path = pathparser_parse(path, NULL);
+    if(!root_path){
+        return -EBADPATH;
+    }
+    struct disk* disk = disk_get(root_path->drive_no);
+    if(!disk || !disk->filesystem){
+        pathparser_free(root_path);
+        return -EIO;
+    }
+    *root_out = root_path;
+    *disk_out = disk;
+    return 0;
+}
+
 int fopen(const char* filename, const char* mode_str){
     int res = 0;
-    struct path_root* root_path = pathparser_parse(filename, NULL);
-    if(!root_path){
+    struct path_root* root_path = NULL;
+    struct disk* disk = NULL;
+    void* descriptor_private_data = NULL;
+
+    FILE_MODE mode = file_get_mode_by_string(mode_str);
+    if(mode == FILE_MODE_INVALID){
         res = -EINVARG;
+        goto out;
+    }
+
+    res = file_resolve_path(filename, &root_path, &disk);
+    if(res < 0){
         goto out;
     }
 
@@ -112,24 +141,7 @@ int fopen(const char* filename, const char* mode_str){
         goto out;
     }
 
-    struct disk* disk = disk_get(root_path->drive_no);
-    if(!disk){
-        res = -EIO;
-        goto out;
-    }
-
-    if(!disk->filesystem){
-        res = -EIO;
-        goto out;
-    }
-
-    FILE_MODE mode = file_get_mode_by_string(mode_str);
-    if(mode == FILE_MODE_INVALID){
-        res = -EINVARG;
-        goto out;
-    }
-
-    void* descriptor_private_data = disk->filesystem->open(disk, root_path->first, mode);
+    descriptor_private_data = disk->filesystem->open(disk, root_path->first, mode);
     if(ISERR(descriptor_private_data)){
         res = ERROR_I(descriptor_private_data);
         goto out;
@@ -138,6 +150,7 @@ int fopen(const char* filename, const char* mode_str){
     struct file_descriptor* desc = 0;
     res = file_new_descriptor(&desc);
     if(res < 0){
+        disk->filesystem->close(descriptor_private_data);
         goto out;
     }
 
@@ -147,6 +160,9 @@ int fopen(const char* filename, const char* mode_str){
     res = desc->index;
 
 out:
+    if(root_path){
+        pathparser_free(root_path);
+    }
     // fopen should never return a negative value.
     if(res < 0){
         res = 0;
@@ -162,7 +178,7 @@ int fread(void* ptr, uint32_t size, uint32_t nmemb, int fd){
     }
 
     struct file_descriptor* desc = file_get_descriptor(fd);
-    if(!desc){
+    if(!desc || desc->is_directory){
         res = -EINVARG;
         goto out;
     }
@@ -176,7 +192,7 @@ out:
 int fseek(int fd, int offset, FILE_SEEK_MODE whence){
     int res = 0;
     struct file_descriptor* desc = file_get_descriptor(fd);
-    if(!desc){
+    if(!desc || desc->is_directory){
         res = -EIO;
         goto out;
     }
@@ -221,4 +237,106 @@ int fclose(int fd){
 
 out:
     return res;
+}
+
+// ---------------------------------------------------------------
+// Write side of the VFS.
+// ---------------------------------------------------------------
+
+int fwrite(const void* ptr, uint32_t size, uint32_t nmemb, int fd){
+    if(size == 0 || nmemb == 0 || !ptr){
+        return -EINVARG;
+    }
+    struct file_descriptor* desc = file_get_descriptor(fd);
+    if(!desc || desc->is_directory){
+        return -EINVARG;
+    }
+    if(!desc->filesystem->write){
+        return -ERDONLY;
+    }
+    return desc->filesystem->write(desc->disk, desc->private, size, nmemb, (const char*)ptr);
+}
+
+int ftruncate(int fd, uint32_t size){
+    struct file_descriptor* desc = file_get_descriptor(fd);
+    if(!desc || desc->is_directory){
+        return -EINVARG;
+    }
+    if(!desc->filesystem->truncate){
+        return -ERDONLY;
+    }
+    return desc->filesystem->truncate(desc->private, size);
+}
+
+int fremove(const char* path){
+    struct path_root* root_path = NULL;
+    struct disk* disk = NULL;
+    int res = file_resolve_path(path, &root_path, &disk);
+    if(res < 0){
+        return res;
+    }
+    if(!root_path->first){
+        res = -EINVARG;          // the root directory itself
+    } else if(!disk->filesystem->unlink){
+        res = -ERDONLY;
+    } else {
+        res = disk->filesystem->unlink(disk, root_path->first);
+    }
+    pathparser_free(root_path);
+    return res;
+}
+
+int fmkdir(const char* path){
+    struct path_root* root_path = NULL;
+    struct disk* disk = NULL;
+    int res = file_resolve_path(path, &root_path, &disk);
+    if(res < 0){
+        return res;
+    }
+    if(!root_path->first){
+        res = -EEXIST;
+    } else if(!disk->filesystem->mkdir){
+        res = -ERDONLY;
+    } else {
+        res = disk->filesystem->mkdir(disk, root_path->first);
+    }
+    pathparser_free(root_path);
+    return res;
+}
+
+int fopendir(const char* path){
+    struct path_root* root_path = NULL;
+    struct disk* disk = NULL;
+    int res = file_resolve_path(path, &root_path, &disk);
+    if(res < 0){
+        return res;
+    }
+    if(!disk->filesystem->opendir){
+        pathparser_free(root_path);
+        return -EUNIMP;
+    }
+    void* private = disk->filesystem->opendir(disk, root_path->first);
+    pathparser_free(root_path);
+    if(ISERR(private)){
+        return ERROR_I(private);
+    }
+    struct file_descriptor* desc = 0;
+    res = file_new_descriptor(&desc);
+    if(res < 0){
+        disk->filesystem->close(private);
+        return res;
+    }
+    desc->filesystem   = disk->filesystem;
+    desc->private      = private;
+    desc->disk         = disk;
+    desc->is_directory = 1;
+    return desc->index;
+}
+
+int freaddir(int fd, struct file_dirent* entry){
+    struct file_descriptor* desc = file_get_descriptor(fd);
+    if(!desc || !desc->is_directory || !entry){
+        return -EINVARG;
+    }
+    return desc->filesystem->readdir(desc->private, entry);
 }

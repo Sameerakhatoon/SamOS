@@ -2,6 +2,8 @@
 #define DISK_H
 
 #include <stddef.h>
+#include <stdint.h>
+#include <stdbool.h>
 #include "fs/file.h"
 #include "driver.h"           // L184 - struct disk_driver
 
@@ -14,8 +16,8 @@ typedef unsigned int SAMOS_DISK_TYPE;
 #define SAMOS_DISK_TYPE_PARTITION   1
 
 // Lecture 78 - the volume label our kernel filesystem uses.
-// disk_create_new sets primary_fs_disk to the disk whose
-// FAT16 volume label matches.
+// disk_filesystem_mount sets primary_fs_disk to the disk whose
+// FAT volume label matches.
 #define SAMOS_KERNEL_FILESYSTEM_NAME "SAMOS      "
 
 // Lecture 183 - forward decl for the driver pointer added below.
@@ -29,8 +31,8 @@ struct disk {
     int                 id;
     struct filesystem*  filesystem;
 
-    // Lecture 184 - owning disk driver (NULL for the bootstrap
-    // disk0 that predates the abstraction).
+    // Lecture 184 - owning disk driver. Partitions inherit the
+    // driver of the REAL disk they live on.
     struct disk_driver* driver;
 
     // Lecture 183 - back-pointer to the physical disk this disk
@@ -38,62 +40,74 @@ struct disk {
     // disk; REAL disks point at themselves.
     struct disk*        hardware_disk;
 
-    // Lecture 203 - per-disk stream cache. The L204+ source
-    // populates it lazily on first cached read.
+    // Sector cache. Only the REAL disk owns one; partition
+    // disks share it through hardware_disk so a write through
+    // one view is seen by every other view of the same sectors.
     struct disk_stream_cache* cache;
 
-    // Lecture 78 - LBA bounds. Set both to zero for the
-    // primary disk; all bounds checking is then bypassed.
-    size_t              starting_lba;
-    size_t              ending_lba;
+    // LBA bounds, 64-bit. starting_lba is absolute on the
+    // hardware disk. total_sectors is the size of this view
+    // (0 = unknown, no bounds check; only for REAL disks whose
+    // driver could not report a size).
+    uint64_t            starting_lba;
+    uint64_t            ending_lba;     // inclusive, kept for GPT symmetry
+    uint64_t            total_sectors;
+
+    // Writes are refused when set. See disk_policy_* in
+    // disk.c: internal disks on real hardware start read-only.
+    bool                read_only;
 
     void*               fs_private;
 
     // Lecture 183 - disk-driver-side opaque pointer (PATA per-
-    // channel state, NVME submission queue, etc).
+    // drive state, NVME queues, AHCI port state). Partitions
+    // copy their parent's pointer.
     void*               driver_private;
 };
 
-// Lecture 189 - returns int now (0 OK / negative on error).
 int          disk_search_and_init();
 int          disk_mount_all();
 struct disk* disk_get(int index);
-int          disk_read_block(struct disk* idisk, unsigned int lba, int total, void* buf);
+int          disk_count(void);
 
-// Lecture 78 / 183 - virtual-disk constructor. L183 widens the
-// signature with a `disk_driver*`, a `hardware_disk*`, and a
-// `driver_private` pointer. type=REAL forces hardware_disk=self.
+// Sector I/O relative to the disk view. Partitions are
+// translated to absolute LBAs and routed through the hardware
+// disk's driver. Bounds are checked against total_sectors.
+int          disk_read_block(struct disk* idisk, uint64_t lba, int total, void* buf);
+int          disk_write_block(struct disk* idisk, uint64_t lba, int total, const void* buf);
+
+// Lecture 78 / 183 - virtual-disk constructor. type=REAL forces
+// hardware_disk=self. total_sectors may be 0 for "unknown".
 int          disk_create_new(struct disk_driver* driver,
                              struct disk* hardware_disk,
-                             int type, int starting_lba, int ending_lba,
+                             int type, uint64_t starting_lba, uint64_t total_sectors,
                              size_t sector_size,
                              void* driver_private_data,
                              struct disk** disk_out);
 
-// Lecture 183 - accessor for the disk's hardware backing.
 struct disk* disk_hardware_disk(struct disk* disk);
 
 // Lecture 186 - run fs_resolve against the disk and (if the
 // label matches) set primary_fs_disk.
 int          disk_filesystem_mount(struct disk* disk);
 
-// Lecture 186 - delegate partition creation to the disk's
-// driver.
+// make a partition view of a REAL disk. LBAs are
+// relative to the REAL disk; ending_lba is inclusive.
 int          disk_create_partition(struct disk* disk,
-                                   int starting_lba, int ending_lba,
+                                   uint64_t starting_lba, uint64_t ending_lba,
                                    struct disk** partition_disk_out);
 
-// Lecture 188 - per-disk driver private data accessor.
-// (Upstream's decl lands at L189; SamOs hoists it here so the
-// L188 PATA source links cleanly.)
 void*        disk_private_data_driver(struct disk* disk);
 
-// Lecture 206 - absolute-LBA + byte-offset accessors used by
-// the disk stream cache.
-long         disk_real_sector(struct disk* idisk, unsigned int lba);
-long         disk_real_offset(struct disk* idisk, unsigned int lba);
+// Lecture 206 - absolute-LBA + byte-offset accessors.
+uint64_t     disk_real_sector(struct disk* idisk, uint64_t lba);
+uint64_t     disk_real_offset(struct disk* idisk, uint64_t lba);
 
 struct disk* disk_primary(void);
 struct disk* disk_primary_fs_disk(void);
+
+// True when the kernel runs under a hypervisor (CPUID
+// leaf 1 ECX bit 31). Used by the read-only policy.
+bool         disk_running_on_hypervisor(void);
 
 #endif

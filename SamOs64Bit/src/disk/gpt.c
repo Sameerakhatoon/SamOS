@@ -5,124 +5,142 @@
 //   LBA 1 - primary GPT header
 //   LBA 2..N - partition entry array
 //   ...
-//   LBA -1 - backup partition entry array
-//   LBA -N - backup GPT header
+//   LBA -33..-2 - backup partition entry array
+//   LBA -1 - backup GPT header
 //
-// gpt_init reads the header at LBA 1, validates the "EFI PART"
-// signature, and walks the partition entry array creating one
-// virtual disk per non-empty entry.
-//
-// SamOs DEVIATION: the upstream code references disk_create_new
-// with PEACHOS_DISK_TYPE_PARTITION which is added in L78. This
-// file therefore does not compile against L77 alone - it's
-// staged on disk pending L78 wiring it up. Our Makefile does
-// not yet add gpt.o to FILES.
+// Changes:
+//   - Runs on every REAL disk (the course only scanned disk 0).
+//   - Checks the header CRC32 and the entry-array CRC32, and
+//     falls back to the backup header if the primary is bad.
+//   - 64-bit LBAs end to end (the course truncated the entry
+//     array's byte offset to int).
+//   - Partition disks reuse the parent disk's driver, so reads
+//     no longer fall back to hard-coded IDE ports.
 
 #include "gpt.h"
 #include "disk/disk.h"
 #include "status.h"
 #include "memory/memory.h"
-#include "disk/streamer.h"
+#include "memory/heap/kheap.h"
 #include "kernel.h"
 
-struct disk* gpt_primary_disk = NULL;
+// Refuse silly entry arrays (the spec minimum is 16 KiB; nobody
+// uses more than a few hundred KiB).
+#define GPT_MAX_ARRAY_BYTES (1024 * 1024)
 
-// Some headers have trailing padding past the documented size.
-// Real size = sizeof(*header) + (declared - documented offset).
-size_t gpt_partition_table_header_real_size(struct gpt_partition_table_header* header){
-    return sizeof(*header) + (header->hdr_size - offsetof(struct gpt_partition_table_header, reserved2));
-}
+static int gpt_partitions_found = 0;
 
-int gpt_partition_table_header_read(struct gpt_partition_table_header* header_out){
-    int res = 0;
-    // C99 VLA gives us a stack-allocated sector buffer. The
-    // GPT primary header always sits in LBA 1, one sector.
-    char sector[gpt_primary_disk->sector_size];
-    res = disk_read_block(gpt_primary_disk, GPT_PARTITION_TABLE_HEADER_LBA, 1, sector);
-    if(res < 0){
-        goto out;
-    }
-    memcpy(header_out, sector, sizeof(*header_out));
-out:
-    return res;
-}
-
-int gpt_mount_partitions(struct gpt_partition_table_header* partition_header){
-    int res = 0;
-    size_t   total_entries = partition_header->total_array_entries;
-    uint64_t starting_lba  = partition_header->guid_array_lba_start;
-    uint64_t starting_byte = starting_lba * gpt_primary_disk->sector_size;
-    size_t   entry_size    = partition_header->array_entry_size;
-
-    struct disk_stream* streamer = diskstreamer_new(gpt_primary_disk->id);
-    if(!streamer){
-        res = -EINVARG;
-        goto out;
-    }
-
-    res = diskstreamer_seek(streamer, (int)starting_byte);
-    if(res < 0){
-        goto out;
-    }
-
-    for(size_t i = 0; i < total_entries; i++){
-        char buffer[entry_size];
-        res = diskstreamer_read(streamer, buffer, sizeof(buffer));
-        if(res < 0){
-            goto out;
+uint32_t gpt_crc32(const void* data, size_t len){
+    const uint8_t* p = data;
+    uint32_t crc = 0xFFFFFFFFu;
+    for(size_t i = 0; i < len; i++){
+        crc ^= p[i];
+        for(int k = 0; k < 8; k++){
+            crc = (crc >> 1) ^ (0xEDB88320u & (uint32_t)-(int32_t)(crc & 1));
         }
+    }
+    return ~crc;
+}
 
-        struct gpt_partition_entry* entry = (struct gpt_partition_entry*)buffer;
+// Read and validate the header at `lba`. On success *array_out
+// holds the (CRC-checked) entry array; the caller frees it.
+static int gpt_read_valid(struct disk* disk, uint64_t lba,
+                          struct gpt_partition_table_header* header_out,
+                          void** array_out){
+    int res = 0;
+    int ss = disk->sector_size;
+    char sector[ss];
+    void* array = NULL;
+
+    res = disk_read_block(disk, lba, 1, sector);
+    if(res < 0){
+        return res;
+    }
+    struct gpt_partition_table_header* header = (struct gpt_partition_table_header*)sector;
+    if(memcmp(header->signature, GPT_SIGNATURE, sizeof(header->signature)) != 0){
+        return -EINFORMAT;
+    }
+    if(header->hdr_size < 92 || header->hdr_size > (uint32_t)ss || header->lba != lba){
+        return -EINFORMAT;
+    }
+    uint32_t stored_crc = header->cr32_checksum;
+    header->cr32_checksum = 0;
+    uint32_t crc = gpt_crc32(header, header->hdr_size);
+    header->cr32_checksum = stored_crc;
+    if(crc != stored_crc){
+        return -EINFORMAT;
+    }
+
+    uint64_t entry_size = header->array_entry_size;
+    uint64_t array_bytes = entry_size * header->total_array_entries;
+    if(entry_size < sizeof(struct gpt_partition_entry) || (entry_size % 8) != 0 ||
+       array_bytes == 0 || array_bytes > GPT_MAX_ARRAY_BYTES){
+        return -EINFORMAT;
+    }
+    int array_sectors = (int)((array_bytes + ss - 1) / ss);
+    array = kzalloc((size_t)array_sectors * ss);
+    if(!array){
+        return -ENOMEM;
+    }
+    res = disk_read_block(disk, header->guid_array_lba_start, array_sectors, array);
+    if(res < 0){
+        kfree(array);
+        return res;
+    }
+    if(gpt_crc32(array, array_bytes) != header->crc32_entry_array){
+        kfree(array);
+        return -EINFORMAT;
+    }
+
+    memcpy(header_out, header, sizeof(*header_out));
+    *array_out = array;
+    return 0;
+}
+
+int gpt_scan_disk(struct disk* disk){
+    struct gpt_partition_table_header header;
+    void* array = NULL;
+    int created = 0;
+
+    if(!disk || disk->type != SAMOS_DISK_TYPE_REAL){
+        return -EINVARG;
+    }
+
+    int res = gpt_read_valid(disk, GPT_PARTITION_TABLE_HEADER_LBA, &header, &array);
+    if(res < 0){
+        // Primary damaged: the backup header sits in the last
+        // sector. Only possible when the driver knows the size.
+        if(disk->total_sectors < 3){
+            return 0;
+        }
+        res = gpt_read_valid(disk, disk->total_sectors - 1, &header, &array);
+        if(res < 0){
+            return 0;
+        }
+        print("gpt: primary header bad, using backup\n");
+    }
+
+    for(uint32_t i = 0; i < header.total_array_entries; i++){
+        struct gpt_partition_entry* entry =
+            (struct gpt_partition_entry*)((char*)array + (size_t)i * header.array_entry_size);
         char guid_empty[16] = {0};
         if(memcmp(entry->guid, guid_empty, sizeof(entry->guid)) == 0){
-            // Empty slot - skip.
             continue;
         }
-
-        // L77 - depends on disk_create_new + PEACHOS_DISK_TYPE_PARTITION
-        // (= SAMOS_DISK_TYPE_PARTITION in our prefix scheme) which the
-        // L78 virtual-disk patch adds.
-        // Lecture 183 - new disk_create_new signature: pass
-        // driver=NULL, hardware_disk=primary, driver_private=NULL.
-        res = disk_create_new(NULL, gpt_primary_disk,
-                              SAMOS_DISK_TYPE_PARTITION,
-                              entry->starting_lba, entry->ending_lba,
-                              gpt_primary_disk->sector_size, NULL, NULL);
-        if(res < 0){
-            goto out;
+        if(entry->ending_lba < entry->starting_lba ||
+           entry->starting_lba < header.data_block_lba ||
+           entry->ending_lba > header.data_block_lba_end){
+            continue;
+        }
+        if(disk_create_partition(disk, entry->starting_lba, entry->ending_lba, NULL) == 0){
+            created++;
         }
     }
-out:
-    return res;
+    kfree(array);
+    gpt_partitions_found += created;
+    return created;
 }
 
 int gpt_init(void){
-    int res = 0;
-    struct gpt_partition_table_header partition_header = {0};
-
-    gpt_primary_disk = disk_get(0);
-    if(!gpt_primary_disk){
-        res = -EINVARG;
-        goto out;
-    }
-
-    res = gpt_partition_table_header_read(&partition_header);
-    if(res < 0){
-        goto out;
-    }
-
-    if(memcmp(partition_header.signature, GPT_SIGNATURE,
-              sizeof(partition_header.signature)) != 0){
-        // Not a GPT-formatted disk.
-        res = -EINFORMAT;
-        goto out;
-    }
-
-    // GPT confirmed - mount each non-empty entry as a virtual disk.
-    res = gpt_mount_partitions(&partition_header);
-    if(res < 0){
-        goto out;
-    }
-out:
-    return res;
+    return gpt_partitions_found > 0 ? 0 : -EINFORMAT;
 }

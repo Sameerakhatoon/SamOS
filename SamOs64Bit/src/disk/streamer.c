@@ -1,278 +1,200 @@
+// Lecture 83 / 203-207 - disk streamer + sector cache.
+// The storage work rewrite; see streamer.h for why the course's cache tree
+// was replaced.
+
 #include "streamer.h"
 #include "memory/heap/kheap.h"
-#include "memory/memory.h"   // L64 - memcpy
+#include "memory/memory.h"
 #include "config.h"
-#include "kernel.h"          // L204 - panic + krealloc
-#include "status.h"          // L204 - status codes
-#include <stdbool.h>
+#include "kernel.h"
+#include "status.h"
 
-// Lecture 204 - per-disk stream cache. The cache is a sparse
-// three-level lookup tree (level1 -> level2 -> level3 of cache
-// sectors) plus a round-robin eviction queue. L205 lands the
-// path-walk + lookup helpers, L206/L207 wire it into read.
+// Runs of at least this many whole sectors bypass the cache on
+// read and go straight to the driver (one multi-sector command
+// instead of one command per sector). Safe because the cache is
+// write-through: the disk always holds the newest data.
+#define DISK_STREAM_DIRECT_RUN 8
 
 struct disk_stream_cache* diskstreamer_cache_new(){
-    struct disk_stream_cache* cache = kzalloc(sizeof(struct disk_stream_cache));
+    return kzalloc(sizeof(struct disk_stream_cache));
+}
+
+static struct disk_stream_cache_slot* diskstreamer_cache_slot(struct disk_stream_cache* cache,
+                                                             uint64_t abs_lba){
+    return &cache->slots[abs_lba % DISK_STREAM_CACHE_SLOTS];
+}
+
+void diskstreamer_cache_update(struct disk* hw, uint64_t abs_lba, int total,
+                               const void* data, bool ok){
+    struct disk_stream_cache* cache = hw ? hw->cache : NULL;
     if(!cache){
-        goto out;
+        return;
     }
-out:
-    return cache;
-}
-
-// Lecture 204 / 206 - L204 shipped this sizeof with the typo
-// `struct disk_Stream_cache_bucket_level1**` (capital S). L206
-// fixes it to the correct struct name.
-struct disk_stream_cache_bucket_level1* diskstreamer_cache_bucket_level1_get(
-    struct disk_stream_cache* cache, int index){
-    struct disk_stream_cache_bucket_level1* level1 = NULL;
-    if((int)cache->total <= index){
-        size_t old_total = cache->total;
-        size_t new_total = index + 1;
-        size_t new_size = new_total * sizeof(struct disk_stream_cache_bucket_level1**);
-
-        struct disk_stream_cache_bucket_level1** new_buckets =
-            krealloc(cache->buckets, new_size);
-        if(!new_buckets){
-            return NULL;
+    for(int i = 0; i < total; i++){
+        struct disk_stream_cache_slot* slot = diskstreamer_cache_slot(cache, abs_lba + i);
+        if(!slot->valid || slot->lba != abs_lba + i){
+            continue;
         }
-        memset(new_buckets + old_total, 0,
-               (new_total - old_total) * sizeof(*new_buckets));
-        cache->buckets = new_buckets;
-        cache->total   = new_total;
-    }
-
-    level1 = cache->buckets[index];
-    if(!level1){
-        cache->buckets[index] = kzalloc(sizeof(struct disk_stream_cache_bucket_level1));
-        if(!cache->buckets[index]){
-            return NULL;
-        }
-        level1 = cache->buckets[index];
-        level1->total_buckets = 0;
-    }
-    return level1;
-}
-
-struct disk_stream_cache_bucket_level2* diskstreamer_cache_bucket_level2_get(
-    struct disk_stream_cache_bucket_level1* level1_bucket, int index){
-    int max_buckets = (sizeof(level1_bucket->buckets) / sizeof(*level1_bucket->buckets));
-    if(index >= max_buckets){
-        return NULL;
-    }
-    struct disk_stream_cache_bucket_level2* level_two = level1_bucket->buckets[index];
-    if(!level_two){
-        level_two = kzalloc(sizeof(struct disk_stream_cache_bucket_level2));
-        if(!level_two){
-            return NULL;
-        }
-        level_two->total_buckets = 0;
-        level1_bucket->buckets[index] = level_two;
-    }
-    return level_two;
-}
-
-struct disk_stream_cache_bucket_level3* diskstreamer_cache_bucket_level3_get(
-    struct disk_stream_cache_bucket_level2* level2, int index){
-    struct disk_stream_cache_bucket_level3* level3 = NULL;
-    int max_buckets = (sizeof(level2->buckets) / sizeof(*level2->buckets));
-    if(index >= max_buckets){
-        return NULL;
-    }
-    level3 = level2->buckets[index];
-    if(!level3){
-        level3 = kzalloc(sizeof(struct disk_stream_cache_bucket_level3));
-        if(!level3){
-            return NULL;
-        }
-        level3->total_sectors = 0;
-        level2->buckets[index] = level3;
-    }
-    return level3;
-}
-
-void diskstreamer_cache_bucket_level3_free(struct disk_stream_cache_bucket_level3* level3){
-    for(size_t i = 0; i < DISK_STREAM_LEVEL3_SECTORS_ARRAY_SIZE; i++){
-        kfree(level3->sectors[i]);
-    }
-    kfree(level3);
-}
-
-// Lecture 205 - round-robin eviction. When the queue is full
-// the oldest bucket's refcount drops; on zero we free it.
-int diskstreamer_cache_round_robin_add(struct disk_stream_cache* cache,
-                                       struct disk_stream_cache_bucket_level3* level3){
-    int res = 0;
-    int index = cache->mem_roundrobin.pos % DISK_STREAM_CACHE_ROUNDROBIN_MAX;
-    struct disk_stream_cache_bucket_level3* old_elem = cache->mem_roundrobin.queue[index];
-    if(old_elem){
-        old_elem->roundrobin_count--;
-        if(old_elem->roundrobin_count == 0){
-            diskstreamer_cache_bucket_level3_free(old_elem);
+        if(ok){
+            memcpy(slot->buf, (char*)data + (size_t)i * hw->sector_size, hw->sector_size);
+        } else {
+            slot->valid = false;
         }
     }
-    cache->mem_roundrobin.queue[index] = level3;
-    cache->mem_roundrobin.queue[index]->roundrobin_count++;
-    cache->mem_roundrobin.pos++;
-    return res;
 }
 
-// Lecture 205 - look up the cache sector for `pos`. Walks
-// level1 -> level2 -> level3 -> sector. Returns
-// DISK_STREAMER_CACHE_STATUS_NEW_CACHE_ENTRY when the slot was
-// freshly allocated (caller must populate it) or
-// DISK_STREAMER_CACHE_STATUS_CACHE_FOUND on hit.
-//
-// Upstream uses -EINVAL / -ENOENT here; SamOs's status.h
-// provides EINVAL / ENOENT (added at L178).
-int diskstreamer_cache_find(struct disk* disk, int pos,
-                            struct disk_stream_cache_sector** cache_sector_out){
-    int res = DISK_STREAMER_CACHE_STATUS_CACHE_FOUND;
+// Return the cached copy of one sector of the view, reading it
+// from the disk on a miss.
+static int diskstreamer_cache_get(struct disk* disk, uint64_t lba, char** buf_out){
     struct disk_stream_cache* cache = disk->cache;
+    uint64_t abs_lba = disk_real_sector(disk, lba);
     if(!cache){
-        return -ENOENT;
+        return -EIO;
     }
-
-    long level1_size = DISK_STREAM_BUCKET1_BYTE_SIZE(disk->sector_size);
-    long level2_size = DISK_STREAM_BUCKET2_BYTE_SIZE(disk->sector_size);
-    long level3_size = DISK_STREAM_BUCKET3_BYTE_SIZE(disk->sector_size);
-
-    long level1_bucket = pos / level1_size;
-    long pos_in_level1 = pos % level1_size;
-    long level2_bucket = pos_in_level1 / level2_size;
-    long pos_in_level2 = pos_in_level1 % level2_size;
-    long level3_bucket = pos_in_level2 / level3_size;
-
-    struct disk_stream_cache_bucket_level1* level1 =
-        diskstreamer_cache_bucket_level1_get(cache, level1_bucket);
-    if(!level1){
-        return -EINVAL;
+    struct disk_stream_cache_slot* slot = diskstreamer_cache_slot(cache, abs_lba);
+    if(slot->valid && slot->lba == abs_lba){
+        cache->hits++;
+        *buf_out = slot->buf;
+        return 0;
     }
-    struct disk_stream_cache_bucket_level2* level2 =
-        diskstreamer_cache_bucket_level2_get(level1, level2_bucket);
-    if(!level2){
-        return -EINVAL;
-    }
-    struct disk_stream_cache_bucket_level3* level3 =
-        diskstreamer_cache_bucket_level3_get(level2, level3_bucket);
-    if(!level3){
-        return -EINVAL;
-    }
-
-    long pos_in_level3 = pos_in_level2 % level3_size;
-    int byte_offset    = (pos_in_level3 % (sizeof(level3->sectors) * disk->sector_size));
-    int sector_index   = (byte_offset / disk->sector_size);
-    if(!level3->sectors[sector_index]){
-        level3->sectors[sector_index] = kzalloc(sizeof(struct disk_stream_cache_sector));
-        if(!level3->sectors[sector_index]){
+    cache->misses++;
+    if(!slot->buf){
+        slot->buf = kzalloc(DISK_STREAMER_MAX_CACHE_SECTOR_SIZE);
+        if(!slot->buf){
             return -ENOMEM;
         }
-        level3->total_sectors++;
-        diskstreamer_cache_round_robin_add(cache, level3);
-        res = DISK_STREAMER_CACHE_STATUS_NEW_CACHE_ENTRY;
     }
-    if(cache_sector_out){
-        *cache_sector_out = level3->sectors[sector_index];
+    slot->valid = false;
+    int res = disk_read_block(disk, lba, 1, slot->buf);
+    if(res < 0){
+        return res;
     }
-    return res;
+    slot->lba   = abs_lba;
+    slot->valid = true;
+    *buf_out    = slot->buf;
+    return 0;
 }
 
 struct disk_stream* diskstreamer_new(int disk_id){
-    struct disk* disk = disk_get(disk_id);
-    if(!disk){
-        return 0;
-    }
-
-    // Lecture 207 - delegate to diskstreamer_new_from_disk so
-    // both constructors share the same init path (pos +
-    // sector_size + disk).
-    return diskstreamer_new_from_disk(disk);
+    return diskstreamer_new_from_disk(disk_get(disk_id));
 }
 
-// Lecture 83 - alternative constructor for callers that already
-// hold the disk pointer (FAT16 in particular, after the L78/L82
-// virtual-disk wiring).
 struct disk_stream* diskstreamer_new_from_disk(struct disk* disk){
     if(!disk){
         return 0;
     }
     struct disk_stream* streamer = kzalloc(sizeof(struct disk_stream));
+    if(!streamer){
+        return 0;
+    }
     streamer->pos         = 0;
     streamer->sector_size = disk->sector_size;
     streamer->disk        = disk;
     return streamer;
 }
 
-int diskstreamer_seek(struct disk_stream* stream, int pos){
+int diskstreamer_seek(struct disk_stream* stream, int64_t pos){
+    if(pos < 0){
+        return -EINVARG;
+    }
     stream->pos = pos;
     return 0;
 }
 
-// Lecture 64 / 205 / 206 - read through the per-disk stream
-// cache. The loop aligns the read window to the sector grid,
-// then for each sector it consults the cache: hit reads from
-// the cache buffer; miss reads the sector through
-// disk_read_block into the freshly allocated cache slot.
 int diskstreamer_read(struct disk_stream* stream, void* out, int total){
-    int res = 0;
-    int offset = stream->pos;
-    int offset_aligned_down = offset;
-    int starting_sector = 0;
-    int ending_sector   = 0;
-    int total_bytes_aligned = 0;
-    int total_sectors_to_read = 0;
-    int final_offset = 0;
-    int final_offset_aligned_up = 0;
-
-    if((offset % stream->sector_size) != 0){
-        offset_aligned_down -= (offset % stream->sector_size);
+    char* dst = out;
+    int64_t ss = stream->sector_size;
+    if(total < 0){
+        return -EINVARG;
     }
+    while(total > 0){
+        uint64_t lba    = stream->pos / ss;
+        int      offset = stream->pos % ss;
 
-    starting_sector         = offset_aligned_down / stream->sector_size;
-    final_offset            = offset + total;
-    final_offset_aligned_up = final_offset;
-    if((final_offset % stream->sector_size) != 0){
-        final_offset_aligned_up += (stream->sector_size -
-                                    (final_offset_aligned_up % stream->sector_size));
-    }
-
-    ending_sector         = final_offset_aligned_up / stream->sector_size;
-    total_bytes_aligned   = final_offset_aligned_up - offset_aligned_down;
-    total_sectors_to_read = total_bytes_aligned / stream->sector_size;
-    if(total_sectors_to_read < 0){
-        panic("you went below zero\n");
-    }
-
-    for(int i = starting_sector; i <= ending_sector; i++){
-        int offset_in_sector = stream->pos % stream->sector_size;
-        int amount_read = stream->sector_size - (stream->pos % stream->sector_size);
-        if(total < stream->sector_size){
-            amount_read = total;
-        }
-
-        long real_offset = disk_real_offset(stream->disk, i);
-        struct disk_stream_cache_sector* cache_sector = NULL;
-        int cache_res = diskstreamer_cache_find(stream->disk, real_offset, &cache_sector);
-        if(cache_res < 0){
-            res = cache_res;
-            goto out;
-        }
-
-        if(cache_res == DISK_STREAMER_CACHE_STATUS_NEW_CACHE_ENTRY){
-            res = disk_read_block(stream->disk, i, 1, cache_sector->buf);
-            if(res < 0){
-                goto out;
+        if(offset == 0 && total >= ss * DISK_STREAM_DIRECT_RUN){
+            int sectors = total / ss;
+            if(sectors > 128){
+                sectors = 128;
             }
+            int res = disk_read_block(stream->disk, lba, sectors, dst);
+            if(res < 0){
+                return res;
+            }
+            dst         += sectors * ss;
+            stream->pos += sectors * ss;
+            total       -= sectors * ss;
+            continue;
         }
 
-        for(int j = 0; j < amount_read; j++){
-            *(char*)out++ = cache_sector->buf[offset_in_sector + j];
+        char* sector = NULL;
+        int res = diskstreamer_cache_get(stream->disk, lba, &sector);
+        if(res < 0){
+            return res;
         }
-        stream->pos += amount_read;
-        total       -= amount_read;
+        int chunk = ss - offset;
+        if(chunk > total){
+            chunk = total;
+        }
+        memcpy(dst, sector + offset, chunk);
+        dst         += chunk;
+        stream->pos += chunk;
+        total       -= chunk;
     }
-out:
-    return res;
+    return 0;
+}
+
+int diskstreamer_write(struct disk_stream* stream, const void* in, int total){
+    const char* src = in;
+    int64_t ss = stream->sector_size;
+    if(total < 0){
+        return -EINVARG;
+    }
+    if(stream->disk->read_only){
+        return -ERDONLY;
+    }
+    while(total > 0){
+        uint64_t lba    = stream->pos / ss;
+        int      offset = stream->pos % ss;
+
+        if(offset == 0 && total >= ss){
+            // Whole sectors: write straight from the caller's
+            // buffer. disk_write_block refreshes the cache.
+            int sectors = total / ss;
+            if(sectors > 128){
+                sectors = 128;
+            }
+            int res = disk_write_block(stream->disk, lba, sectors, src);
+            if(res < 0){
+                return res;
+            }
+            src         += sectors * ss;
+            stream->pos += sectors * ss;
+            total       -= sectors * ss;
+            continue;
+        }
+
+        // Partial sector: read-modify-write through the cache.
+        char* sector = NULL;
+        int res = diskstreamer_cache_get(stream->disk, lba, &sector);
+        if(res < 0){
+            return res;
+        }
+        int chunk = ss - offset;
+        if(chunk > total){
+            chunk = total;
+        }
+        char tmp[ss];
+        memcpy(tmp, sector, ss);
+        memcpy(tmp + offset, (void*)src, chunk);
+        res = disk_write_block(stream->disk, lba, 1, tmp);
+        if(res < 0){
+            return res;
+        }
+        src         += chunk;
+        stream->pos += chunk;
+        total       -= chunk;
+    }
+    return 0;
 }
 
 void diskstreamer_close(struct disk_stream* stream){

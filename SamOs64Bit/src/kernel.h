@@ -11,11 +11,12 @@
 // 64-bit pointer width without sign-extending nonsense.
 #define ERROR(value)    (void*)((intptr_t)(value))
 #define ERROR_I(value)  (int)((intptr_t)(value))
-// L46 - cast through int64_t before truncating to int so that
-// a 64-bit error code with the high bit set survives the
-// negativity check intact. Necessary for ERROR(value) round
-// trips when the kernel grows >2 GiB heap pointers.
-#define ISERR(value)    ((int)((int64_t)(value)) < 0)
+// L46 - the book's version truncated to int, so any pointer whose
+// bit 31 is set (a heap above 2 GiB, a higher-half address) read
+// as an error. Only the top 4095 values are errors, the
+// same rule as Linux IS_ERR_VALUE. An int argument sign-extends,
+// so ISERR(-EIO) still holds.
+#define ISERR(value)    ((uint64_t)(int64_t)(value) >= (uint64_t)-4095)
 
 void kernel_main();
 void print(const char* str);

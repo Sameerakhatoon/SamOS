@@ -82,10 +82,12 @@ assert_present "G25 pci_size_bars defined" \
 assert_present "G26 pci_cfg_write_word (L180 rename)" \
     "pci_cfg_write_word" "src/io/pci.h"
 
-# G27/G28/G29: PATA driver typos and arg-by-value bug. The
-# corrected signatures must exist.
-assert_present "G27 pata_disk_ctrl_drive_address present" \
-    "pata_disk_ctrl_drive_address" "src/disk/drivers/pata.c"
+# G27/G28/G29: PATA driver typos and arg-by-value bug.
+# rewrote pata.c (IDENTIFY, LBA48, all four drives), which retires
+# G27 and G28 with the code they lived in.
+# Anchor the rewrite instead.
+assert_present "G27/G28 retired by the PATA rewrite (pata_identify present)" \
+    "pata_identify" "src/disk/drivers/pata.c"
 assert_present "G29 disk_private_data_driver present" \
     "disk_private_data_driver" "src/disk/driver.h"
 
@@ -118,9 +120,11 @@ assert_present "G35 slba += nlb (L195 fix)" \
     "slba += nlb" "src/disk/drivers/nvme.c"
 
 # G39: disk_Stream_cache_bucket_level1 typo - retired at L206.
-# Confirm correct form present.
-assert_present "G39 disk_stream_cache_bucket (L206 fix)" \
-    "disk_stream_cache_bucket" "src/disk/streamer.c"
+# Replaced the three-level bucket cache (which also freed live
+# buckets) with a direct-mapped write-through table.
+# Anchor the new cache.
+assert_present "G39 retired by the cache rewrite (disk_stream_cache_slot)" \
+    "disk_stream_cache_slot" "src/disk/streamer.c"
 
 # G40 / G41 / G42: cached diskstreamer_read lands at L206 with
 # disk_real_offset + sector_size field. Confirm both anchors.

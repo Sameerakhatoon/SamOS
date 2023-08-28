@@ -18,13 +18,13 @@ typedef void (*DISK_DRIVER_UNLOADED)(struct disk_driver* driver);
 typedef int  (*DISK_DRIVER_MOUNT)(struct disk_driver* driver);
 typedef void (*DISK_DRIVER_UNMOUNT)(struct disk* disk);
 
-typedef int  (*DISK_DRIVER_WRITE)(struct disk* disk, unsigned int lba,
+// read/write always receive the REAL (hardware) disk and
+// an absolute 64-bit LBA; disk.c translates partition views.
+// Drivers split requests larger than their per-command limit.
+typedef int  (*DISK_DRIVER_WRITE)(struct disk* disk, uint64_t lba,
                                   int total_sectors, void* buf_in);
-typedef int  (*DISK_DRIVER_READ)(struct disk* disk, unsigned int lba,
+typedef int  (*DISK_DRIVER_READ)(struct disk* disk, uint64_t lba,
                                  int total_sectors, void* buf_out);
-typedef int  (*DISK_DRIVER_MOUNT_PARTITION)(struct disk* disk,
-                                            long starting_lba, long ending_lba,
-                                            struct disk** partition_disk_out);
 
 struct disk_driver {
     char name[DISK_DRIVER_NAME_SIZE];
@@ -36,9 +36,8 @@ struct disk_driver {
         DISK_DRIVER_UNMOUNT         unmount;
         DISK_DRIVER_WRITE           write;
         DISK_DRIVER_READ            read;
-        // Inheritors create a virtual disk in here that points
-        // at the lba start/end.
-        DISK_DRIVER_MOUNT_PARTITION mount_partition;
+        // mount_partition is gone: partitions are generic
+        // (disk_create_partition) and reuse the parent's driver.
     } functions;
 
     // Private data the disk driver may use for itself.
@@ -49,9 +48,6 @@ int   disk_driver_mount_all();
 int   disk_driver_register(struct disk_driver* driver);
 void* disk_driver_private_data(struct disk_driver* driver);
 bool  disk_driver_registered(struct disk_driver* driver);
-int   disk_driver_mount_partition(struct disk_driver* driver, struct disk* disk,
-                                  int starting_lba, int ending_lba,
-                                  struct disk** partition_disk_out);
 int   disk_driver_system_init();
 int   disk_driver_system_load_drivers();
 

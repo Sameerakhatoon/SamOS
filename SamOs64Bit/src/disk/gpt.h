@@ -47,6 +47,20 @@ struct gpt_partition_entry {
     char     partition_name[72];        // UTF-16LE
 };
 
+struct disk;
+
+// Scan one REAL disk for a GPT. Checks the header and
+// entry-array CRC32s, falls back to the backup header when the
+// primary is damaged, and creates one partition disk per used
+// entry. Returns the number of partitions created, 0 when the
+// disk has no valid GPT, or a negative status.
+int gpt_scan_disk(struct disk* disk);
+
+// CRC-32 (IEEE 802.3, the one GPT uses).
+uint32_t gpt_crc32(const void* data, size_t len);
+
+// Kept for kernel.c: disk_search_and_init now scans every disk,
+// so this only reports whether any partition was found.
 int gpt_init(void);
 
 #endif

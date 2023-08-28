@@ -460,7 +460,7 @@ static void nvme_disk_driver_unmount(struct disk* disk){
 // `slba + nlb;` (no assignment, dead expression). Preserved
 // verbatim under an explicit `(void)` cast so the project's
 // `-Werror=unused-value` does not reject it.
-static int nvme_disk_driver_read(struct disk* disk, unsigned int lba,
+static int nvme_disk_driver_read(struct disk* disk, uint64_t lba,
                                  int total_sectors, void* buf_out){
     struct disk* hw = disk_hardware_disk(disk);
     if(!hw){
@@ -470,7 +470,15 @@ static int nvme_disk_driver_read(struct disk* disk, unsigned int lba,
     uint64_t slba = (uint64_t)lba;
     uint8_t* p = (uint8_t*)buf_out;
     while(remaining > 0){
-        uint16_t nlb = (remaining > 16) ? 16 : (uint16_t)remaining;
+        // Two PRP entries describe at most the rest of
+        // the first page plus one more page. The old fixed 16
+        // sectors let nvme_io_submit_and_poll shrink nlb while
+        // this loop still advanced by 16, skipping data.
+        uint32_t span = (4096u - ((uintptr_t)p & 4095u)) + 4096u;
+        uint16_t nlb = (uint16_t)(span / NVME_SECTOR_SIZE);
+        if(nlb > remaining){
+            nlb = (uint16_t)remaining;
+        }
         int rc = nvme_io_submit_and_poll(hw, NVME_OPCODE_READ, slba, nlb, p);
         if(rc < 0){
             return rc;
@@ -484,7 +492,7 @@ static int nvme_disk_driver_read(struct disk* disk, unsigned int lba,
     return 0;
 }
 
-static int nvme_disk_driver_write(struct disk* disk, unsigned int lba,
+static int nvme_disk_driver_write(struct disk* disk, uint64_t lba,
                                   int total_sectors, void* buf_in){
     struct disk* hw = disk_hardware_disk(disk);
     if(!hw){
@@ -494,7 +502,15 @@ static int nvme_disk_driver_write(struct disk* disk, unsigned int lba,
     uint64_t slba = (uint64_t)lba;
     uint8_t* p = (uint8_t*)buf_in;
     while(remaining > 0){
-        uint16_t nlb = (remaining > 16) ? 16 : (uint16_t)remaining;
+        // Two PRP entries describe at most the rest of
+        // the first page plus one more page. The old fixed 16
+        // sectors let nvme_io_submit_and_poll shrink nlb while
+        // this loop still advanced by 16, skipping data.
+        uint32_t span = (4096u - ((uintptr_t)p & 4095u)) + 4096u;
+        uint16_t nlb = (uint16_t)(span / NVME_SECTOR_SIZE);
+        if(nlb > remaining){
+            nlb = (uint16_t)remaining;
+        }
         int rc = nvme_io_submit_and_poll(hw, NVME_OPCODE_WRITE, slba, nlb, p);
         if(rc < 0){
             return rc;
@@ -506,13 +522,6 @@ static int nvme_disk_driver_write(struct disk* disk, unsigned int lba,
     return 0;
 }
 
-static int nvme_disk_driver_mount_partition(struct disk* disk, long start_lba,
-                                            long end_lba, struct disk** out){
-    return disk_create_new(disk->driver, disk->hardware_disk,
-                           SAMOS_DISK_TYPE_PARTITION,
-                           start_lba, end_lba, disk->sector_size, NULL, out);
-}
-
 static struct disk_driver nvme_driver = {
     .name = {"NVME"},
     .functions.loaded          = NULL,
@@ -521,7 +530,6 @@ static struct disk_driver nvme_driver = {
     .functions.write           = nvme_disk_driver_write,
     .functions.mount           = nvme_disk_driver_mount,
     .functions.unmount         = nvme_disk_driver_unmount,
-    .functions.mount_partition = nvme_disk_driver_mount_partition,
 };
 
 struct disk_driver* nvme_driver_init(void){
