@@ -25,6 +25,7 @@ global samos_process_load_start:function
 global samos_process_get_arguments:function
 global samos_system:function
 global samos_exit:function
+global samos_fopen:function   ; L105
 
 ; void print(const char* msg)
 print:
@@ -92,4 +93,14 @@ samos_system:
 samos_exit:
     mov  rax, 9            ; SYSTEM_COMMAND9_EXIT
     int  0x80
+    ret
+
+; Lecture 105 - int samos_fopen(const char* filename, const char* mode)
+;   rdi = filename, rsi = mode
+samos_fopen:
+    mov  rax, 10           ; SYSTEM_COMMAND10_FOPEN
+    push qword rsi
+    push qword rdi
+    int  0x80
+    add  rsp, 16
     ret

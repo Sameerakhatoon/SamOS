@@ -30,11 +30,25 @@ struct process_arguments {
     char** argv;
 };
 
+// Lecture 105 - per-process file descriptor record. The kernel fd
+// returned by fopen plus enough metadata to reopen the same file
+// if we ever need to (process snapshot/restore, debugging).
+struct process_file_handle {
+    int   fd;
+    char  file_path[SAMOS_MAX_PATH];
+    char  mode[2];   // "r", "w", "w+" - max 2 chars per upstream
+};
+
 struct process {
     uint16_t           id;
     char               filename[SAMOS_MAX_PATH];
     struct task*       task;
     struct process_allocation allocations[SAMOS_MAX_PROGRAM_ALLOCATIONS];
+
+    // L105 - vector<struct process_file_handle*>. Populated by
+    // process_fopen, drained at process_free_process time so a
+    // process exit closes its open fds.
+    struct vector*     file_handles;
 
     PROCESS_FILETYPE   filetype;
     union {
@@ -66,5 +80,10 @@ int              process_inject_arguments(struct process* process, struct comman
 int              process_terminate(struct process* process);
 struct process*  process_current();
 struct process*  process_get(int process_id);
+
+// Lecture 105 - per-process fopen wrapper + lookup.
+int                            process_fopen(struct process* process,
+                                             const char* path, const char* mode);
+struct process_file_handle*    process_file_handle_get(struct process* process, int fd);
 
 #endif
