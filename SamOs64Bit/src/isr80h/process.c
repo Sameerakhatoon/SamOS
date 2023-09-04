@@ -6,7 +6,7 @@
 #include "config.h"
 #include "kernel.h"
 
-void* isr80h_command6_process_load_start(struct interrupt_frame* frame){
+void* isr80h_command6_process_load_start(struct trap_frame* frame){
     void* filename_user_ptr = task_get_stack_item(task_current(), 0);
     char  filename[SAMOS_MAX_PATH];
     int   res = copy_string_from_task(task_current(), filename_user_ptr, filename, sizeof(filename));
@@ -27,14 +27,13 @@ void* isr80h_command6_process_load_start(struct interrupt_frame* frame){
         goto out;
     }
 
-    task_switch(process->task);
-    task_return(&process->task->registers);
+    task_enter(process->task);
 
 out:
     return 0;
 }
 
-void* isr80h_command7_invoke_system_command(struct interrupt_frame* frame){
+void* isr80h_command7_invoke_system_command(struct trap_frame* frame){
     struct command_argument* arguments = task_virtual_address_to_physical(
         task_current(), task_get_stack_item(task_current(), 0));
     if(!arguments || strlen(arguments[0].argument) == 0){
@@ -61,12 +60,11 @@ void* isr80h_command7_invoke_system_command(struct interrupt_frame* frame){
         return ERROR(res);
     }
 
-    task_switch(process->task);
-    task_return(&process->task->registers);
+    task_enter(process->task);
     return 0;
 }
 
-void* isr80h_command8_get_program_arguments(struct interrupt_frame* frame){
+void* isr80h_command8_get_program_arguments(struct trap_frame* frame){
     struct process* process = task_current()->process;
     struct process_arguments* arguments = task_virtual_address_to_physical(
         task_current(), task_get_stack_item(task_current(), 0));
@@ -74,7 +72,7 @@ void* isr80h_command8_get_program_arguments(struct interrupt_frame* frame){
     return 0;
 }
 
-void* isr80h_command9_exit(struct interrupt_frame* frame){
+void* isr80h_command9_exit(struct trap_frame* frame){
     struct process* process = task_current()->process;
     process_terminate(process);
     task_next();

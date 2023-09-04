@@ -2,7 +2,7 @@
 #define KERNEL_ISR80H_TIME_H
 // Lecture 198 - userland udelay syscall.
 
-struct interrupt_frame;
-void* isr80h_command25_udelay(struct interrupt_frame* frame);
+struct trap_frame;
+void* isr80h_command25_udelay(struct trap_frame* frame);
 
 #endif

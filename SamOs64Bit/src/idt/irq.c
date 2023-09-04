@@ -17,6 +17,9 @@ void IRQ_enable(IRQ irq){
     if(irq >= PIC_SLAVE_STARTING_IRQ){
         port = IRQ_SLAVE_PORT;
         relative_irq = irq - PIC_SLAVE_STARTING_IRQ;
+        // A slave line is only delivered while the
+        // master's cascade input (IRQ2) is unmasked too.
+        IRQ_enable(IRQ_CASCADE);
     }
     // Read current mask, CLEAR the bit (enable the IRQ), write
     // it back. Bit clear = unmasked = delivered.

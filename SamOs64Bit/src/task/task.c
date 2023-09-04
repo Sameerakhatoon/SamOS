@@ -1,9 +1,9 @@
 // Lecture 40 - task system rebuilt for 64-bit.
 //
 // What changed vs the 32-bit version:
-//   - struct registers fields are now 64-bit (rdi/rsi/.../rsp).
-//     The interrupt_frame -> registers copy in task_save_state
-//     mirrors the new layout.
+//   - the saved register file is a struct trap_frame
+//     (idt/idt.h) with all 15 general registers, plus the task's
+//     FPU/SSE state.
 //   - struct task uses paging_desc (4-level walk) instead of
 //     paging_4gb_chunk (which built a 2-level 4 GiB identity
 //     map). task_init calls paging_desc_new(PAGING_MAP_LEVEL_4).
@@ -134,8 +134,16 @@ void task_run_first_ever_task(){
     if(!current_task){
         panic("task_run_first_ever_task(): No current task exists!\n");
     }
-    task_switch(task_head);
-    task_return(&task_head->registers);
+    task_enter(task_head);
+}
+
+// make `task` current and iretq into it with its own
+// FPU/SSE state. Nothing between the fxrstor and the iretq may touch
+// an x87 or SSE register; the kernel is built -mgeneral-regs-only.
+void task_enter(struct task* task){
+    task_switch(task);
+    __asm__ volatile("fxrstor64 %0" : : "m"(task->fpu_state));
+    task_return(&task->registers);
 }
 
 int task_page(){
@@ -144,23 +152,14 @@ int task_page(){
     return 0;
 }
 
-// Lecture 40 - 64-bit register file mirror.
-void task_save_state(struct task* task, struct interrupt_frame* frame){
-    task->registers.ip    = frame->ip;
-    task->registers.cs    = frame->cs;
-    task->registers.flags = frame->flags;
-    task->registers.rsp   = frame->rsp;
-    task->registers.ss    = frame->ss;
-    task->registers.rax   = frame->rax;
-    task->registers.rbp   = frame->rbp;
-    task->registers.rbx   = frame->rbx;
-    task->registers.rcx   = frame->rcx;
-    task->registers.rdi   = frame->rdi;
-    task->registers.rdx   = frame->rdx;
-    task->registers.rsi   = frame->rsi;
+// Copy the whole trap frame, then the FPU/SSE registers,
+// which still hold the user's values: the trap path is integer-only.
+void task_save_state(struct task* task, struct trap_frame* frame){
+    task->registers = *frame;
+    __asm__ volatile("fxsave64 %0" : "=m"(task->fpu_state));
 }
 
-void task_current_save_state(struct interrupt_frame* frame){
+void task_current_save_state(struct trap_frame* frame){
     if(!task_current()){
         panic("No current task to save\n");
     }
@@ -193,8 +192,7 @@ void task_next(){
         }
     } while(!next_task);
 
-    task_switch(next_task);
-    task_return(&next_task->registers);
+    task_enter(next_task);
 }
 
 // Pull a 64-bit value off the task's stack at `index` slots
@@ -278,17 +276,22 @@ static int task_init(struct task* task, struct process* process){
     // descriptor through process->paging_desc.
 
 
-    task->registers.ip = SAMOS_PROGRAM_VIRTUAL_ADDRESS;
+    task->registers.rip = SAMOS_PROGRAM_VIRTUAL_ADDRESS;
     if(process->filetype == PROCESS_FILETYPE_ELF){
         // L65 - the ELF64 loader is in. Pull the entry point
         // out of the ELF header.
-        task->registers.ip = elf_header(process->elf_file)->e_entry;
+        task->registers.rip = elf_header(process->elf_file)->e_entry;
     }
 
     task->registers.ss  = USER_DATA_SEGMENT;
     task->registers.cs  = USER_CODE_SEGMENT;
     task->registers.rsp = SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START;
     task->process       = process;
+
+    // Power-on FPU/SSE state: x87 control word 0x37F
+    // and MXCSR 0x1F80 (all exceptions masked), registers zero.
+    *(uint16_t*)&task->fpu_state[0]  = 0x037F;
+    *(uint32_t*)&task->fpu_state[24] = 0x1F80;
 
     return 0;
 }

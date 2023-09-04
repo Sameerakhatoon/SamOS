@@ -7,9 +7,12 @@
 #include "task/process.h"
 #include "io/tsc.h"
 
-void* isr80h_command25_udelay(struct interrupt_frame* frame){
+void* isr80h_command25_udelay(struct trap_frame* frame){
     uint64_t microseconds = (uint64_t)task_get_stack_item(task_current(), 0);
     task_sleep(task_current(), microseconds);
+    // The task resumes through task_enter, not the syscall
+    // return path, so its return value goes into the saved frame.
+    task_current()->registers.rax = 0;
     task_next();
     // Never reached - task_next jumps into the next task.
     return NULL;

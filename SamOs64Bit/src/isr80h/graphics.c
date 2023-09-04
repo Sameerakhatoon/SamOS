@@ -37,7 +37,7 @@ struct userland_graphics* isr80h_graphics_make_userland_metadata(struct process*
 // userland_graphics handle; we resolve the sentinel back to the
 // kernel graphics_info, then map its pixel buffer into the
 // process address space.
-void* isr80h_command20_graphics_pixels_get(struct interrupt_frame* frame){
+void* isr80h_command20_graphics_pixels_get(struct trap_frame* frame){
     int res = 0;
     struct framebuffer_pixel* graphics_pixels_virt_out = NULL;
     struct userland_graphics* userland_graphics_ptr = NULL;
@@ -78,7 +78,7 @@ void* isr80h_command20_graphics_pixels_get(struct interrupt_frame* frame){
 // userland_graphics handle on the stack; we walk the sentinel
 // back to the kernel surface, spawn a relative child, and hand
 // userland a fresh userland_graphics mirror for it.
-void* isr80h_command22_graphics_create(struct interrupt_frame* frame){
+void* isr80h_command22_graphics_create(struct trap_frame* frame){
     size_t x = 0, y = 0, width = 0, height = 0;
     x      = (size_t)task_get_stack_item(task_current(), 4);
     y      = (size_t)task_get_stack_item(task_current(), 3);

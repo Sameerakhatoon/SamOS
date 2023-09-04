@@ -1,62 +1,26 @@
-; Lecture 36 - idt.asm fully migrated to 64-bit.
+; Lecture 36 - idt.asm, 64-bit.
 ;
-; All the 32-bit constructs got widened:
-;   - [BITS 64]
-;   - idt_load: arg in RDI per AMD64 SysV (not [ebp+8])
-;   - iret -> iretq everywhere
-;   - struct interrupt_frame fields are uint64_t (CPU pushes 8-byte
-;     ip/cs/flags/sp/ss in long mode interrupts)
-;   - the interrupt macro passes the interrupt number + frame
-;     pointer via rdi/rsi (SysV), not via stack pushes
-;   - tmp_res slot widened dd -> dq
-;   - interrupt_pointer_table entries widened dd -> dq (function
-;     pointers are 8 bytes now)
+; SamOS divergence from the book: every vector
+; builds one struct trap_frame (idt.h) on the stack, holding all 15
+; general registers, the vector number and an error code. The book's
+; pushad_macro saved only 7 registers, kept rsp in a global scratch
+; slot and never popped the CPU's error code, so r8-r15 leaked
+; between user and kernel and #GP/#PF returned to a frame 8 bytes off.
 ;
-; pushad_macro / popad_macro from L35 stay - they emulate the
-; deleted 1-byte pushad / popad at 64-bit width.
+; Exceptions that push an error code (8, 10-14, 17, 21, 29, 30) get a
+; stub without the dummy push, so every frame has the same layout.
 
 [BITS 64]
 section .asm
 
-extern int21h_handler                ; reserved for the keyboard IRQ
-extern no_interrupt_handler
-extern isr80h_handler
 extern interrupt_handler
+extern isr80h_handler
 
 global idt_load
-global no_interrupt
 global enable_interrupts
 global disable_interrupts
 global isr80h_wrapper
 global interrupt_pointer_table
-
-; Lecture 35 - pushad_macro / popad_macro emulating 32-bit pushad
-; / popad at 64-bit width. See L34-L35 doc for rationale.
-temp_rsp_storage: dq 0x00
-
-%macro pushad_macro 0
-    mov qword [temp_rsp_storage], rsp
-    push rax
-    push rcx
-    push rdx
-    push rbx
-    push qword [temp_rsp_storage]
-    push rbp
-    push rsi
-    push rdi
-%endmacro
-
-%macro popad_macro 0
-    pop rdi
-    pop rsi
-    pop rbp
-    pop qword [temp_rsp_storage]
-    pop rbx
-    pop rdx
-    pop rcx
-    pop rax
-    mov rsp, [temp_rsp_storage]
-%endmacro
 
 enable_interrupts:
     sti
@@ -66,88 +30,92 @@ disable_interrupts:
     cli
     ret
 
-; void idt_load(struct idt_pointer* ptr)
-; AMD64 SysV: first arg in RDI.
+; void idt_load(struct idtr_desc* ptr)
 idt_load:
-    mov rbx, rdi
-    lidt [rbx]
+    lidt [rdi]
     ret
 
-no_interrupt:
-    pushad_macro
+; Save the general registers below the vector/error pair, call
+; %1(struct trap_frame*), restore and iretq.
+%macro TRAP_BODY 1
+    push rax
+    push rbx
+    push rcx
+    push rdx
+    push rsi
+    push rdi
+    push rbp
+    push r8
+    push r9
+    push r10
+    push r11
+    push r12
+    push r13
+    push r14
+    push r15
+    cld
+    mov rdi, rsp
+    ; Rbx is callee-saved and already in the frame, so it holds
+    ; the frame pointer across the call while rsp is aligned for C.
     mov rbx, rsp
     and rsp, -16
-    call no_interrupt_handler
+    call %1
     mov rsp, rbx
-    popad_macro
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx
+    pop rbx
+    pop rax
+    add rsp, 16                        ; vector + error code
     iretq
+%endmacro
 
-; Per-vector stub. The CPU has already pushed:
-;   uint64_t ip
-;   uint64_t cs
-;   uint64_t flags
-;   uint64_t sp
-;   uint64_t ss
-; (long-mode interrupt frame; all fields 8 bytes now.)
-%macro interrupt 1
-    global int%1
-    int%1:
-        pushad_macro
-        ; AMD64 SysV: pass interrupt number in RDI, frame ptr in RSI.
-        mov rdi, %1
-        mov rsi, rsp
-        ; SamOs divergence: align the C call. rbx is
-        ; callee-saved and already in the frame, so it holds the
-        ; frame pointer across the call.
-        mov rbx, rsp
-        and rsp, -16
-        call interrupt_handler
-        mov rsp, rbx
-        popad_macro
-        iretq
+trap_common:
+    TRAP_BODY interrupt_handler
+
+%macro TRAP_STUB 1
+int%1:
+%if %1 = 8 || %1 = 10 || %1 = 11 || %1 = 12 || %1 = 13 || %1 = 14 || %1 = 17 || %1 = 21 || %1 = 29 || %1 = 30
+%else
+    push qword 0
+%endif
+    push qword %1
+    jmp trap_common
 %endmacro
 
 %assign i 0
-%rep 512
-    interrupt i
+%rep 256
+    TRAP_STUB i
 %assign i i+1
 %endrep
 
-; isr80h_wrapper - the int 0x80 entry point. User code put the
-; command number in rax (it was pre-trap). The CPU has pushed
-; ip/cs/flags/sp/ss already.
+; int 0x80. The command number is in rax; isr80h_handler writes the
+; result into frame->rax, which the pops below hand back to the user.
 isr80h_wrapper:
-    pushad_macro
-
-    ; Second arg = interrupt frame pointer
-    mov rsi, rsp
-    ; First arg = command number (user's pre-trap rax)
-    mov rdi, rax
-
-    ; SamOs divergence: align the C call, see int%1.
-    mov rbx, rsp
-    and rsp, -16
-    call isr80h_handler
-    mov rsp, rbx
-
-    ; Stash handler's return value before popad_macro clobbers rax
-    mov qword [tmp_res], rax
-
-    popad_macro
-    mov rax, [tmp_res]
-    iretq
+    push qword 0
+    push qword 0x80
+    TRAP_BODY isr80h_handler
 
 section .data
-tmp_res: dq 0
+align 8
 
-; 64-bit pointer table: 8 bytes per function pointer.
-%macro interrupt_array_entry 1
+%macro TRAP_ENTRY 1
     dq int%1
 %endmacro
 
 interrupt_pointer_table:
 %assign i 0
-%rep 512
-    interrupt_array_entry i
+%rep 256
+    TRAP_ENTRY i
 %assign i i+1
 %endrep

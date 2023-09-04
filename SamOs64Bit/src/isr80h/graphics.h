@@ -13,7 +13,7 @@
 // not pull in interrupt frame transitively.
 struct process;
 struct graphics_info;
-struct interrupt_frame;
+struct trap_frame;
 
 struct userland_graphics {
     size_t x;
@@ -32,9 +32,9 @@ struct userland_graphics* isr80h_graphics_make_userland_metadata(struct process*
                                                                  struct graphics_info* graphics_info);
 
 // Lecture 166 - hand the kernel pixel buffer back as a userland mapping.
-struct interrupt_frame;
-void* isr80h_command20_graphics_pixels_get(struct interrupt_frame* frame);
+struct trap_frame;
+void* isr80h_command20_graphics_pixels_get(struct trap_frame* frame);
 // Lecture 171 - userland creates a relative graphics surface.
-void* isr80h_command22_graphics_create(struct interrupt_frame* frame);
+void* isr80h_command22_graphics_create(struct trap_frame* frame);
 
 #endif

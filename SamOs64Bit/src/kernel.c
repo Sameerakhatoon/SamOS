@@ -45,6 +45,7 @@
 #include "mouse/mouse.h"          // L150 - mouse_system_init / load_static_drivers
 #include "io/serial.h"            // COM1 console
 #include "boot/boot_info.h"       // Loader handoff block
+#include "cpu/cpu.h"              // CPUID checks, CR0/CR4/EFER
 
 // L87 - bss-resident default_graphics_info lives in kernel.asm;
 // the long-mode entry stashes the UEFI framebuffer params into it
@@ -150,6 +151,136 @@ static int cmdline_has(const char* word)
     return 0;
 }
 
+// TSS with the ring-0 stack and the IST stacks for #DF, NMI
+// and #MC. Runs before idt_init, whose gates name the IST slots.
+static void kernel_tss_init(void)
+{
+    // Allocate a 1 MiB kernel stack for ring transitions.
+    // kzalloc lays it out low-to-high; rsp0 needs the TOP of
+    // the region (stack grows down), so we add stack_size to
+    // the base.
+    size_t stack_size = 1024 * 1024;
+    void* tss_stack_low  = kzalloc(stack_size);
+    void* tss_stack_high = (void*)((uintptr_t)tss_stack_low + stack_size);
+
+    // Mark the lowest page of the stack as not-present so any
+    // overflow #PFs visibly instead of silently corrupting
+    // whatever sits below. paging_map with flags=0 unmaps the
+    // page (the "unmap idiom" introduced in L27). With the IST
+    // stack for #DF, that overflow now ends in a register dump.
+    paging_map(kernel_desc(), tss_stack_low, tss_stack_low, 0);
+
+    memset(&tss, 0x00, sizeof(tss));
+    tss.rsp0        = (uint64_t)tss_stack_high;
+    tss.iopb_offset = sizeof(tss);   // no IO bitmap
+
+    uint64_t ist[3];
+    for (int i = 0; i < 3; i++)
+    {
+        uint8_t* stack = kzalloc(KERNEL_IST_STACK_SIZE);
+        if (!stack)
+        {
+            panic("kernel_tss_init: no memory for IST stacks\n");
+        }
+        ist[i] = (uint64_t)(stack + KERNEL_IST_STACK_SIZE);
+    }
+    tss.ist1 = ist[0];   // IDT_IST_DOUBLE_FAULT
+    tss.ist2 = ist[1];   // IDT_IST_NMI
+    tss.ist3 = ist[2];   // IDT_IST_MACHINE_CHECK
+
+    // Install the TSS descriptor into GDT slot 7 (+ slot 8 for
+    // the high half of the base). The reserved slots were added
+    // to kernel.asm in L50.
+    struct tss_desc_64* tssdesc =
+        (struct tss_desc_64*)&gdt[KERNEL_LONG_MODE_TSS_GDT_INDEX];
+    gdt_set_tss(tssdesc, &tss, sizeof(tss) - 1, TSS_DESCRIPTOR_TYPE, 0x00);
+
+    // Lecture 55 - ltr the TSS. The GDTR limit was set at boot
+    // to gdt_end - gdt - 1, which (since L50 reserved the two
+    // TSS slots BEFORE gdt_end) already covers selector 0x38.
+    tss_load(KERNEL_LONG_MODE_TSS_SELECTOR);
+}
+
+// e2e hook: CMDLINE.TXT "samos.run=PROG.ELF arg ...;PROG2.ELF ..."
+// (last on the line) loads each program from @:/ with its arguments,
+// ahead of BLANK.ELF, so it runs first. Not from the book.
+static int cmdline_end(char c)
+{
+    return c == 0 || c == '\n' || c == '\r';
+}
+
+static void kernel_load_cmdline_programs(void)
+{
+    const char* key = "samos.run=";
+    const char* s = samos_boot_info_ptr->cmdline;
+    size_t key_len = strlen(key);
+    while (*s && strncmp(s, key, key_len) != 0)
+    {
+        s++;
+    }
+    if (!*s)
+    {
+        return;
+    }
+    s += key_len;
+
+    while (!cmdline_end(*s))
+    {
+        struct command_argument* root = NULL;
+        struct command_argument* last = NULL;
+        while (!cmdline_end(*s) && *s != ';')
+        {
+            if (*s == ' ')
+            {
+                s++;
+                continue;
+            }
+            struct command_argument* arg = kzalloc(sizeof(struct command_argument));
+            size_t n = 0;
+            while (!cmdline_end(*s) && *s != ' ' && *s != ';' && n < sizeof(arg->argument) - 1)
+            {
+                arg->argument[n++] = *s++;
+            }
+            if (last)
+            {
+                last->next = arg;
+            }
+            else
+            {
+                root = arg;
+            }
+            last = arg;
+        }
+        if (*s == ';')
+        {
+            s++;
+        }
+        if (!root)
+        {
+            continue;
+        }
+
+        char path[SAMOS_MAX_PATH] = "@:/";
+        strncpy(path + 3, root->argument, sizeof(path) - 4);
+        struct process* process = NULL;
+        int res = process_load(path, &process);
+        if (res == SAMOS_ALL_OK)
+        {
+            res = process_inject_arguments(process, root);
+        }
+        print(res == SAMOS_ALL_OK ? "samos.run: loaded " : "samos.run: failed to load ");
+        print(path);
+        print("\n");
+
+        while (root)
+        {
+            struct command_argument* next = root->next;
+            kfree(root);
+            root = next;
+        }
+    }
+}
+
 void kernel_main(void)
 {
     // Lecture 100 - terminal_initialize() (VGA-text grid setup)
@@ -168,6 +299,10 @@ void kernel_main(void)
     serial_write("boot_info: cmdline \"");
     serial_write(samos_boot_info_ptr->cmdline);
     serial_write("\"\n");
+
+    // Check the CPU and set CR0, CR4 and EFER before any
+    // code that depends on them.
+    cpu_init();
 
     // e2e hook: fault before idt_init so the early IDT has
     // to catch it and dump registers on COM1.
@@ -253,12 +388,24 @@ void kernel_main(void)
     graphics_setup(&default_graphics_info);
     screen_info = graphics_screen_info();
 
-    // Lecture 50 - bring up IDT, then build a TSS so future
-    // ring-3 traps have a kernel-side stack to land on. The
-    // L38 div_test smoke is gone; from L50 onward the test
-    // token is "tss ready".
+    // Lecture 50 - bring up IDT and the TSS so ring-3 traps have a
+    // kernel-side stack to land on. The TSS goes first, since
+    // the #DF, NMI and #MC gates name its IST stacks.
+    kernel_tss_init();
     idt_init();
     boot_marker_set(BM_STAGE_IDT_LIVE, 0);
+
+    // e2e hooks: a kernel-mode fault must panic with a
+    // register dump; a fault that cannot push its frame must reach
+    // the #DF handler on its IST stack.
+    if (cmdline_has("samos.kernel_fault_test"))
+    {
+        __asm__ volatile("ud2");
+    }
+    if (cmdline_has("samos.double_fault_test"))
+    {
+        __asm__ volatile("mov %0, %%rsp; push %%rax" : : "r"(0x00007ff000000000ull));
+    }
 
     // Lecture 180 - enumerate PCI devices once the IDT is up.
     pci_init();
@@ -353,37 +500,8 @@ void kernel_main(void)
                                           TERMINAL_FLAG_BACKSPACE_ALLOWED);
     }
 
-    // Allocate a 1 MiB kernel stack for ring transitions.
-    // kzalloc lays it out low-to-high; rsp0 needs the TOP of
-    // the region (stack grows down), so we add stack_size to
-    // the base.
-    size_t stack_size = 1024 * 1024;
-    void* tss_stack_low  = kzalloc(stack_size);
-    void* tss_stack_high = (void*)((uintptr_t)tss_stack_low + stack_size);
-
-    // Mark the lowest page of the stack as not-present so any
-    // overflow #PFs visibly instead of silently corrupting
-    // whatever sits below. paging_map with flags=0 unmaps the
-    // page (the "unmap idiom" introduced in L27).
-    paging_map(kernel_desc(), tss_stack_low, tss_stack_low, 0);
-
-    // Initialise the TSS.
-    memset(&tss, 0x00, sizeof(tss));
-    tss.rsp0        = (uint64_t)tss_stack_high;
-    tss.iopb_offset = sizeof(tss);   // no IO bitmap
-
-    // Install the TSS descriptor into GDT slot 7 (+ slot 8 for
-    // the high half of the base). The reserved slots were added
-    // to kernel.asm in L50.
-    struct tss_desc_64* tssdesc =
-        (struct tss_desc_64*)&gdt[KERNEL_LONG_MODE_TSS_GDT_INDEX];
-    gdt_set_tss(tssdesc, &tss, sizeof(tss) - 1, TSS_DESCRIPTOR_TYPE, 0x00);
-
-    // Lecture 55 - ltr the TSS. The GDTR limit was set at boot
-    // to gdt_end - gdt - 1, which (since L50 reserved the two
-    // TSS slots BEFORE gdt_end) already covers selector 0x38.
-    // So ltr finds the descriptor we just wrote and loads it.
-    tss_load(KERNEL_LONG_MODE_TSS_SELECTOR);
+    // Lecture 50/55 - the TSS is built and loaded by
+    // kernel_tss_init, before idt_init.
 
     // Lecture 114 - build the process slot vector before any
     // process_load can touch it.
@@ -432,6 +550,7 @@ void kernel_main(void)
     // and `task_run_first_ever_task` never returns either.
     {
         struct process* user_selftest_proc = 0;
+        kernel_load_cmdline_programs();
         if(process_load_switch("@:/BLANK.ELF", &user_selftest_proc) == SAMOS_ALL_OK){
             print("e2e: running user-side BLANK.ELF selftest\n");
             enable_interrupts();

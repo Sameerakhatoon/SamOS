@@ -3,51 +3,33 @@
 
 #include <stdint.h>
 
-// Lecture 37 - 64-bit interrupt frame. The CPU now pushes 8-byte
-// ip/cs/flags/sp/ss on EVERY interrupt (unlike 32-bit, which
-// skipped ss/sp on same-DPL traps). pushad_macro inside the asm
-// stub adds the GPR block at the front in the same order the
-// 32-bit pushad used.
-struct interrupt_frame {
-    uint64_t rdi;
-    uint64_t rsi;
-    uint64_t rbp;
-    uint64_t reserved;   // 32-bit pushad pushed esp here; we keep
-                         // the slot occupied with a placeholder
-                         // so the struct stride matches what
-                         // pushad_macro pushes
-    uint64_t rbx;
-    uint64_t rdx;
-    uint64_t rcx;
-    uint64_t rax;
-
-    // CPU-pushed frame (always 8-byte in long mode):
-    uint64_t ip;
+// One frame for every trap, built by idt.asm. Lowest
+// address first: the 15 general registers, then the vector and error
+// code the stub pushed (0 when the CPU pushes none), then what the CPU
+// pushes in long mode (always ss:rsp too, even without a ring change).
+// It replaces the book's struct interrupt_frame and struct registers:
+// a task's saved user state is a trap_frame as well.
+struct trap_frame {
+    uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
+    uint64_t rbp, rdi, rsi, rdx, rcx, rbx, rax;
+    uint64_t vector;
+    uint64_t error_code;
+    uint64_t rip;
     uint64_t cs;
-    uint64_t flags;
+    uint64_t rflags;
     uint64_t rsp;
     uint64_t ss;
 } __attribute__((packed));
 
-typedef void* (*ISR80H_COMMAND)(struct interrupt_frame* frame);
-typedef void  (*INTERRUPT_CALLBACK_FUNCTION)(struct interrupt_frame* frame);
+typedef void* (*ISR80H_COMMAND)(struct trap_frame* frame);
+typedef void  (*INTERRUPT_CALLBACK_FUNCTION)(struct trap_frame* frame);
 
 void  isr80h_register_command(int command_id, ISR80H_COMMAND command);
 int   idt_register_interrupt_callback(int interrupt, INTERRUPT_CALLBACK_FUNCTION interrupt_callback);
 
-// Lecture 37 - 64-bit IDT gate descriptor. Was 8 bytes; now 16:
-//   offset_1   16 bits  handler address bits 0..15
-//   selector   16 bits  GDT selector (kernel long-mode code seg)
-//   ist         3 bits  (in the low byte) - which TSS stack to
-//                       switch to; 0 = use the current one. We
-//                       leave it 0 for now (no TSS stack table
-//                       set up yet). The remaining 5 bits of
-//                       this byte are reserved zero, hence the
-//                       full uint8_t field.
-//   type_attr   8 bits  present + DPL + gate-type
-//   offset_2   16 bits  bits 16..31
-//   offset_3   32 bits  bits 32..63
-//   reserved   32 bits  must be zero
+// Lecture 37 - 64-bit IDT gate descriptor (16 bytes).
+//   ist        bits 0..2: TSS IST slot to switch to, 0 = none
+//   type_attr  present + DPL + gate type
 struct idt_desc {
     uint16_t offset_1;
     uint16_t selector;
@@ -63,8 +45,19 @@ struct idtr_desc {
     uint64_t base;   // L37 - widened to 64 bits
 } __attribute__((packed));
 
+// TSS interrupt stack table slots (task/tss.h ist1..ist3).
+#define IDT_IST_DOUBLE_FAULT   1
+#define IDT_IST_NMI            2
+#define IDT_IST_MACHINE_CHECK  3
+
+// The 8259 vectors after the kernel.asm remap.
+#define IDT_IRQ_BASE           0x20
+#define IDT_IRQ_SLAVE_BASE     0x28
+#define IDT_IRQ_END            0x30
+
 void idt_init();
 void enable_interrupts();
 void disable_interrupts();
+void idt_dump_frame(struct trap_frame* frame);
 
 #endif

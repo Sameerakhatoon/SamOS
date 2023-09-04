@@ -16,7 +16,7 @@
 // Lecture 112 - userland fstat. Stack: 0=fd, 1=struct file_stat*.
 // process_fstat translates the buffer pointer and forwards to
 // the kernel fstat for the underlying fd.
-void* isr80h_command14_fstat(struct interrupt_frame* frame){
+void* isr80h_command14_fstat(struct trap_frame* frame){
     (void)frame;
     long fd = (long)task_get_stack_item(task_current(), 0);
     struct file_stat* virt_file_stat_addr =
@@ -26,7 +26,7 @@ void* isr80h_command14_fstat(struct interrupt_frame* frame){
 
 // Lecture 111 - userland fseek. Stack layout:
 //   0: fd, 1: offset, 2: whence
-void* isr80h_command13_fseek(struct interrupt_frame* frame){
+void* isr80h_command13_fseek(struct trap_frame* frame){
     (void)frame;
     long fd     = (long)task_get_stack_item(task_current(), 0);
     long offset = (long)task_get_stack_item(task_current(), 1);
@@ -41,7 +41,7 @@ void* isr80h_command13_fseek(struct interrupt_frame* frame){
 //   3: fd
 // process_fread translates the buffer pointer and forwards to
 // the kernel fread.
-void* isr80h_command12_fread(struct interrupt_frame* frame){
+void* isr80h_command12_fread(struct trap_frame* frame){
     (void)frame;
     int    res             = 0;
     void*  buffer_virt_addr = task_get_stack_item(task_current(), 0);
@@ -57,14 +57,14 @@ void* isr80h_command12_fread(struct interrupt_frame* frame){
 // stack and forwards to process_fclose, which finds the matching
 // process_file_handle, calls the kernel fclose, and pops the
 // record off the per-process vector.
-void* isr80h_command11_fclose(struct interrupt_frame* frame){
+void* isr80h_command11_fclose(struct trap_frame* frame){
     (void)frame;
     int64_t fd = (int64_t)task_get_stack_item(task_current(), 0);
     process_fclose(task_current()->process, fd);
     return NULL;
 }
 
-void* isr80h_command10_fopen(struct interrupt_frame* frame){
+void* isr80h_command10_fopen(struct trap_frame* frame){
     (void)frame;
     int   fd                  = 0;
     void* filename_virt_addr  = NULL;

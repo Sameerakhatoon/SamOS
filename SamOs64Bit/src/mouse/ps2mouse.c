@@ -20,7 +20,7 @@
 #include "graphics/graphics.h"
 
 // L138 will land the body.
-void ps2_mouse_handle_interrupt(struct interrupt_frame* frame);
+void ps2_mouse_handle_interrupt(struct trap_frame* frame);
 
 int ps2_mouse_init(struct mouse* mouse);
 
@@ -62,7 +62,7 @@ void ps2_mouse_write(uint8_t byte){
 // positive) plus the left/right/middle button bits, clamps
 // the new position against the screen, and forwards the move
 // + click into the L132/L133 mouse_* API.
-void ps2_mouse_handle_interrupt(struct interrupt_frame* frame){
+void ps2_mouse_handle_interrupt(struct trap_frame* frame){
     (void)frame;
     static uint8_t packet[4];
     static int     packet_byte_count = 0;

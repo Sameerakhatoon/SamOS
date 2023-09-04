@@ -14,9 +14,13 @@
 # we substitute the mformat/mcopy pipeline used by SamOs since it
 # does not need sudo or a real mount point.
 
-FILES = ./build/kernel.asm.o ./build/kernel.o ./build/early_fault.o ./build/kernel_selftest.o ./build/string/string.o ./build/memory/memory.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/heap/multiheap.o ./build/memory/pfa.o ./build/memory/heap/slab.o ./build/memory/heap/memtest.o ./build/memory/paging/paging.o ./build/memory/paging/paging.asm.o ./build/io/io.asm.o ./build/io/cpuid.o ./build/io/tsc.o ./build/io/tsc.asm.o ./build/io/serial.o ./build/io/pci.o ./build/idt/idt.o ./build/idt/idt.asm.o ./build/idt/irq.o ./build/task/task.o ./build/task/task.asm.o ./build/task/process.o ./build/task/userlandptr.o ./build/task/tss.asm.o ./build/fs/file.o ./build/fs/pparser.o ./build/fs/fat/fat.o ./build/fs/storage_selftest.o ./build/disk/disk.o ./build/disk/driver.o ./build/disk/drivers/pata.o ./build/disk/drivers/nvme.o ./build/disk/drivers/ahci.o ./build/disk/mbr.o ./build/disk/streamer.o ./build/disk/gpt.o ./build/graphics/graphics.o ./build/graphics/font.o ./build/graphics/terminal.o ./build/graphics/window.o ./build/graphics/image/image.o ./build/graphics/image/bmp.o ./build/mouse/mouse.o ./build/mouse/ps2mouse.o ./build/gdt/gdt.o ./build/keyboard/keyboard.o ./build/keyboard/classic.o ./build/isr80h/isr80h.o ./build/isr80h/io.o ./build/isr80h/heap.o ./build/isr80h/misc.o ./build/isr80h/window.o ./build/isr80h/graphics.o ./build/isr80h/time.o ./build/isr80h/file.o ./build/isr80h/process.o ./build/loader/formats/elf.o ./build/loader/formats/elfloader.o ./build/lib/vector/vector.o
+FILES = ./build/kernel.asm.o ./build/kernel.o ./build/early_fault.o ./build/cpu/cpu.o ./build/kernel_selftest.o ./build/string/string.o ./build/memory/memory.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/heap/multiheap.o ./build/memory/pfa.o ./build/memory/heap/slab.o ./build/memory/heap/memtest.o ./build/memory/paging/paging.o ./build/memory/paging/paging.asm.o ./build/io/io.asm.o ./build/io/cpuid.o ./build/io/tsc.o ./build/io/tsc.asm.o ./build/io/serial.o ./build/io/pci.o ./build/idt/idt.o ./build/idt/idt.asm.o ./build/idt/irq.o ./build/task/task.o ./build/task/task.asm.o ./build/task/process.o ./build/task/userlandptr.o ./build/task/tss.asm.o ./build/fs/file.o ./build/fs/pparser.o ./build/fs/fat/fat.o ./build/fs/storage_selftest.o ./build/disk/disk.o ./build/disk/driver.o ./build/disk/drivers/pata.o ./build/disk/drivers/nvme.o ./build/disk/drivers/ahci.o ./build/disk/mbr.o ./build/disk/streamer.o ./build/disk/gpt.o ./build/graphics/graphics.o ./build/graphics/font.o ./build/graphics/terminal.o ./build/graphics/window.o ./build/graphics/image/image.o ./build/graphics/image/bmp.o ./build/mouse/mouse.o ./build/mouse/ps2mouse.o ./build/gdt/gdt.o ./build/keyboard/keyboard.o ./build/keyboard/classic.o ./build/isr80h/isr80h.o ./build/isr80h/io.o ./build/isr80h/heap.o ./build/isr80h/misc.o ./build/isr80h/window.o ./build/isr80h/graphics.o ./build/isr80h/time.o ./build/isr80h/file.o ./build/isr80h/process.o ./build/loader/formats/elf.o ./build/loader/formats/elfloader.o ./build/lib/vector/vector.o
 INCLUDES = -I./src
-FLAGS = -g -ffreestanding -falign-jumps -falign-functions -falign-labels -falign-loops -fstrength-reduce -fomit-frame-pointer -finline-functions -Wno-unused-function -fno-builtin -Werror -Wno-unused-label -Wno-cpp -Wno-unused-parameter -nostdlib -nostartfiles -nodefaultlibs -Wall -O0 -Iinc
+# No red zone (an interrupt pushes its frame right
+# below the interrupted rsp), no SSE/x87 code in the kernel (user FPU
+# state is saved only at the trap boundary), and the kernel code model
+# for the higher-half move in the isolation work.
+FLAGS = -g -ffreestanding -mno-red-zone -mgeneral-regs-only -mcmodel=kernel -falign-jumps -falign-functions -falign-labels -falign-loops -fstrength-reduce -fomit-frame-pointer -finline-functions -Wno-unused-function -fno-builtin -Werror -Wno-unused-label -Wno-cpp -Wno-unused-parameter -nostdlib -nostartfiles -nodefaultlibs -Wall -O0 -Iinc
 # Extra defines from the command line, e.g.
 #   make EXTRA_CFLAGS=-DSAMOS_STORAGE_WRITE_REAL_HW=1
 FLAGS += $(EXTRA_CFLAGS)
@@ -36,6 +40,7 @@ user_programs:
 	$(MAKE) -C ./programs/blank  all
 	$(MAKE) -C ./programs/shell  all
 	$(MAKE) -C ./programs/simple all
+	$(MAKE) -C ./programs/ktest  all
 
 # Lecture 200 - mirror clean targets across user programs.
 user_programs_clean:
@@ -43,6 +48,7 @@ user_programs_clean:
 	$(MAKE) -C ./programs/blank  clean
 	$(MAKE) -C ./programs/shell  clean
 	$(MAKE) -C ./programs/simple clean
+	$(MAKE) -C ./programs/ktest  clean
 
 ./bin/kernel.bin: $(FILES)
 	x86_64-elf-ld -g -relocatable $(FILES) -o ./build/kernelfull.o
@@ -262,6 +268,11 @@ clean:
 # COM1 serial console.
 ./build/io/serial.o: ./src/io/serial.c
 	x86_64-elf-gcc $(INCLUDES) -I./src/io $(FLAGS) -std=gnu99 -c ./src/io/serial.c -o ./build/io/serial.o
+
+# CPUID checks and CR0/CR4/EFER.
+./build/cpu/cpu.o: ./src/cpu/cpu.c
+	mkdir -p ./build/cpu
+	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c ./src/cpu/cpu.c -o ./build/cpu/cpu.o
 
 # Early exception handler (minimal IDT before idt_init).
 ./build/early_fault.o: ./src/early_fault.c

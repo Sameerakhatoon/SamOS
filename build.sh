@@ -68,6 +68,10 @@ elif [ -x "$EDK2_ROOT/BaseTools/Source/C/bin/GenFw" ]; then
         if ! grep -q 'Application/SamOs/SamOs.inf' "$dsc"; then
             sed -i 's|^\(\s*\)MdeModulePkg/Application/HelloWorld/HelloWorld.inf|&\n\1MdeModulePkg/Application/SamOs/SamOs.inf|' "$dsc"
         fi
+        # The module's build dir is shared too, and EDK2 rebuilds only
+        # by mtime: another worktree's newer object (from an older
+        # SamOs.c) would win over this tree's source. Start clean.
+        rm -rf "$EDK2_ROOT/Build/MdeModule/DEBUG_${EDK2_TOOLCHAIN}/X64/MdeModulePkg/Application/SamOs"
         cd "$EDK2_ROOT"
         export EDK_TOOLS_PATH="$EDK2_ROOT/BaseTools"
         set +u
@@ -92,7 +96,7 @@ fi
 bash "$ROOT/SamOs64Bit/build.sh"
 
 K="$ROOT/SamOs64Bit"
-for f in "$K/bin/kernel.bin" "$K/programs/blank/blank.elf" "$K/programs/shell/shell.elf" "$K/assets/sysfont.bmp"; do
+for f in "$K/bin/kernel.bin" "$K/programs/blank/blank.elf" "$K/programs/shell/shell.elf" "$K/programs/ktest/ktest.elf" "$K/assets/sysfont.bmp"; do
     [ -f "$f" ] || { echo "build.sh: missing build output $f" >&2; exit 1; }
 done
 
@@ -145,6 +149,7 @@ mcopy -i "$P1" "$K/assets/sysfont.bmp"         ::/SYSFONT.BMP
 # p2 (SAMOS): the kernel's primary filesystem ("@:/").
 mcopy -i "$P2" "$K/programs/blank/blank.elf"   ::/BLANK.ELF
 mcopy -i "$P2" "$K/programs/shell/shell.elf"   ::/SHELL.ELF
+mcopy -i "$P2" "$K/programs/ktest/ktest.elf"   ::/KTEST.ELF   # The interrupt work e2e probes
 mcopy -i "$P2" "$K/assets/sysfont.bmp"         ::/SYSFONT.BMP
 mcopy -i "$P2" "$K/hello.txt"                  ::/HELLO.TXT
 

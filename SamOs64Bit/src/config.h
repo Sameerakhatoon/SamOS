@@ -49,7 +49,10 @@
 #define KERNEL_LONG_MODE_DATA_GDT_INDEX  4
 #define KERNEL_LONG_MODE_TSS_GDT_INDEX   7
 
-#define SAMOS_TOTAL_INTERRUPTS  512
+#define SAMOS_TOTAL_INTERRUPTS  256
+
+// Stacks the TSS IST slots switch to for #DF, NMI and #MC.
+#define KERNEL_IST_STACK_SIZE   (16 * 1024)
 
 #define SAMOS_HEAP_BLOCK_SIZE           4096
 

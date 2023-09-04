@@ -2,35 +2,21 @@
 #define TASK_H
 
 #include "config.h"
+#include "idt/idt.h"          // Struct trap_frame
 #include "memory/paging/paging.h"
 #include "io/tsc.h"           // L197 - TIME_MICROSECONDS / tsc_microseconds
 #include <stdbool.h>
 
 struct process;
-struct interrupt_frame;
 
-// Lecture 40 - 64-bit register file.
-struct registers {
-    uint64_t rdi;
-    uint64_t rsi;
-    uint64_t rbp;
-    uint64_t rbx;
-    uint64_t rdx;
-    uint64_t rcx;
-    uint64_t rax;
-
-    uint64_t ip;
-    uint64_t cs;
-    uint64_t flags;
-    uint64_t rsp;
-    uint64_t ss;
-};
+// fxsave/fxrstor image: x87, MXCSR and xmm0-15.
+#define TASK_FPU_STATE_SIZE 512
 
 struct task {
+    // The saved user state is a full trap_frame (all
+    // 15 general registers), not the book's 7-register struct.
     // Lecture 113 - paging_desc moved from task to process.
-    // task->process->paging_desc is the canonical pointer; the
-    // accessor task_paging_desc() forwards to it.
-    struct registers     registers;
+    struct trap_frame    registers;
     struct process*      process;
 
     // Lecture 197 - sleep state. task_get_next_non_sleeping_task
@@ -41,6 +27,11 @@ struct task {
 
     struct task*         next;
     struct task*         prev;
+
+    // Saved on every trap from ring 3, restored before
+    // the iretq into this task. The kernel itself is built with
+    // -mgeneral-regs-only, so it never touches these registers.
+    uint8_t              fpu_state[TASK_FPU_STATE_SIZE] __attribute__((aligned(16)));
 };
 
 struct task* task_new(struct process* process);
@@ -52,7 +43,8 @@ int   task_switch(struct task* task);
 int   task_page();
 int   task_page_task(struct task* task);
 void  task_run_first_ever_task();
-void  task_current_save_state(struct interrupt_frame* frame);
+void  task_enter(struct task* task);
+void  task_current_save_state(struct trap_frame* frame);
 void* task_get_stack_item(struct task* task, int index);
 int   copy_string_from_task(struct task* task, void* virtual, void* phys, int max);
 void* task_virtual_address_to_physical(struct task* task, void* virtual_address);
@@ -68,8 +60,7 @@ struct paging_desc* task_paging_desc(struct task* task);
 struct paging_desc* task_current_paging_desc();
 
 // Defined in task.asm.
-void task_return(struct registers* regs);
-void restore_general_purpose_registers(struct registers* regs);
+void task_return(struct trap_frame* regs);
 void user_registers();
 
 #endif
