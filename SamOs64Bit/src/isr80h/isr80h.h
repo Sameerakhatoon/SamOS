@@ -12,7 +12,8 @@ enum SystemCommands {
     SYSTEM_COMMAND7_INVOKE_SYSTEM_COMMAND,
     SYSTEM_COMMAND8_GET_PROGRAM_ARGUMENTS,
     SYSTEM_COMMAND9_EXIT,
-    SYSTEM_COMMAND10_FOPEN, // L105 - userland fopen
+    SYSTEM_COMMAND10_FOPEN,  // L105 - userland fopen
+    SYSTEM_COMMAND11_FCLOSE, // L106 - userland fclose
 };
 
 void isr80h_register_commands();

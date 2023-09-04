@@ -19,6 +19,7 @@ int main(int argc, char** argv){
     int fd = fopen("@:/blank.elf", "r");
     if(fd > 0){
         printf("File blank.elf opened\n");
+        fclose(fd);                   // L106 - close on success
     }else{
         printf("File blank.elf opened failed\n");
     }

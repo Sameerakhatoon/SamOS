@@ -31,5 +31,7 @@ void print(const char* msg);
 
 // Lecture 105 - userland fopen syscall trampoline.
 int  samos_fopen(const char* filename, const char* mode);
+// Lecture 106 - userland fclose trampoline.
+void samos_fclose(size_t fd);
 
 #endif

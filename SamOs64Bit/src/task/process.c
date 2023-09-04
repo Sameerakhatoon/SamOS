@@ -447,6 +447,21 @@ struct process_file_handle* process_file_handle_get(struct process* process, int
     return NULL;
 }
 
+// Lecture 106 - userland fclose path. Drop the matching
+// process_file_handle from the per-process vector and call the
+// kernel fclose.
+int process_fclose(struct process* process, int fd){
+    int res = 0;
+    struct process_file_handle* handle = process_file_handle_get(process, fd);
+    if(!handle){
+        return -EINVARG;
+    }
+    fclose(handle->fd);
+    vector_pop_element(process->file_handles, &handle, sizeof(handle));
+    kfree(handle);
+    return res;
+}
+
 static int process_close_file_handles(struct process* process){
     if(!process->file_handles){
         return 0;
