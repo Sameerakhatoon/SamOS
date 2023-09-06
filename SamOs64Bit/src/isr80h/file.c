@@ -12,6 +12,25 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// Lecture 107 - userland fread. Stack layout (top to bottom):
+//   0: buffer (user virtual)
+//   1: size
+//   2: count
+//   3: fd
+// process_fread translates the buffer pointer and forwards to
+// the kernel fread.
+void* isr80h_command12_fread(struct interrupt_frame* frame){
+    (void)frame;
+    int    res             = 0;
+    void*  buffer_virt_addr = task_get_stack_item(task_current(), 0);
+    size_t size            = (size_t)task_get_stack_item(task_current(), 1);
+    size_t count           = (size_t)task_get_stack_item(task_current(), 2);
+    long   fd              = (long)task_get_stack_item(task_current(), 3);
+
+    res = process_fread(task_current()->process, buffer_virt_addr, size, count, fd);
+    return (void*)(int64_t)res;
+}
+
 // Lecture 106 - userland fclose. Reads the fd off the syscall
 // stack and forwards to process_fclose, which finds the matching
 // process_file_handle, calls the kernel fclose, and pops the

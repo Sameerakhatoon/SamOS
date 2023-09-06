@@ -14,6 +14,7 @@ enum SystemCommands {
     SYSTEM_COMMAND9_EXIT,
     SYSTEM_COMMAND10_FOPEN,  // L105 - userland fopen
     SYSTEM_COMMAND11_FCLOSE, // L106 - userland fclose
+    SYSTEM_COMMAND12_FREAD,  // L107 - userland fread
 };
 
 void isr80h_register_commands();
