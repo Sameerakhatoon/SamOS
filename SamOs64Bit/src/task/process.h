@@ -17,7 +17,28 @@ struct elf_file;
 
 struct process_allocation {
     void*  ptr;
+    // Lecture 108 - exclusive end of the allocation. ptr + size,
+    // cached so range-vs-allocation tests do not have to add.
+    void*  end;
     size_t size;
+};
+
+// Lecture 108 - request descriptor used by the upcoming
+// allocation-walk helpers (process_get_allocation_by_addr in
+// L109). `allocation` is the full record; `peek` carries the
+// run-length info for a "validate range" query.
+enum {
+    PROCESS_ALLOCATION_REQUEST_IS_STACK_MEMORY = 0b00000001,
+};
+
+struct process_allocation_request {
+    struct process_allocation  allocation;
+    int                        flags;
+    struct {
+        void*  addr;
+        void*  end;
+        size_t total_bytes_left;
+    } peek;
 };
 
 struct command_argument {
@@ -43,7 +64,11 @@ struct process {
     uint16_t           id;
     char               filename[SAMOS_MAX_PATH];
     struct task*       task;
-    struct process_allocation allocations[SAMOS_MAX_PROGRAM_ALLOCATIONS];
+    // Lecture 108 - allocations was a fixed-size array indexed by
+    // SAMOS_MAX_PROGRAM_ALLOCATIONS. It is now a vector of
+    // struct process_allocation; new allocations grow the vector,
+    // freed slots are nulled in place and reused.
+    struct vector*     allocations;
 
     // L105 - vector<struct process_file_handle*>. Populated by
     // process_fopen, drained at process_free_process time so a
@@ -88,5 +113,14 @@ struct process_file_handle*    process_file_handle_get(struct process* process, 
 int                            process_fclose(struct process* process, int fd);
 int                            process_fread(struct process* process, void* virt_ptr,
                                              uint64_t size, uint64_t nmemb, int fd);
+
+// Lecture 108 - vector-backed allocation table accessors.
+int                            process_find_free_allocation_index(struct process* process);
+int                            process_allocation_set_map(struct process* process,
+                                                          int allocation_entry_index,
+                                                          void* ptr, size_t size);
+int                            process_get_allocation_by_start_addr(struct process* process,
+                                                                    void* addr,
+                                                                    struct process_allocation* allocation_out);
 
 #endif
