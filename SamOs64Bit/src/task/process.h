@@ -123,4 +123,13 @@ int                            process_get_allocation_by_start_addr(struct proce
                                                                     void* addr,
                                                                     struct process_allocation* allocation_out);
 
+// Lecture 109 - range query + stack-region test.
+int                            process_get_allocation_by_addr(struct process* process,
+                                                              void* addr,
+                                                              struct process_allocation_request* allocation_request_out);
+bool                           process_is_stack_memory(struct process* process, void* addr);
+int                            process_validate_memory_or_terminate(struct process* process,
+                                                                    void* virt_addr,
+                                                                    size_t space_needed);
+
 #endif
