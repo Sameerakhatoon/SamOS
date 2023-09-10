@@ -34,6 +34,6 @@ int  samos_fopen(const char* filename, const char* mode);
 // Lecture 106 - userland fclose trampoline.
 void samos_fclose(size_t fd);
 // Lecture 107 - userland fread trampoline.
-long samos_read(void* buffer, size_t size, size_t count, long fd);
+long samos_fread(void* buffer, size_t size, size_t count, long fd);
 
 #endif

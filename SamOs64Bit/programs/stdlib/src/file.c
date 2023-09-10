@@ -14,5 +14,5 @@ void fclose(int fd){
 }
 
 int fread(void* buffer, size_t size, size_t count, long fd){
-    return samos_read(buffer, size, count, fd);
+    return samos_fread(buffer, size, count, fd);
 }
