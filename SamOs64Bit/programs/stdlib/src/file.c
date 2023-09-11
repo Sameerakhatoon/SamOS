@@ -16,3 +16,7 @@ void fclose(int fd){
 int fread(void* buffer, size_t size, size_t count, long fd){
     return samos_fread(buffer, size, count, fd);
 }
+
+int fseek(int fd, int offset, int whence){
+    return (int)samos_fseek(fd, offset, whence);
+}

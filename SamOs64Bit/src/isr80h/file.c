@@ -12,6 +12,16 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// Lecture 111 - userland fseek. Stack layout:
+//   0: fd, 1: offset, 2: whence
+void* isr80h_command13_fseek(struct interrupt_frame* frame){
+    (void)frame;
+    long fd     = (long)task_get_stack_item(task_current(), 0);
+    long offset = (long)task_get_stack_item(task_current(), 1);
+    long whence = (long)task_get_stack_item(task_current(), 2);
+    return (void*)(long)process_fseek(task_current()->process, fd, offset, whence);
+}
+
 // Lecture 107 - userland fread. Stack layout (top to bottom):
 //   0: buffer (user virtual)
 //   1: size
