@@ -665,6 +665,37 @@ out:
     return res;
 }
 
+// Lecture 112 - shorthand. Walks the process's paging descriptor
+// to translate a virtual address to its physical backing.
+void* process_virtual_address_to_physical(struct process* process, void* virt_addr){
+    return paging_get_physical_address(process->task->paging_desc, virt_addr);
+}
+
+// Lecture 112 - userland fstat. Validate the user buffer fits in
+// one allocation, translate it, forward to the kernel fstat.
+int process_fstat(struct process* process, int fd, struct file_stat* virt_filestat_addr){
+    int res = 0;
+    res = process_validate_memory_or_terminate(process, virt_filestat_addr,
+                                               sizeof(*virt_filestat_addr));
+    if(res < 0){
+        goto out;
+    }
+
+    struct file_stat* phys_filestat_addr =
+        process_virtual_address_to_physical(process, virt_filestat_addr);
+    if(!phys_filestat_addr){
+        res = -EINVARG;
+        goto out;
+    }
+
+    res = fstat(fd, phys_filestat_addr);
+    if(res < 0){
+        goto out;
+    }
+out:
+    return res;
+}
+
 // Lecture 111 - userland fseek. Look up the handle on the
 // per-process vector, then call the kernel fseek with the
 // underlying fd.

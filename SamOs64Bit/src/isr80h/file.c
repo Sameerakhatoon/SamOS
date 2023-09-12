@@ -9,8 +9,20 @@
 #include "task/task.h"
 #include "task/process.h"
 #include "idt/idt.h"
+#include "fs/file.h"   // L112 - struct file_stat for fstat handler
 #include <stddef.h>
 #include <stdint.h>
+
+// Lecture 112 - userland fstat. Stack: 0=fd, 1=struct file_stat*.
+// process_fstat translates the buffer pointer and forwards to
+// the kernel fstat for the underlying fd.
+void* isr80h_command14_fstat(struct interrupt_frame* frame){
+    (void)frame;
+    long fd = (long)task_get_stack_item(task_current(), 0);
+    struct file_stat* virt_file_stat_addr =
+        (struct file_stat*)task_get_stack_item(task_current(), 1);
+    return (void*)(long)process_fstat(task_current()->process, fd, virt_file_stat_addr);
+}
 
 // Lecture 111 - userland fseek. Stack layout:
 //   0: fd, 1: offset, 2: whence
