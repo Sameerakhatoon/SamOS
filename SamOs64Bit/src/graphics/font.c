@@ -11,6 +11,7 @@
 
 #include "graphics/font.h"
 #include "graphics/graphics.h"
+#include "graphics/font_builtin.h"
 #include "graphics/image/image.h"
 #include "memory/heap/kheap.h"
 #include "lib/vector/vector.h"
@@ -165,8 +166,10 @@ int font_draw_from_index(struct graphics_info* graphics_info, struct font* font,
         res = -EINVARG;
         goto out;
     }
-    // Upstream uses > here; preserved (likely intent is >=).
-    if(index_character > (int)font->character_count){
+    // Upstream used `>`, so index == character_count read
+    // one glyph past the table; negative indexes (control bytes
+    // below the first glyph) read before it.
+    if(index_character < 0 || index_character >= (int)font->character_count){
         res = 0;
         goto out;
     }
@@ -241,12 +244,34 @@ int font_system_init(void){
     }
 
     // Lecture 94 - the upstream path is "@:/sysfont.bmp" sitting
-    // at the FS root. Our build pipeline does not yet copy a
-    // font BMP onto the disk image, so font_load will fail.
-    // We do not panic here (unlike upstream) because the rest
-    // of the kernel boot must continue under CI.
+    // at the FS root. We do not panic when it is missing (unlike
+    // upstream): the usability work falls back to the compiled-in copy of the
+    // same glyphs, so the system terminal always has a font.
     system_font = font_load("@:/sysfont.bmp");
-    (void)system_font;
+    if(!system_font){
+        system_font = font_builtin();
+    }
 out:
     return res;
+}
+
+// The compiled-in 8x16 font (see font_builtin.c). Built
+// once and cached under the pseudo-path FONT_BUILTIN_NAME.
+struct font* font_builtin(void){
+    struct font* font = loaded_fonts ? font_get_loaded_font(FONT_BUILTIN_NAME) : NULL;
+    if(font){
+        return font;
+    }
+    // At width 8 the packed layout (bit y*8+x) is one byte per row
+    // with bit 0 leftmost - exactly the generated table's layout,
+    // so the data can be used as-is.
+    font = font_create((uint8_t*)font_builtin_8x16_data,
+                       FONT_BUILTIN_CHARACTER_COUNT,
+                       FONT_BUILTIN_WIDTH, FONT_BUILTIN_HEIGHT,
+                       FONT_BUILTIN_FIRST_CHARACTER);
+    if(font && loaded_fonts){
+        strncpy(font->filename, FONT_BUILTIN_NAME, sizeof(font->filename));
+        vector_push(loaded_fonts, &font);
+    }
+    return font;
 }

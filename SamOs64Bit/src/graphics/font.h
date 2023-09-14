@@ -13,9 +13,9 @@
 #include "kernel.h"   // SAMOS_MAX_PATH
 
 #define FONT_IMAGE_DRAW_SUBTRACT_FROM_INDEX     32
-#define FONT_IMAGE_CHARACTER_WIDTH_PIXEL_SIZE   9
+#define FONT_IMAGE_CHARACTER_WIDTH_PIXEL_SIZE   8   // Real 8x16 sheet (was a 9-wide stub)
 #define FONT_IMAGE_CHRACTER_HEIGHT_PIXEL_SIZE   16
-#define FONT_IMAGE_CHARACTER_Y_OFFSET           4
+#define FONT_IMAGE_CHARACTER_Y_OFFSET           0   // Glyphs fill the whole cell
 
 struct font {
     size_t   character_count;
@@ -42,6 +42,10 @@ int          font_draw(struct graphics_info* g, struct font* font,
                        int screen_x, int screen_y,
                        int character,
                        struct framebuffer_pixel font_color);
+// Compiled-in 8x16 font; font_system_init falls back to it
+// when @:/sysfont.bmp cannot be loaded.
+#define FONT_BUILTIN_NAME "builtin:8x16"
+struct font* font_builtin(void);
 int          font_draw_text(struct graphics_info* g, struct font* font,
                             int screen_x, int screen_y,
                             const char* str,

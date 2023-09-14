@@ -77,5 +77,8 @@ void mouse_position_set(struct mouse* mouse, size_t x, size_t y);
 int  mouse_register(struct mouse* mouse);
 int  mouse_system_init(void);
 int  mouse_system_load_static_drivers(void);
+// Create cursor windows for mice registered before the
+// window system was up. Called by window_system_initialize.
+void mouse_system_attach_windows(void);
 
 #endif

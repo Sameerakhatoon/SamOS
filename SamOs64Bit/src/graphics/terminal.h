@@ -62,6 +62,8 @@ int               terminal_total_rows(struct terminal* terminal);
 int               terminal_write(struct terminal* terminal, int c);
 int               terminal_print(struct terminal* terminal, const char* message);
 int               terminal_backspace(struct terminal* terminal);
+// Erase the text area and home the cursor ('\f' does this).
+void              terminal_clear(struct terminal* terminal);
 
 int               terminal_pixel_set(struct terminal* terminal, size_t x, size_t y,
                                      struct framebuffer_pixel pixel_color);

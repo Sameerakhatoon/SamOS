@@ -553,7 +553,10 @@ void kernel_main(void)
         kernel_load_cmdline_programs();
         if(process_load_switch("@:/BLANK.ELF", &user_selftest_proc) == SAMOS_ALL_OK){
             print("e2e: running user-side BLANK.ELF selftest\n");
-            enable_interrupts();
+            // No sti here: task_return sets IF in the iretq
+            // frame. An IRQ taken in this window (a latched IRQ1)
+            // saved the kernel frame as the task's user state, and
+            // the first iretq faulted on SS 0x20.
             task_run_first_ever_task();
             // unreachable
         }
@@ -638,12 +641,11 @@ void kernel_main(void)
     // mouse driver can actually fire IRQ12 callbacks.
     enable_interrupts();
 
-    while(1){
-    }
     // Lecture 208 - upstream switches the default user program
-    // from blank.elf to shell.elf. SamOs's call site is
-    // unreachable (the spin loop above never exits) but we
-    // follow the rename for parity.
+    // from blank.elf to shell.elf. The L136 `while(1){}`
+    // that made this load unreachable is gone, so a disk without
+    // BLANK.ELF boots straight into the shell. With BLANK.ELF the
+    // selftest above starts the shell itself when it is done.
     int res = process_load_switch("@:/shell.elf", &p);
     if(res != SAMOS_ALL_OK){
         panic("Failed to load user program\n");

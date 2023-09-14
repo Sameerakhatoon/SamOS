@@ -25,6 +25,7 @@
 #include "graphics/terminal.h"
 #include "idt/irq.h"
 #include "mouse/mouse.h"
+#include "mouse/ps2mouse.h"   // ps2_mouse_get
 #include "graphics/window.h"
 #include "keyboard/keyboard.h"
 #include "task/task.h"
@@ -748,12 +749,13 @@ int kernel_selftest(void) {
 
     // L92 font load. With the stub sysfont.bmp now staged on
     // both partitions, font_load should return a non-NULL
-    // struct and bits_width_per_character should equal 9.
+    // struct and bits_width_per_character should equal 8.
     struct font* loaded_font = font_load("@:/sysfont.bmp");
     {
         if (loaded_font) mark_pass(BM_FEATURE_FONT_LOADED);
         else              mark_fail(BM_FEATURE_FONT_LOADED);
-        if (loaded_font && loaded_font->bits_width_per_character == 9)
+        // The sheet is now a real 8x16 font (was a 9-wide stub).
+        if (loaded_font && loaded_font->bits_width_per_character == 8)
             mark_pass(BM_FEATURE_FONT_PIXEL_W);
         else
             mark_fail(BM_FEATURE_FONT_PIXEL_W);
@@ -830,6 +832,23 @@ int kernel_selftest(void) {
         mark_fail(BM_FEATURE_MOUSE_MOVE_H);
         mark_fail(BM_FEATURE_MOUSE_CLICK);
         mark_fail(BM_FEATURE_MOUSE_MOVE);
+    }
+
+    // The real PS/2 driver was registered at boot by
+    // mouse_system_load_static_drivers (QEMU's i8042 has an aux
+    // device) and got its cursor window once the window system
+    // came up (mouse_system_attach_windows).
+    {
+        extern struct vector* mouse_driver_vector;
+        int found = 0;
+        size_t n = vector_count(mouse_driver_vector);
+        for (size_t i = 0; i < n; i++) {
+            struct mouse* m = NULL;
+            vector_at(mouse_driver_vector, i, &m, sizeof(m));
+            if (m == ps2_mouse_get() && m->graphic.window) found = 1;
+        }
+        if (found) mark_pass(BM_FEATURE_PS2_MOUSE);
+        else       mark_fail(BM_FEATURE_PS2_MOUSE);
     }
 
     // L154 / L136 kernel-side window_create + window_redraw +
@@ -1054,6 +1073,32 @@ int kernel_selftest(void) {
                 if (terminal_write(t, '\n') < 0) ok = 0;
             }
             terminal_free(t);
+        }
+        // Real scrolling. A 3-row terminal; draw 'X' (whose
+        // top-left pixel is lit in the 8x16 font) at row 0, then
+        // push three newlines. The X must scroll off the top and
+        // the cursor must stay on the last row - the old code
+        // wrapped back to row 0 and left the X in place.
+        t = NULL;
+        if (ok && g && loaded_font) {
+            t = terminal_create(g, 0, 0,
+                                loaded_font->bits_width_per_character * 10,
+                                loaded_font->bits_height_per_character * 3,
+                                loaded_font, white, 0);
+        }
+        if (t) {
+            struct framebuffer_pixel bg = t->terminal_background[0];
+            terminal_write(t, 'X');
+            struct framebuffer_pixel drawn = g->pixels[0];
+            int lit = memcmp(&drawn, &white, sizeof(white)) == 0;
+            for (int i = 0; i < 3; i++) terminal_write(t, '\n');
+            struct framebuffer_pixel after = g->pixels[0];
+            int cleared = memcmp(&after, &bg, sizeof(bg)) == 0;
+            int on_last = terminal_cursor_row(t) == 2;
+            if (!(lit && cleared && on_last)) ok = 0;
+            terminal_free(t);
+        } else if (loaded_font) {
+            ok = 0;
         }
         if (ok) mark_pass(BM_FEATURE_TERMINAL_SCROLL);
         else    mark_fail(BM_FEATURE_TERMINAL_SCROLL);

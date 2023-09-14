@@ -138,9 +138,15 @@ out:
     return found_terminal;
 }
 
-// Copy the surface's current pixel buffer into our restore
-// snapshot. Allocates the snapshot lazily on first call.
+// Copy the terminal's rectangle of the surface into our restore
+// snapshot (stride = bounds.width). Allocates the snapshot lazily
+// on first call.
+//
+// This used to memcpy the first width*height pixels of the
+// whole surface, which is only the terminal's own rectangle when
+// the terminal sits at (0,0) and spans the full surface width.
 void terminal_background_save(struct terminal* terminal){
+    struct graphics_info* g = terminal->graphics_info;
     size_t width        = terminal->bounds.width;
     size_t height       = terminal->bounds.height;
     size_t total_pixels = width * height;
@@ -152,29 +158,123 @@ void terminal_background_save(struct terminal* terminal){
             return;
         }
     }
-    memcpy(terminal->terminal_background, terminal->graphics_info->pixels, buffer_size);
+    for(size_t y = 0; y < height; y++){
+        size_t abs_y = terminal->bounds.abs_y + y;
+        if(abs_y >= g->height){
+            break;
+        }
+        for(size_t x = 0; x < width; x++){
+            size_t abs_x = terminal->bounds.abs_x + x;
+            if(abs_x >= g->width){
+                break;
+            }
+            terminal->terminal_background[y * width + x] = g->pixels[abs_y * g->width + abs_x];
+        }
+    }
+}
+
+// The part of the terminal that holds whole glyph cells and
+// lies on the surface, in pixels.
+static void terminal_text_extent(struct terminal* terminal, size_t* width_out, size_t* height_out){
+    struct graphics_info* g = terminal->graphics_info;
+    size_t width  = terminal_total_cols(terminal) * terminal->font->bits_width_per_character;
+    size_t height = terminal_total_rows(terminal) * terminal->font->bits_height_per_character;
+    if(terminal->bounds.abs_x + width > g->width){
+        width = g->width > terminal->bounds.abs_x ? g->width - terminal->bounds.abs_x : 0;
+    }
+    if(terminal->bounds.abs_y + height > g->height){
+        height = g->height > terminal->bounds.abs_y ? g->height - terminal->bounds.abs_y : 0;
+    }
+    *width_out  = width;
+    *height_out = height;
+}
+
+// Real scrolling. Move the text up by one glyph height,
+// refill the freed bottom row from the saved background, and
+// repaint the terminal once. Upstream reset the cursor to row 0
+// instead, so new output overwrote the top of the screen.
+// Only glyph pixels move: a source pixel that still
+// shows the saved background becomes the destination's own saved
+// background, so a non-uniform backdrop stays put.
+static void terminal_scroll(struct terminal* terminal){
+    struct graphics_info* g = terminal->graphics_info;
+    struct framebuffer_pixel* saved = terminal->terminal_background;
+    size_t stride = terminal->bounds.width;
+    size_t font_height = terminal->font->bits_height_per_character;
+    size_t width = 0;
+    size_t height = 0;
+    terminal_text_extent(terminal, &width, &height);
+    if(width == 0 || height < font_height){
+        return;
+    }
+
+    size_t x0 = terminal->bounds.abs_x;
+    size_t y0 = terminal->bounds.abs_y;
+    for(size_t y = 0; y + font_height < height; y++){
+        struct framebuffer_pixel* dst = &g->pixels[(y0 + y) * g->width + x0];
+        struct framebuffer_pixel* src = &g->pixels[(y0 + y + font_height) * g->width + x0];
+        if(!saved){
+            memcpy(dst, src, (int)(width * sizeof(struct framebuffer_pixel)));
+            continue;
+        }
+        struct framebuffer_pixel* dst_bg = &saved[y * stride];
+        struct framebuffer_pixel* src_bg = &saved[(y + font_height) * stride];
+        for(size_t x = 0; x < width; x++){
+            if(*(uint32_t*)&src[x] == *(uint32_t*)&src_bg[x]){
+                dst[x] = dst_bg[x];
+            } else {
+                dst[x] = src[x];
+            }
+        }
+    }
+    for(size_t y = height - font_height; y < height; y++){
+        for(size_t x = 0; x < width; x++){
+            struct framebuffer_pixel pixel = {0};
+            if(saved){
+                pixel = saved[y * stride + x];
+            }
+            g->pixels[(y0 + y) * g->width + x0 + x] = pixel;
+        }
+    }
+    graphics_redraw_graphics_to_screen(g, x0, y0, width, height);
+}
+
+// Repaint the whole text area from the saved background and
+// home the cursor.
+void terminal_clear(struct terminal* terminal){
+    size_t width = 0;
+    size_t height = 0;
+    terminal_text_extent(terminal, &width, &height);
+    terminal_restore_background(terminal, 0, 0, width, height);
+    terminal->text.row = 0;
+    terminal->text.col = 0;
+}
+
+// Move to the next row, scrolling when we are on the last one.
+static void terminal_next_row(struct terminal* terminal){
+    size_t total_rows_per_term = terminal_total_rows(terminal);
+    terminal->text.col = 0;
+    if(total_rows_per_term == 0){
+        terminal->text.row = 0;
+        return;
+    }
+    if(terminal->text.row + 1 >= total_rows_per_term){
+        terminal_scroll(terminal);
+        terminal->text.row = total_rows_per_term - 1;
+        return;
+    }
+    terminal->text.row++;
 }
 
 static void terminal_handle_newline(struct terminal* terminal){
-    terminal->text.row++;
-    size_t total_rows_per_term = terminal_total_rows(terminal);
-    if(terminal->text.row >= total_rows_per_term){
-        terminal->text.row = 0;
-    }
-    terminal->text.col = 0;
+    terminal_next_row(terminal);
 }
 
 static void terminal_update_position_after_draw(struct terminal* terminal){
     terminal->text.col += 1;
-    size_t total_cols_per_row  = terminal_total_cols(terminal);
-    size_t total_rows_per_term = terminal_total_rows(terminal);
+    size_t total_cols_per_row = terminal_total_cols(terminal);
     if(terminal->text.col >= total_cols_per_row){
-        terminal->text.col = 0;
-        terminal->text.row++;
-    }
-    if(terminal->text.row >= total_rows_per_term){
-        terminal->text.col = 0;
-        terminal->text.row = 0;
+        terminal_next_row(terminal);
     }
 }
 
@@ -240,15 +340,22 @@ extern void graphics_draw_rect(struct graphics_info* g,
 void terminal_restore_background(struct terminal* terminal,
                                  int sx, int sy,
                                  int width, int height){
+    // The bounds test compared absolute coordinates with the
+    // terminal's size, and the snapshot was indexed without sx/sy,
+    // so every erased cell got the top-left cell's background.
     for(int x = 0; x < width; x++){
         for(int y = 0; y < height; y++){
-            size_t abs_x = terminal->bounds.abs_x + sx + x;
-            size_t abs_y = terminal->bounds.abs_y + sy + y;
-            if(abs_x > terminal->bounds.width || abs_y > terminal->bounds.height){
+            size_t rel_x = sx + x;
+            size_t rel_y = sy + y;
+            if(rel_x >= terminal->bounds.width || rel_y >= terminal->bounds.height){
                 continue;
             }
+            size_t abs_x = terminal->bounds.abs_x + rel_x;
+            size_t abs_y = terminal->bounds.abs_y + rel_y;
             struct framebuffer_pixel background_pixel = {0};
-            background_pixel = terminal->terminal_background[y * terminal->bounds.width + x];
+            if(terminal->terminal_background){
+                background_pixel = terminal->terminal_background[rel_y * terminal->bounds.width + rel_x];
+            }
             graphics_draw_pixel(terminal->graphics_info, abs_x, abs_y, background_pixel);
         }
     }
@@ -272,14 +379,16 @@ int terminal_backspace(struct terminal* terminal){
     int current_col = terminal_cursor_col(terminal);
     int current_row = terminal_cursor_row(terminal);
 
+    // At the top-left cell there is nothing to erase. The
+    // old code wrapped to the bottom row, so a stray backspace
+    // jumped the cursor to the end of the screen.
+    if(current_col == 0 && current_row == 0){
+        return 0;
+    }
     current_col--;
     if(current_col < 0){
         current_col = total_cols - 1;
         current_row--;
-    }
-    if(current_row < 0){
-        current_row = total_rows - 1;
-        current_col = 0;
     }
     if(current_col >= total_cols){
         current_col = 0;
@@ -309,6 +418,30 @@ int terminal_write(struct terminal* terminal, int c){
     }
     if(c == 0x08 && (terminal->flags & TERMINAL_FLAG_BACKSPACE_ALLOWED)){
         terminal_backspace(terminal);
+        return 0;
+    }
+    // Form feed clears the terminal (the shell's `clear`),
+    // carriage return and tab (8-column stops). Other control
+    // bytes have no glyph and are dropped.
+    if(c == '\f'){
+        terminal_clear(terminal);
+        return 0;
+    }
+    if(c == '\r'){
+        terminal->text.col = 0;
+        return 0;
+    }
+    if(c == '\t'){
+        int spaces = 8 - (int)(terminal->text.col % 8);
+        for(int i = 0; i < spaces; i++){
+            terminal_write(terminal, ' ');
+            if(terminal->text.col == 0){
+                break;  // wrapped onto a new row
+            }
+        }
+        return 0;
+    }
+    if(c < 0x20 || c == 0x7F){
         return 0;
     }
 

@@ -199,6 +199,7 @@ typedef enum {
     BM_FEATURE_FONT_LOAD_BAD  = 165, // font_load("@:/MISSING.BMP") returns NULL
     BM_FEATURE_MULTIHEAP_OOM  = 166, // kmalloc(SIZE_MAX) returns NULL gracefully
     BM_FEATURE_GFX_NESTED     = 167, // graphics_info_create_relative round trip
+    BM_FEATURE_PS2_MOUSE      = 170, // PS/2 mouse registered at boot, cursor window attached
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
@@ -223,6 +224,10 @@ typedef enum {
     BM_USER_PUTCHAR_OK        = 82,  // samos_putchar did not fault
     BM_USER_PARSE_CMD_OK      = 83,  // samos_parse_command returned a non-NULL list
     BM_USER_PROC_ARGS_OK      = 84,  // samos_process_get_arguments round trip
+
+    // (ux) user-side libc checks, written by blank.elf.
+    BM_USER_LIBC_PRINTF       = 168, // snprintf %d %u %x %p %c %ld + width, trailing %
+    BM_USER_LIBC_STRINGS      = 169, // atoi/strtol/strchr/strstr/strcat/errno/calloc/itoa_r/quoting
 
     // The memory manager work memory-manager self-tests (src/memory/heap/memtest.c).
     // Value 1 = pass; any other value is the failing check's line

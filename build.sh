@@ -144,11 +144,13 @@ mcopy -i "$P1" "$EFI_OUT"                      ::/EFI/BOOT/BOOTX64.EFI
 mcopy -i "$P1" "$K/bin/kernel.bin"             ::/KERNEL.BIN
 mcopy -i "$P1" "$K/programs/blank/blank.elf"   ::/BLANK.ELF
 mcopy -i "$P1" "$K/programs/shell/shell.elf"   ::/SHELL.ELF
+mcopy -i "$P1" "$K/programs/hello/hello.elf"   ::/HELLO.ELF
 mcopy -i "$P1" "$K/assets/sysfont.bmp"         ::/SYSFONT.BMP
 
 # p2 (SAMOS): the kernel's primary filesystem ("@:/").
 mcopy -i "$P2" "$K/programs/blank/blank.elf"   ::/BLANK.ELF
 mcopy -i "$P2" "$K/programs/shell/shell.elf"   ::/SHELL.ELF
+mcopy -i "$P2" "$K/programs/hello/hello.elf"   ::/HELLO.ELF
 mcopy -i "$P2" "$K/programs/ktest/ktest.elf"   ::/KTEST.ELF   # The interrupt work e2e probes
 mcopy -i "$P2" "$K/assets/sysfont.bmp"         ::/SYSFONT.BMP
 mcopy -i "$P2" "$K/hello.txt"                  ::/HELLO.TXT

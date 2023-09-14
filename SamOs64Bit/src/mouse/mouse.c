@@ -13,6 +13,7 @@
 #include "lib/vector/vector.h"
 #include "graphics/graphics.h"
 #include "graphics/window.h"
+#include "mouse/ps2mouse.h"
 #include "kernel.h"
 #include "status.h"
 
@@ -23,10 +24,46 @@
 // Holds all the loaded mouse drivers.
 struct vector* mouse_driver_vector = NULL;
 
+// Register the built-in PS/2 driver. A machine without an
+// aux port fails the handshake inside ps2_mouse_init and
+// mouse_register returns the error without adding it; boot
+// continues either way.
 int mouse_system_load_static_drivers(void){
-    int res = 0;
-    // TODO L137+ - register the PS/2 driver here once it lands.
-    return res;
+    return mouse_register(ps2_mouse_get());
+}
+
+// Give a mouse its cursor window. kernel_main loads the
+// static drivers before window_system_initialize, so at that
+// point window_create would push onto a NULL windows_vector; the
+// window system calls mouse_system_attach_windows once it is up.
+static void mouse_create_graphic(struct mouse* mouse){
+    if(mouse->graphic.window || !window_system_ready()){
+        return;
+    }
+    mouse->graphic.window =
+        window_create(graphics_screen_info(), NULL, "",
+                      mouse->coords.x, mouse->coords.y,
+                      mouse->graphic.width, mouse->graphic.height,
+                      WINDOW_FLAG_BACKGROUND_TRANSPARENT
+                      | WINDOW_FLAG_BORDERLESS
+                      | WINDOW_FLAG_CLICK_THROUGH,
+                      -1);
+    if(!mouse->graphic.window){
+        return;
+    }
+    window_set_z_index(mouse->graphic.window, MOUSE_GRAPHIC_ZINDEX);
+    mouse->draw(mouse);
+}
+
+void mouse_system_attach_windows(void){
+    size_t total_mice = vector_count(mouse_driver_vector);
+    for(size_t i = 0; i < total_mice; i++){
+        struct mouse* mouse = NULL;
+        vector_at(mouse_driver_vector, i, &mouse, sizeof(mouse));
+        if(mouse){
+            mouse_create_graphic(mouse);
+        }
+    }
 }
 
 int mouse_system_init(void){
@@ -96,19 +133,7 @@ int mouse_register(struct mouse* mouse){
         goto out;
     }
 
-    if(!mouse->graphic.window){
-        mouse->graphic.window =
-            window_create(screen_graphics, NULL, "",
-                          mouse->coords.x, mouse->coords.y,
-                          mouse->graphic.width, mouse->graphic.height,
-                          WINDOW_FLAG_BACKGROUND_TRANSPARENT
-                          | WINDOW_FLAG_BORDERLESS
-                          | WINDOW_FLAG_CLICK_THROUGH,
-                          -1);
-        window_set_z_index(mouse->graphic.window, MOUSE_GRAPHIC_ZINDEX);
-    }
-
-    mouse->draw(mouse);
+    mouse_create_graphic(mouse);
     vector_push(mouse_driver_vector, &mouse);
 out:
     return res;
@@ -117,7 +142,9 @@ out:
 void mouse_position_set(struct mouse* mouse, size_t x, size_t y){
     mouse->coords.x = x;
     mouse->coords.y = y;
-    window_position_set(mouse->graphic.window, x, y);
+    if(mouse->graphic.window){
+        window_position_set(mouse->graphic.window, x, y);
+    }
 }
 
 void mouse_click(struct mouse* mouse, MOUSE_CLICK_TYPE type){

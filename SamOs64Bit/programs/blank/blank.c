@@ -11,6 +11,7 @@
 #include "stdio.h"
 #include "string.h"
 #include "file.h"   // L105 - userland fopen
+#include "errno.h"
 
 // SamOs e2e: BM_USER_* slot numbers; mirror src/bootmarker.h.
 enum {
@@ -32,7 +33,65 @@ enum {
     USER_PARSE_CMD_OK   = 83,  // samos_parse_command returned a non-NULL list
     USER_PROC_ARGS_OK   = 84,  // samos_process_get_arguments round trip
     USER_KEY_RECEIVED   = 160, // samos_getkey eventually returns a non-zero key
+    USER_LIBC_PRINTF    = 168, // Snprintf formats (bitmask of failures in the value)
+    USER_LIBC_STRINGS   = 169, // number/string helpers, errno, calloc, quoting
 };
+
+// Libc checks, run inside SamOS so they use the real
+// syscalls and the cross-compiled code. Each returns 1 on success.
+// On failure the e2e value is 0x100 + the number of the first
+// failing check, so the marker says which one broke.
+static int fmt_is(const char* want, const char* got){
+    return strcmp(want, got) == 0;
+}
+
+static unsigned int libc_printf_checks(void){
+    char b[64];
+    int n = 0;
+    snprintf(b, sizeof b, "%d|%i|%u", -42, 7, 4294967295u);
+    if(!fmt_is("-42|7|4294967295", b)) return 0x100 + 1;
+    snprintf(b, sizeof b, "%x|%X|%p", 255, 255, (void*)0x1234);
+    if(!fmt_is("ff|FF|0x1234", b)) return 0x100 + 2;
+    snprintf(b, sizeof b, "%c%c|%s", 'o', 'k', "str");
+    if(!fmt_is("ok|str", b)) return 0x100 + 3;
+    snprintf(b, sizeof b, "%ld|%lu", -9000000000L, 18000000000UL);
+    if(!fmt_is("-9000000000|18000000000", b)) return 0x100 + 4;
+    snprintf(b, sizeof b, "[%5d][%-5d][%05d]", 42, 42, -42);
+    if(!fmt_is("[   42][42   ][-0042]", b)) return 0x100 + 5;
+    snprintf(b, sizeof b, "100%%|50%");
+    if(!fmt_is("100%|50%", b)) return 0x100 + 6;
+    n = snprintf(b, 4, "abcdef");
+    if(n != 6 || !fmt_is("abc", b)) return 0x100 + 7;
+    // printf goes out through print(); the e2e only checks it returns.
+    if(printf("e2e: printf %d %s\n", 7, "ok") != 17) return 0x100 + 8;
+    return 1;
+}
+
+static unsigned int libc_string_checks(void){
+    char* end = 0;
+    if(atoi("  -123") != -123) return 0x100 + 1;
+    if(strtol("0x1f", &end, 0) != 31 || *end) return 0x100 + 2;
+    errno = 0;
+    strtol("999999999999999999999", &end, 10);
+    if(errno != ERANGE) return 0x100 + 3;
+    const char* s = "hello world";
+    if(strchr(s, 'w') != s + 6 || strstr(s, "lo w") != s + 3) return 0x100 + 4;
+    char cat[16] = "ab";
+    strcat(cat, "cd");
+    if(strcmp(cat, "abcd") != 0) return 0x100 + 5;
+    errno = 0;
+    if(calloc((size_t)1 << 62, 16) != 0 || errno != ENOMEM) return 0x100 + 6;
+    char a[12], b[12];
+    itoa_r(-5, a, sizeof a, 10);
+    itoa_r(255, b, sizeof b, 16);
+    if(strcmp(a, "-5") != 0 || strcmp(b, "ff") != 0) return 0x100 + 7;
+    struct command_argument* c = samos_parse_command("echo \"a b\" 'c'", 64);
+    int ok = c && c->next && strcmp(c->next->argument, "a b") == 0
+               && c->next->next && strcmp(c->next->next->argument, "c") == 0;
+    samos_free_command(c);
+    if(!ok) return 0x100 + 8;
+    return 1;
+}
 
 int main(int argc, char** argv){
     (void)argc;
@@ -44,6 +103,10 @@ int main(int argc, char** argv){
     // (process_load_switch failed, ring 3 transition didn't iretq,
     // or the syscall dispatcher dropped the call).
     samos_e2e_mark(USER_INT80_REACH, 1);
+
+    // Libc.
+    samos_e2e_mark(USER_LIBC_PRINTF,  libc_printf_checks());
+    samos_e2e_mark(USER_LIBC_STRINGS, libc_string_checks());
 
     // Exercise user heap.
     {
@@ -206,7 +269,12 @@ int main(int argc, char** argv){
         samos_e2e_mark(USER_KEY_RECEIVED, got_key ? 1 : 0);
     }
 
-    while(1){
+    // Boot to the shell. The kernel starts BLANK.ELF with no
+    // arguments; then the selftest hands over to SHELL.ELF and
+    // exits instead of spinning. Started from the shell (argc >= 1)
+    // it just exits, so the shell gets its prompt back.
+    if(argc == 0){
+        samos_system_run("shell.elf");
     }
     return 0;
 }

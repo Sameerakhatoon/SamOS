@@ -72,7 +72,15 @@ int window_system_initialize(void){
     focused_window                  = NULL;
     window_autoincrement_id_current = 100000;
 out:
+    // Mice registered earlier in boot get their cursor now.
+    if(windows_vector){
+        mouse_system_attach_windows();
+    }
     return res;
+}
+
+bool window_system_ready(void){
+    return windows_vector != NULL;
 }
 
 // Lecture 145 - find the window that owns `graphics` (i.e.

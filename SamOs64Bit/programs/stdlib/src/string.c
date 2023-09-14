@@ -105,7 +105,11 @@ char* strtok(char* str, const char* delimiters){
     if(!str && !sp){
         return 0;
     }
-    if(str && !sp){
+    // A new string always restarts tokenising. Upstream only
+    // took `str` when the previous string had been fully consumed,
+    // so abandoning a tokenise half way made the next call carry on
+    // in the old (possibly freed) buffer.
+    if(str){
         sp = str;
     }
 
@@ -141,4 +145,76 @@ char* strtok(char* str, const char* delimiters){
         }
     }
     return p_start;
+}
+
+// The rest of the everyday <string.h> surface.
+int strcmp(const char* str1, const char* str2){
+    const unsigned char* a = (const unsigned char*)str1;
+    const unsigned char* b = (const unsigned char*)str2;
+    while(*a && *a == *b){
+        a++;
+        b++;
+    }
+    return *a - *b;
+}
+
+char* strchr(const char* str, int c){
+    for(;; str++){
+        if(*str == (char)c){
+            return (char*)str;
+        }
+        if(*str == '\0'){
+            return 0;
+        }
+    }
+}
+
+char* strrchr(const char* str, int c){
+    const char* last = 0;
+    for(;; str++){
+        if(*str == (char)c){
+            last = str;
+        }
+        if(*str == '\0'){
+            return (char*)last;
+        }
+    }
+}
+
+char* strstr(const char* haystack, const char* needle){
+    if(*needle == '\0'){
+        return (char*)haystack;
+    }
+    for(; *haystack; haystack++){
+        const char* h = haystack;
+        const char* n = needle;
+        while(*h && *n && *h == *n){
+            h++;
+            n++;
+        }
+        if(*n == '\0'){
+            return (char*)haystack;
+        }
+    }
+    return 0;
+}
+
+char* strcat(char* dest, const char* src){
+    strcpy(dest + strlen(dest), src);
+    return dest;
+}
+
+// Appends at most count bytes of src and always NUL-terminates
+// (C semantics: dest needs strlen(dest) + count + 1 bytes).
+char* strncat(char* dest, const char* src, int count){
+    char* d = dest + strlen(dest);
+    while(count-- > 0 && *src){
+        *d++ = *src++;
+    }
+    *d = '\0';
+    return dest;
+}
+
+bool isspace(char c){
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v';
 }

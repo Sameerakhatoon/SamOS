@@ -15,4 +15,12 @@ bool  isdigit(char c);
 int   tonumericdigit(char c);
 char* strtok(char* str, const char* delimiters);
 
+int   strcmp(const char* str1, const char* str2);
+char* strchr(const char* str, int c);
+char* strrchr(const char* str, int c);
+char* strstr(const char* haystack, const char* needle);
+char* strcat(char* dest, const char* src);
+char* strncat(char* dest, const char* src, int count);
+bool  isspace(char c);
+
 #endif

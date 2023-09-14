@@ -10,8 +10,22 @@
 static struct keyboard* keyboard_list_head = 0;
 static struct keyboard* keyboard_list_last = 0;
 
+// Keys dropped because a process ring was full.
+static unsigned int keyboard_dropped = 0;
+
 static int keyboard_get_tail_index(struct process* process){
     return process->keyboard.tail % sizeof(process->keyboard.buffer);
+}
+
+// Bytes waiting in the ring. head and tail only ever grow (and are
+// rewound together when the ring drains), so tail - head is the
+// fill level.
+static int keyboard_buffer_used(struct process* process){
+    return process->keyboard.tail - process->keyboard.head;
+}
+
+unsigned int keyboard_dropped_count(void){
+    return keyboard_dropped;
 }
 
 void keyboard_init(){
@@ -50,6 +64,12 @@ out:
 }
 
 void keyboard_backspace(struct process* process){
+    // Nothing unread to take back. Without this the tail
+    // walked below head and the next push landed behind the
+    // reader.
+    if(keyboard_buffer_used(process) <= 0){
+        return;
+    }
     process->keyboard.tail -= 1;
     int real_index = keyboard_get_tail_index(process);
     process->keyboard.buffer[real_index] = 0x00;
@@ -65,6 +85,15 @@ void keyboard_push(char c){
     // legitimately storing a 0 in the buffer would be indistinguishable
     // from emptiness and cause getkey to loop on a real-but-invisible key.
     if(c == 0){
+        return;
+    }
+
+    // Bounded ring. The old code wrapped tail straight over
+    // unread keys once 1024 were queued, so the reader saw a mix
+    // of new and stale bytes. Drop the new key
+    // instead and count it.
+    if(keyboard_buffer_used(process) >= (int)sizeof(process->keyboard.buffer)){
+        keyboard_dropped++;
         return;
     }
 
@@ -97,14 +126,26 @@ char keyboard_pop(){
         return 0;
     }
     struct process* process = task_current()->process;
-    int real_index = process->keyboard.head % sizeof(process->keyboard.buffer);
-    char c = process->keyboard.buffer[real_index];
-    if(c == 0x00){
+    if(keyboard_buffer_used(process) <= 0){
         return 0;
     }
+    int real_index = process->keyboard.head % sizeof(process->keyboard.buffer);
+    char c = process->keyboard.buffer[real_index];
     process->keyboard.buffer[real_index] = 0;
     process->keyboard.head++;
+    if(process->keyboard.head == process->keyboard.tail){
+        // Drained: rewind both so the ints never overflow.
+        process->keyboard.head = 0;
+        process->keyboard.tail = 0;
+    }
     return c;
+}
+
+int keyboard_get_modifiers(struct keyboard* keyboard){
+    if(!keyboard){
+        keyboard = keyboard_default();
+    }
+    return keyboard ? keyboard->modifiers : 0;
 }
 
 // Lecture 174 - head of the inserted-keyboards list. When

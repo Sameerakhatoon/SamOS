@@ -130,6 +130,9 @@ struct window {
 // Lecture 122 - public window API.
 int             window_system_initialize(void);
 int             window_system_initialize_stage2(void);
+// True once window_system_initialize has created the
+// window list, so window_create is safe to call.
+bool            window_system_ready(void);
 void            window_set_z_index(struct window* window, int zindex);
 void            window_unfocus(struct window* old_focused_window);
 void            window_focus(struct window* window);

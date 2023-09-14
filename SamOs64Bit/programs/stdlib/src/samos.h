@@ -22,7 +22,11 @@ struct process_arguments {
     char** argv;
 };
 
+// Splits on spaces/tabs with shell-style quoting ("a b",
+// 'a b', a\ b). Returns NULL for an empty line or an unterminated
+// quote. Free the list with samos_free_command.
 struct command_argument* samos_parse_command(const char* command, int max);
+void samos_free_command(struct command_argument* command);
 void samos_process_get_arguments(struct process_arguments* arguments);
 int  samos_system(struct command_argument* arguments);
 int  samos_system_run(const char* command);
