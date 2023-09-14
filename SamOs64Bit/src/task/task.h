@@ -25,8 +25,9 @@ struct registers {
 };
 
 struct task {
-    // Lecture 40 - paging_desc replaces the old paging_4gb_chunk.
-    struct paging_desc*  paging_desc;
+    // Lecture 113 - paging_desc moved from task to process.
+    // task->process->paging_desc is the canonical pointer; the
+    // accessor task_paging_desc() forwards to it.
     struct registers     registers;
     struct process*      process;
     struct task*         next;
