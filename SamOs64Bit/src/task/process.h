@@ -152,4 +152,8 @@ int                            process_validate_memory_or_terminate(struct proce
                                                                     void* virt_addr,
                                                                     size_t space_needed);
 
+// Lecture 114 - allocate the process slot vector. Must be
+// called before any process_load.
+void                           process_system_init(void);
+
 #endif

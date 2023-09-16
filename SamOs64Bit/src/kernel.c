@@ -265,6 +265,11 @@ void kernel_main(void)
     // TSS slots BEFORE gdt_end) already covers selector 0x38.
     // So ltr finds the descriptor we just wrote and loads it.
     tss_load(KERNEL_LONG_MODE_TSS_SELECTOR);
+
+    // Lecture 114 - build the process slot vector before any
+    // process_load can touch it.
+    process_system_init();
+
     print("tss load was fine\n");
 
     // Lecture 54 - register every syscall handler the user can
