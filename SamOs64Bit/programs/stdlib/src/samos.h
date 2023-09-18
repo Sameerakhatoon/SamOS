@@ -40,5 +40,7 @@ long samos_fseek(long fd, long offset, long whence);
 // Lecture 112 - userland fstat trampoline.
 struct file_stat;
 long samos_fstat(long fd, struct file_stat* file_stat_out);
+// Lecture 115 - userland realloc trampoline.
+void* samos_realloc(void* old_ptr, size_t new_size);
 
 #endif

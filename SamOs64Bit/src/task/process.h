@@ -111,6 +111,10 @@ int              process_load_for_slot(const char* filename, struct process** pr
 int              process_switch(struct process* process);
 int              process_load_switch(const char* filename, struct process** process);
 void*            process_malloc(struct process* process, size_t size);
+// Lecture 115 - userland-facing realloc. Reuses the existing
+// allocation record when present, calls krealloc for the
+// physical reshape, and rewires the slot's ptr/end/size.
+void*            process_realloc(struct process* process, void* old_virt_ptr, size_t new_size);
 void             process_free(struct process* process, void* ptr);
 void             process_get_arguments(struct process* process, int* argc, char*** argv);
 int              process_inject_arguments(struct process* process, struct command_argument* root_argument);

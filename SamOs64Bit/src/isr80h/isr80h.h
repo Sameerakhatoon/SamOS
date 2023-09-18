@@ -17,6 +17,7 @@ enum SystemCommands {
     SYSTEM_COMMAND12_FREAD,  // L107 - userland fread
     SYSTEM_COMMAND13_FSEEK,  // L111 - userland fseek
     SYSTEM_COMMAND14_FSTAT,  // L112 - userland fstat
+    SYSTEM_COMMAND15_REALLOC, // L115 - userland realloc
 };
 
 void isr80h_register_commands();

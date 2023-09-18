@@ -30,6 +30,7 @@ global samos_fclose:function  ; L106
 global samos_fread:function    ; L107
 global samos_fseek:function    ; L111
 global samos_fstat:function    ; L112
+global samos_realloc:function  ; L115
 
 ; void print(const char* msg)
 print:
@@ -160,6 +161,17 @@ samos_fstat:
     mov  rax, 14           ; SYSTEM_COMMAND14_FSTAT
     push qword rsi         ; out (item 1)
     push qword rdi         ; fd  (item 0)
+    int  0x80
+    add  rsp, 16
+    ret
+
+; Lecture 115 - void* samos_realloc(void* old_ptr, size_t new_size)
+;   rdi = old_ptr, rsi = new_size
+; rax returns the new (user-virtual) pointer.
+samos_realloc:
+    mov  rax, 15           ; SYSTEM_COMMAND15_REALLOC
+    push qword rsi         ; new_size (item 1)
+    push qword rdi         ; old_ptr  (item 0)
     int  0x80
     add  rsp, 16
     ret
