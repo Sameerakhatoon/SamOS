@@ -111,4 +111,22 @@ void                  graphics_redraw_children(struct graphics_info* g);
 void                  graphics_redraw(struct graphics_info* g);
 void                  graphics_redraw_all(void);
 
+// Lecture 116 - essential helpers.
+void                  graphics_set_z_index(struct graphics_info* graphics_info,
+                                           uint32_t z_index);
+struct graphics_info* graphics_info_create_relative(struct graphics_info* source_graphics,
+                                                    size_t x, size_t y,
+                                                    size_t width, size_t height,
+                                                    int flags);
+void                  graphics_paste_pixels_to_pixels(struct graphics_info* graphics_info_in,
+                                                      struct graphics_info* graphics_info_out,
+                                                      uint32_t src_x, uint32_t src_y,
+                                                      uint32_t width, uint32_t height,
+                                                      uint32_t dst_x, uint32_t dst_y,
+                                                      int flags);
+int                   graphics_pixel_get(struct graphics_info* graphics_info,
+                                         uint32_t x, uint32_t y,
+                                         struct framebuffer_pixel* pixel_out);
+void                  graphics_info_free(struct graphics_info* graphics_in);
+
 #endif
