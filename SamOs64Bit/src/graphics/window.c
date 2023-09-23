@@ -28,6 +28,12 @@
 #include "status.h"
 #include "kernel.h"
 
+// L121-L123 forward decls. window.o stays unlinked so missing
+// bodies are inert at L120.
+void window_draw_title_bar(struct window* window, struct framebuffer_pixel title_bar_bg_color);
+void window_set_z_index(struct window* window, size_t z_index);
+void window_focus(struct window* window);
+
 // Vector of struct window* - every live window registers here.
 struct vector* windows_vector = NULL;
 
@@ -178,7 +184,163 @@ struct window* window_create(struct graphics_info* graphics_info,
     }
 
     window->root_graphics = root_graphics_info;
+
+    // Lecture 120 - title bar + four borders + body surface +
+    // terminals + close icon placement + initial paint.
+    if(!(flags & WINDOW_FLAG_BORDERLESS)){
+        title_bar_graphics_info =
+            graphics_info_create_relative(root_graphics_info,
+                                          WINDOW_BORDER_PIXEL_SIZE, 0,
+                                          width, WINDOW_TITLE_BAR_HEIGHT, 0);
+        if(!title_bar_graphics_info){
+            res = -ENOMEM;
+            goto out;
+        }
+        window->title_bar_graphics = title_bar_graphics_info;
+
+        border_left_graphics_info =
+            graphics_info_create_relative(root_graphics_info,
+                                          0, WINDOW_TITLE_BAR_HEIGHT,
+                                          WINDOW_BORDER_PIXEL_SIZE, height, 0);
+        if(!border_left_graphics_info){
+            res = -ENOMEM;
+            goto out;
+        }
+
+        // Upstream shadow-declares border_right + border_bottom
+        // inside the if-block, hiding the outer slots. The outer
+        // pointers therefore stay NULL after the block exits.
+        // We mirror verbatim; the bug is inert because window.o
+        // is not linked yet.
+        struct graphics_info* border_right_graphics_info =
+            graphics_info_create_relative(root_graphics_info,
+                                          total_window_width_bounds - WINDOW_BORDER_PIXEL_SIZE,
+                                          WINDOW_TITLE_BAR_HEIGHT,
+                                          WINDOW_BORDER_PIXEL_SIZE, height, 0);
+        if(!border_right_graphics_info){
+            res = -ENOMEM;
+            goto out;
+        }
+
+        struct graphics_info* border_bottom_graphics_info =
+            graphics_info_create_relative(root_graphics_info,
+                                          0,
+                                          total_window_height_bounds - WINDOW_BORDER_PIXEL_SIZE,
+                                          width, WINDOW_BORDER_PIXEL_SIZE, 0);
+        if(!border_bottom_graphics_info){
+            res = -ENOMEM;
+            goto out;
+        }
+        (void)border_right_graphics_info;
+        (void)border_bottom_graphics_info;
+    }
+
+    struct graphics_info* window_graphics_info =
+        graphics_info_create_relative(root_graphics_info,
+                                      window_body_width_offset,
+                                      window_body_height_offset,
+                                      width, height, 0);
+    if(!window_graphics_info){
+        res = -ENOMEM;
+        goto out;
+    }
+    window->graphics = window_graphics_info;
+
+    if(!(flags & WINDOW_FLAG_BORDERLESS)){
+        struct framebuffer_pixel title_bar_font_color = {0};
+        title_bar_font_color.red   = 0xff;
+        title_bar_font_color.blue  = 0xff;
+        title_bar_font_color.green = 0xff;
+        window->title_bar_terminal = terminal_create(title_bar_graphics_info,
+                                                     0, 0,
+                                                     total_window_width_bounds,
+                                                     WINDOW_TITLE_BAR_HEIGHT,
+                                                     font, title_bar_font_color, 0);
+        if(!window->title_bar_terminal){
+            res = -ENOMEM;
+            goto out;
+        }
+    }
+
+    struct framebuffer_pixel pixel_color = {0};
+    pixel_color.red = 0xff;
+    window->terminal = terminal_create(window_graphics_info, 0, 0,
+                                       width, height, font, pixel_color,
+                                       TERMINAL_FLAG_BACKSPACE_ALLOWED);
+    if(!window->terminal){
+        res = -ENOMEM;
+        goto out;
+    }
+
+    struct framebuffer_pixel bg_color = {0};
+    bg_color.red   = 0xff;
+    bg_color.blue  = 0xff;
+    bg_color.green = 0xff;
+    terminal_draw_rect(window->terminal, 0, 0, width, height, bg_color);
+    terminal_background_save(window->terminal);
+
+    if(flags & WINDOW_FLAG_BACKGROUND_TRANSPARENT){
+        terminal_transparency_key_set(window->terminal, bg_color);
+    }
+
+    if(!(flags & WINDOW_FLAG_BORDERLESS)){
+        size_t icon_pos_x = window->title_bar_terminal->bounds.width
+                          - close_icon->width
+                          - (close_icon->width / 2);
+        size_t icon_pos_y = (window->title_bar_terminal->bounds.height / 2)
+                          - (close_icon->height / 2);
+        window->title_bar_components.close_btn.x      = icon_pos_x;
+        window->title_bar_components.close_btn.y      = icon_pos_y;
+        window->title_bar_components.close_btn.width  = close_icon->width;
+        window->title_bar_components.close_btn.height = close_icon->height;
+
+        struct framebuffer_pixel title_bar_bg_color = {0};
+        window_draw_title_bar(window, title_bar_bg_color);
+
+        // Upstream bug preserved: each of these three draws hits
+        // border_left_graphics_info because the outer right /
+        // bottom pointers are still NULL (shadow-decl scoping
+        // above). Carried verbatim.
+        struct framebuffer_pixel border_color = {0};
+        graphics_draw_rect(border_left_graphics_info, 0, 0,
+                           border_left_graphics_info->width,
+                           border_left_graphics_info->height,
+                           border_color);
+        graphics_draw_rect(border_left_graphics_info, 0, 0,
+                           border_left_graphics_info->width,
+                           border_left_graphics_info->height,
+                           border_color);
+        graphics_draw_rect(border_left_graphics_info, 0, 0,
+                           border_left_graphics_info->width,
+                           border_left_graphics_info->height,
+                           border_color);
+    }
+
+    vector_push(windows_vector, &window);
+
+    size_t child_count = vector_count(window->root_graphics->children);
+    window_set_z_index(window, child_count + 1);
+
+    // L121+ - register window event handler.
+
+    window_focus(window);
+    graphics_redraw_all();
+
 out:
-    (void)res;
-    // L120 appends the title-bar + borders + return.
+    if(res < 0){
+        if(window){
+            if(window->terminal){
+                terminal_free(window->terminal);
+                window->terminal = NULL;
+            }
+            if(window->title_bar_terminal){
+                terminal_free(window->title_bar_terminal);
+                window->title_bar_terminal = NULL;
+            }
+            vector_pop_element(windows_vector, &window, sizeof(struct window*));
+            kfree(window);
+            window = NULL;
+        }
+    }
+    return window;
 }
