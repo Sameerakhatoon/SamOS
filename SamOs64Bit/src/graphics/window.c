@@ -238,7 +238,11 @@ void window_draw_title_bar(struct window* window,
     white_color.green = 0xff;
     white_color.blue  = 0xff;
     terminal_ignore_color(window->title_bar_terminal, white_color);
-    terminal_draw_image(window->title_bar_terminal, icon_pos_x, icon_pos_y, close_icon);
+    // Without @:/clsicon.bmp close_icon is NULL. Page 0 used
+    // to be mapped, so the book read zeros through it; now it faults.
+    if(close_icon){
+        terminal_draw_image(window->title_bar_terminal, icon_pos_x, icon_pos_y, close_icon);
+    }
     terminal_ignore_color_finish(window->title_bar_terminal);
 }
 
@@ -812,15 +816,17 @@ struct window* window_create(struct graphics_info* graphics_info,
     }
 
     if(!(flags & WINDOW_FLAG_BORDERLESS)){
-        size_t icon_pos_x = window->title_bar_terminal->bounds.width
-                          - close_icon->width
-                          - (close_icon->width / 2);
-        size_t icon_pos_y = (window->title_bar_terminal->bounds.height / 2)
-                          - (close_icon->height / 2);
-        window->title_bar_components.close_btn.x      = icon_pos_x;
-        window->title_bar_components.close_btn.y      = icon_pos_y;
-        window->title_bar_components.close_btn.width  = close_icon->width;
-        window->title_bar_components.close_btn.height = close_icon->height;
+        if(close_icon){   // See window_draw_title_bar
+            size_t icon_pos_x = window->title_bar_terminal->bounds.width
+                              - close_icon->width
+                              - (close_icon->width / 2);
+            size_t icon_pos_y = (window->title_bar_terminal->bounds.height / 2)
+                              - (close_icon->height / 2);
+            window->title_bar_components.close_btn.x      = icon_pos_x;
+            window->title_bar_components.close_btn.y      = icon_pos_y;
+            window->title_bar_components.close_btn.width  = close_icon->width;
+            window->title_bar_components.close_btn.height = close_icon->height;
+        }
 
         struct framebuffer_pixel title_bar_bg_color = {0};
         window_draw_title_bar(window, title_bar_bg_color);

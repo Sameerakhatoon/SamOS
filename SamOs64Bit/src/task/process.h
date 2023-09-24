@@ -33,30 +33,21 @@ struct window_event;
 // the bottom of this header compile without including graphics.h.
 struct framebuffer_pixel;
 
+// What a process_allocation range is.
+enum {
+    PROCESS_ALLOCATION_HEAP    = 1,  // process_malloc: the process may free it
+    PROCESS_ALLOCATION_SEGMENT = 2,  // an ELF PT_LOAD segment
+    PROCESS_ALLOCATION_FOREIGN = 3,  // kernel memory owned elsewhere (pixels, flat binary)
+};
+
 struct process_allocation {
-    void*  ptr;
+    void*  ptr;     // The USER address (page aligned)
     // Lecture 108 - exclusive end of the allocation. ptr + size,
     // cached so range-vs-allocation tests do not have to add.
     void*  end;
     size_t size;
-};
-
-// Lecture 108 - request descriptor used by the upcoming
-// allocation-walk helpers (process_get_allocation_by_addr in
-// L109). `allocation` is the full record; `peek` carries the
-// run-length info for a "validate range" query.
-enum {
-    PROCESS_ALLOCATION_REQUEST_IS_STACK_MEMORY = 0b00000001,
-};
-
-struct process_allocation_request {
-    struct process_allocation  allocation;
-    int                        flags;
-    struct {
-        void*  addr;
-        void*  end;
-        size_t total_bytes_left;
-    } peek;
+    void*  kptr;    // Kernel address of the backing pages
+    int    kind;    // PROCESS_ALLOCATION_*
 };
 
 struct command_argument {
@@ -75,7 +66,7 @@ struct process_arguments {
 struct process_file_handle {
     int   fd;
     char  file_path[SAMOS_MAX_PATH];
-    char  mode[2];   // "r", "w", "w+" - max 2 chars per upstream
+    char  mode[4];   // "r", "w", "w+": room for the NUL (upstream had 2)
 };
 
 // Lecture 154 - userspace-visible window descriptor.
@@ -165,6 +156,9 @@ int              process_load_for_slot(const char* filename, struct process** pr
 int              process_switch(struct process* process);
 int              process_load_switch(const char* filename, struct process** process);
 void*            process_malloc(struct process* process, size_t size);
+// As process_malloc, and *kptr_out is the kernel view of the
+// same memory, for kernel code that fills it in.
+void*            process_malloc_kernel(struct process* process, size_t size, void** kptr_out);
 // Lecture 115 - userland-facing realloc. Reuses the existing
 // allocation record when present, calls krealloc for the
 // physical reshape, and rewires the slot's ptr/end/size.
@@ -187,28 +181,16 @@ int                            process_fseek(struct process* process, int fd,
                                              int offset, FILE_SEEK_MODE whence);
 int                            process_fstat(struct process* process, int fd,
                                              struct file_stat* virt_filestat_addr);
-// Lecture 112 - L107 stub for buffer translation became its own
-// helper now that fread/fstat both need it.
-void*                          process_virtual_address_to_physical(struct process* process,
-                                                                   void* virt_addr);
 
 // Lecture 108 - vector-backed allocation table accessors.
 int                            process_find_free_allocation_index(struct process* process);
-int                            process_allocation_set_map(struct process* process,
-                                                          int allocation_entry_index,
-                                                          void* ptr, size_t size);
 int                            process_get_allocation_by_start_addr(struct process* process,
                                                                     void* addr,
                                                                     struct process_allocation* allocation_out);
 
-// Lecture 109 - range query + stack-region test.
-int                            process_get_allocation_by_addr(struct process* process,
-                                                              void* addr,
-                                                              struct process_allocation_request* allocation_request_out);
-bool                           process_is_stack_memory(struct process* process, void* addr);
-int                            process_validate_memory_or_terminate(struct process* process,
-                                                                    void* virt_addr,
-                                                                    size_t space_needed);
+// The L109 range query, stack test and
+// process_validate_memory_or_terminate are gone: syscalls check user
+// memory with uaccess.h.
 
 // Lecture 114 - allocate the process slot vector. Must be
 // called before any process_load.
@@ -238,10 +220,10 @@ int                     process_push_window_event(struct process* process,
 int                     process_pop_window_event(struct process* process,
                                                  struct window_event* event_out);
 
-// Lecture 166 - userspace mapping helpers. Hand a phys range
-// off to the process address space (must be page-aligned).
+// Lecture 166 - userspace mapping helpers. Hand a kernel buffer
+// to the process address space (must be page-aligned).
 int                     process_map_into_userspace(struct process* process,
-                                                   void* phys_ptr, size_t t_size,
+                                                   void* kernel_ptr, size_t t_size,
                                                    int map_flags, void** virt_addr_out);
 int                     process_map_graphics_framebuffer_pixels_into_userspace(struct process* process,
                                                                                struct graphics_info* graphics_in,

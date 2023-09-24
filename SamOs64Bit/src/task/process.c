@@ -20,6 +20,7 @@
 #include "graphics/terminal.h"   // L158 - process_print routes here
 #include "kernel.h"
 #include "io/serial.h"     // Mirror process output to COM1
+#include "uaccess.h"       // Checked user access
 #include <stdbool.h>
 
 // The current process that is running.
@@ -308,15 +309,18 @@ struct process_window* process_window_create(struct process* process, char* titl
         goto out;
     }
 
-    proc_win->user_win = process_malloc(process, sizeof(struct process_userspace_window));
+    // User memory, filled in through its kernel view.
+    struct process_userspace_window* user_win_k = NULL;
+    proc_win->user_win = process_malloc_kernel(process, sizeof(struct process_userspace_window),
+                                               (void**)&user_win_k);
     if(!proc_win->user_win){
         res = -ENOMEM;
         goto out;
     }
 
-    proc_win->user_win->width  = width;
-    proc_win->user_win->height = height;
-    strncpy(proc_win->user_win->title, title, sizeof(proc_win->user_win->title));
+    user_win_k->width  = width;
+    user_win_k->height = height;
+    strncpy(user_win_k->title, title, sizeof(user_win_k->title) - 1);
 
     // Lecture 162 - register the per-process event handler now
     // that the body has landed.
@@ -413,6 +417,12 @@ static int process_load_binary(const char* filename, struct process* process){
     if(res != SAMOS_ALL_OK){
         goto out;
     }
+    // The flat image sits between 0x400000 and the heap.
+    if(stat.filesize == 0 ||
+       stat.filesize > SAMOS_USER_HEAP_START - SAMOS_PROGRAM_VIRTUAL_ADDRESS){
+        res = -EBADEXEC;
+        goto out;
+    }
 
     program_data_ptr = kpage_zalloc(stat.filesize);   // Mapped at 0x400000
     if(!program_data_ptr){
@@ -442,12 +452,6 @@ out:
 // Lecture 63 - ELF loading re-enabled. The body is the original
 // 32-bit logic; elfloader.c was widened to uintptr_t in L63 so
 // the elf64_phdr casts no longer warn under x86_64-elf-gcc.
-//
-// Note the file is still parsed as ELF32 - our blank.elf / etc
-// are actually ELF64 (L62 toolchain change), so this load will
-// fail on the EI_CLASS check until L65 refactors elfloader to
-// ELF64. Until then process_load_data falls through to
-// process_load_binary if process_load_elf returns -EINFORMAT.
 static int process_load_elf(const char* filename, struct process* process){
     int res = 0;
     struct elf_file* elf_file = 0;
@@ -461,6 +465,9 @@ out:
     return res;
 }
 
+// Only a file without the ELF signature falls back to a flat
+// binary. A file that claims to be ELF and fails the checks is
+// -EBADEXEC and is not run at all.
 static int process_load_data(const char* filename, struct process* process){
     int res = 0;
     res = process_load_elf(filename, process);
@@ -470,52 +477,318 @@ static int process_load_data(const char* filename, struct process* process){
     return res;
 }
 
-int process_map_binary(struct process* process){
-    int res = 0;
-    paging_map_to(process->paging_desc,
-                  (void*)SAMOS_PROGRAM_VIRTUAL_ADDRESS,
-                  process->ptr,
-                  paging_align_address(process->ptr + process->size),
-                  PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL | PAGING_IS_WRITEABLE);
-    return res;
+// ------------------------------------------------------------------
+// The process address space.
+//
+// Every user page is a kernel page (kpage_zalloc, so whole
+// frames) mapped at a user virtual address that has nothing to do
+// with its kernel address. process->allocations records each range:
+// the user address, the size, the kernel address of the backing
+// pages and what kind of range it is.
+// ------------------------------------------------------------------
+
+// Map `bytes` of kernel memory at `kptr` to user address `uva`.
+static int process_map_pages(struct process* process, uintptr_t uva, void* kptr,
+                             size_t bytes, int flags){
+    for(size_t off = 0; off < bytes; off += PAGING_PAGE_SIZE){
+        uint64_t phys = paging_kernel_virt_to_phys((char*)kptr + off);
+        if(!phys){
+            return -EFAULT;
+        }
+        int res = paging_map(process->paging_desc, (void*)(uva + off), (void*)phys,
+                             flags | PAGING_ACCESS_FROM_ALL | PAGING_IS_PRESENT);
+        if(res < 0){
+            return res;
+        }
+    }
+    return 0;
 }
 
-// Lecture 63 - ELF mapping re-enabled. p_vaddr now goes through
-// uintptr_t to silence the int-to-pointer-of-different-size
-// diagnostic on x86_64.
-static int process_map_elf(struct process* process){
-    int res = 0;
-    struct elf_file*   elf_file = process->elf_file;
-    struct elf_header* header   = elf_header(elf_file);
-    struct elf64_phdr* phdrs    = elf_pheader(header);
+static void process_unmap_pages(struct process* process, uintptr_t uva, size_t bytes){
+    for(size_t off = 0; off < bytes; off += PAGING_PAGE_SIZE){
+        paging_map(process->paging_desc, (void*)(uva + off), NULL, 0);
+    }
+}
 
-    for(int i = 0; i < header->e_phnum; i++){
-        struct elf64_phdr* phdr = &phdrs[i];
-        void* phdr_phys_address = elf_phdr_phys_address(elf_file, phdr);
-        int flags = PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL;
-        if(phdr->p_flags & PF_W){
-            flags |= PAGING_IS_WRITEABLE;
+static size_t process_allocation_span(struct process_allocation* a){
+    return paging_align_value_to_upper_page(a->size);
+}
+
+// Lecture 108 - vector-walk variants of the allocation
+// bookkeeping. process_find_free_allocation_index now appends a
+// zeroed slot when no free entry exists.
+int process_find_free_allocation_index(struct process* process){
+    int    res             = 0;
+    bool   found           = false;
+    size_t allocation_size = vector_count(process->allocations);
+    for(size_t i = 0; i < allocation_size; i++){
+        struct process_allocation allocation;
+        res = vector_at(process->allocations, i, &allocation, sizeof(allocation));
+        if(res < 0){
+            break;
         }
-        res = paging_map_to(process->paging_desc,
-                            paging_align_to_lower_page((void*)(uintptr_t)phdr->p_vaddr),
-                            paging_align_to_lower_page(phdr_phys_address),
-                            paging_align_address(phdr_phys_address + phdr->p_memsz),
-                            flags);
-        if(ISERR(res)){
+        if(allocation.ptr == NULL){
+            res   = i;
+            found = true;
             break;
         }
     }
+    if(!found){
+        struct process_allocation allocation = {0};
+        res = vector_push(process->allocations, &allocation);
+    }
     return res;
+}
+
+// Lowest page-aligned user address from SAMOS_USER_HEAP_START where
+// `bytes` fit, with an unmapped guard page after every existing
+// range. 0 when the user half is full.
+static uintptr_t process_va_reserve(struct process* process, size_t bytes){
+    uintptr_t cand = SAMOS_USER_HEAP_START;
+    size_t total = vector_count(process->allocations);
+    bool moved = true;
+    while(moved){
+        moved = false;
+        if(bytes > SAMOS_USER_SPACE_END - cand){
+            return 0;
+        }
+        for(size_t i = 0; i < total; i++){
+            struct process_allocation a;
+            if(vector_at(process->allocations, i, &a, sizeof(a)) < 0 || !a.ptr){
+                continue;
+            }
+            uintptr_t s = (uintptr_t)a.ptr;
+            uintptr_t e = s + process_allocation_span(&a) + PAGING_PAGE_SIZE;
+            if(cand < e && s < cand + bytes + PAGING_PAGE_SIZE){
+                cand  = e;
+                moved = true;
+            }
+        }
+    }
+    return cand;
+}
+
+static int process_allocation_record(struct process* process, uintptr_t uva, size_t size,
+                                     void* kptr, int kind){
+    int index = process_find_free_allocation_index(process);
+    if(index < 0){
+        return -ENOMEM;
+    }
+    struct process_allocation allocation = {
+        .ptr = (void*)uva, .end = (void*)(uva + size), .size = size,
+        .kptr = kptr, .kind = kind,
+    };
+    return vector_overwrite(process->allocations, index, &allocation, sizeof(allocation));
+}
+
+// Index of the allocation that starts at `uva`, or -ENOTFOUND.
+static int process_allocation_index(struct process* process, void* uva,
+                                    struct process_allocation* out){
+    if(!uva){
+        return -ENOTFOUND;
+    }
+    size_t total = vector_count(process->allocations);
+    for(size_t i = 0; i < total; i++){
+        struct process_allocation a;
+        if(vector_at(process->allocations, i, &a, sizeof(a)) < 0){
+            break;
+        }
+        if(a.ptr == uva){
+            if(out){
+                *out = a;
+            }
+            return (int)i;
+        }
+    }
+    return -ENOTFOUND;
+}
+
+// Unmap the range, free its pages if the process owns them, clear
+// the record.
+static void process_allocation_release(struct process* process, int index){
+    struct process_allocation a;
+    if(vector_at(process->allocations, index, &a, sizeof(a)) < 0 || !a.ptr){
+        return;
+    }
+    process_unmap_pages(process, (uintptr_t)a.ptr, process_allocation_span(&a));
+    if(a.kptr && a.kind != PROCESS_ALLOCATION_FOREIGN){
+        kfree(a.kptr);
+    }
+    struct process_allocation empty = {0};
+    vector_overwrite(process->allocations, index, &empty, sizeof(empty));
+}
+
+// Lecture 108 - by-start-addr lookup. Fills `allocation_out`
+// with a COPY of the matched record and returns 0; returns
+// -EIO when the address is not the start of any allocation.
+int process_get_allocation_by_start_addr(struct process* process, void* addr,
+                                         struct process_allocation* allocation_out){
+    return process_allocation_index(process, addr, allocation_out) < 0 ? -EIO : 0;
+}
+
+// Lecture 115 - look up an allocation by ptr and report its
+// index. Returns -ENOTFOUND on miss; 0 on hit with the index
+// written to *index_out if non-NULL.
+int process_allocation_exists(struct process* process, void* ptr, size_t* index_out){
+    int index = process_allocation_index(process, ptr, NULL);
+    if(index < 0){
+        return index;
+    }
+    if(index_out){
+        *index_out = (size_t)index;
+    }
+    return 0;
+}
+
+// User memory for the process, and its kernel view for code
+// that fills it in (window records, argv). The book returned the
+// kernel pointer and identity-mapped it into the process, which is
+// how every process came to see the kernel heap.
+void* process_malloc_kernel(struct process* process, size_t size, void** kptr_out){
+    if(size == 0 || size > SAMOS_USER_SPACE_END - SAMOS_USER_HEAP_START){
+        return NULL;
+    }
+    size_t bytes = paging_align_value_to_upper_page(size);
+    void* kptr = kpage_zalloc(bytes);
+    if(!kptr){
+        return NULL;
+    }
+    uintptr_t uva = process_va_reserve(process, bytes);
+    if(!uva || process_map_pages(process, uva, kptr, bytes,
+                                 PAGING_IS_WRITEABLE | PAGING_NO_EXECUTE) < 0 ||
+       process_allocation_record(process, uva, size, kptr, PROCESS_ALLOCATION_HEAP) < 0){
+        if(uva){
+            process_unmap_pages(process, uva, bytes);
+        }
+        kfree(kptr);
+        return NULL;
+    }
+    if(kptr_out){
+        *kptr_out = kptr;
+    }
+    return (void*)uva;
+}
+
+void* process_malloc(struct process* process, size_t size){
+    return process_malloc_kernel(process, size, NULL);
+}
+
+// Lecture 115 - userland realloc.
+//
+// Allocate, copy, free. The book translated the user
+// pointer and kreallocated the kernel block in place, which only
+// worked because user and kernel addresses were the same.
+void* process_realloc(struct process* process, void* old_virt_ptr, size_t new_size){
+    // Lecture 201 - realloc(NULL, n) is malloc(n).
+    if(old_virt_ptr == NULL){
+        return process_malloc(process, new_size);
+    }
+    struct process_allocation old;
+    int index = process_allocation_index(process, old_virt_ptr, &old);
+    if(index < 0 || old.kind != PROCESS_ALLOCATION_HEAP){
+        return NULL;
+    }
+    if(new_size == 0){
+        process_allocation_release(process, index);
+        return NULL;
+    }
+    void* new_kptr = NULL;
+    void* new_ptr = process_malloc_kernel(process, new_size, &new_kptr);
+    if(!new_ptr){
+        return NULL;
+    }
+    memcpy(new_kptr, old.kptr, (int)(old.size < new_size ? old.size : new_size));
+    process_allocation_release(process, index);
+    return new_ptr;
+}
+
+int process_terminate_allocations(struct process* process){
+    size_t total_allocations = vector_count(process->allocations);
+    for(size_t i = 0; i < total_allocations; i++){
+        process_allocation_release(process, (int)i);
+    }
+    return 0;
+}
+
+// Free a heap allocation or drop a foreign mapping. ELF
+// segments are not the user's to free.
+void process_free(struct process* process, void* ptr){
+    struct process_allocation allocation;
+    int index = process_allocation_index(process, ptr, &allocation);
+    if(index < 0 || allocation.kind == PROCESS_ALLOCATION_SEGMENT){
+        return;
+    }
+    process_allocation_release(process, index);
+}
+
+// Flat binary: one RWX range at 0x400000, since there are no
+// segment flags to go by.
+int process_map_binary(struct process* process){
+    size_t bytes = paging_align_value_to_upper_page(process->size);
+    int res = process_map_pages(process, SAMOS_PROGRAM_VIRTUAL_ADDRESS, process->ptr, bytes,
+                                PAGING_IS_WRITEABLE);
+    if(res < 0){
+        return res;
+    }
+    // The pages stay owned by process->ptr (process_free_binary_data).
+    return process_allocation_record(process, SAMOS_PROGRAM_VIRTUAL_ADDRESS, bytes,
+                                     process->ptr, PROCESS_ALLOCATION_FOREIGN);
+}
+
+// Lecture 63 - ELF mapping re-enabled.
+//
+// Each PT_LOAD gets fresh zeroed pages.
+// p_filesz bytes are copied from the file at p_vaddr; the rest,
+// .bss included, stays zero. The book mapped the file buffer itself,
+// so .bss was whatever followed the segment in the file, and the
+// zero-fill wrote over the wrong segment. Permissions come from
+// p_flags: W only with PF_W, NX unless PF_X. elf_load has already
+// rejected W+X segments and overlapping pages.
+static int process_map_elf(struct process* process){
+    struct elf_file*   elf_file = process->elf_file;
+    struct elf_header* header   = elf_header(elf_file);
+
+    for(int i = 0; i < header->e_phnum; i++){
+        struct elf64_phdr* phdr = elf_program_header(header, i);
+        if(phdr->p_type != PT_LOAD || phdr->p_memsz == 0){
+            continue;
+        }
+        uintptr_t start = (uintptr_t)paging_align_to_lower_page((void*)phdr->p_vaddr);
+        size_t    bytes = paging_align_value_to_upper_page(phdr->p_vaddr + phdr->p_memsz) - start;
+        char* kptr = kpage_zalloc(bytes);
+        if(!kptr){
+            return -ENOMEM;
+        }
+        memcpy(kptr + (phdr->p_vaddr - start), (char*)elf_memory(elf_file) + phdr->p_offset,
+               (int)phdr->p_filesz);
+
+        int flags = 0;
+        if(phdr->p_flags & PF_W){
+            flags |= PAGING_IS_WRITEABLE;
+        }
+        if(!(phdr->p_flags & PF_X)){
+            flags |= PAGING_NO_EXECUTE;
+        }
+        int res = process_map_pages(process, start, kptr, bytes, flags);
+        if(res >= 0){
+            res = process_allocation_record(process, start, bytes, kptr, PROCESS_ALLOCATION_SEGMENT);
+        }
+        if(res < 0){
+            process_unmap_pages(process, start, bytes);
+            kfree(kptr);
+            return res;
+        }
+    }
+    return 0;
 }
 
 int process_map_memory(struct process* process){
     int res = 0;
 
-    // Lecture 113 - identity-map every E820-usable region into
-    // the process's PML4. Was task_init's responsibility before;
-    // moved here so the descriptor's owner does the wiring.
-    paging_map_e820_memory_regions(process->paging_desc);
-
+    // Lecture 113 - identity-mapped every E820-usable region into
+    // the process's PML4, user-writable. The
+    // process gets its segments, its stack and its heap, and shares
+    // the supervisor-only kernel half (paging_desc_new).
     switch(process->filetype){
         case PROCESS_FILETYPE_ELF:
             res = process_map_elf(process);
@@ -533,12 +806,12 @@ int process_map_memory(struct process* process){
     // Ch 107: map the user stack into the task's address space so the
     // user code can push/pop without page-faulting. Stack grows down
     // from STACK_ADDRESS_START to STACK_ADDRESS_END, so we map starting
-    // from END.
-    paging_map_to(process->paging_desc,
-                  (void*)SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_END,
-                  process->stack,
-                  paging_align_address(process->stack + SAMOS_USER_PROGRAM_STACK_SIZE),
-                  PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL | PAGING_IS_WRITEABLE);
+    // from END. NX, and the page below it
+    // (SAMOS_USER_STACK_GUARD) is never mapped, so an overflow faults
+    // instead of running into whatever was there.
+    res = process_map_pages(process, SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_END, process->stack,
+                            SAMOS_USER_PROGRAM_STACK_SIZE,
+                            PAGING_IS_WRITEABLE | PAGING_NO_EXECUTE);
 
 out:
     return res;
@@ -574,6 +847,31 @@ out:
     return res;
 }
 
+static int process_free_program_data(struct process* process);
+
+// Undo a process_load_for_slot that failed before the
+// process was linked in (a failed load used to leak the
+// process). A malformed ELF goes through here every time.
+static void process_load_cleanup(struct process* process){
+    if(process->paging_desc){
+        process_terminate_allocations(process);
+        paging_desc_free(process->paging_desc);
+    }
+    if(process->ptr){
+        process_free_program_data(process);
+    }
+    kfree(process->stack);
+    process_close_file_handles(process);
+    struct vector* vectors[] = { process->allocations, process->kernel_userland_ptrs_vector,
+                                 process->windows, process->window_events.vector };
+    for(size_t i = 0; i < sizeof(vectors) / sizeof(vectors[0]); i++){
+        if(vectors[i]){
+            vector_free(vectors[i]);
+        }
+    }
+    kfree(process);
+}
+
 int process_load_for_slot(const char* filename, struct process** process, int process_slot){
     int res = 0;
     struct task* task = 0;
@@ -597,7 +895,7 @@ int process_load_for_slot(const char* filename, struct process** process, int pr
         goto out;
     }
 
-    program_stack_ptr = kzalloc(SAMOS_USER_PROGRAM_STACK_SIZE);
+    program_stack_ptr = kpage_zalloc(SAMOS_USER_PROGRAM_STACK_SIZE);  // Mapped, whole pages
     if(!program_stack_ptr){
         res = -ENOMEM;
         goto out;
@@ -613,7 +911,7 @@ int process_load_for_slot(const char* filename, struct process** process, int pr
     // also called BEFORE task_new) sees a live descriptor.
     _process->paging_desc = paging_desc_new(PAGING_MAP_LEVEL_4);
     if(!_process->paging_desc){
-        res = -EIO;
+        res = -ENOMEM;
         goto out;
     }
 
@@ -623,8 +921,9 @@ int process_load_for_slot(const char* filename, struct process** process, int pr
     }
 
     task = task_new(_process);
-    if(ERROR_I(task) == 0){
+    if(ISERR(task)){
         res = ERROR_I(task);
+        task = NULL;
         goto out;
     }
     _process->task = task;
@@ -636,246 +935,10 @@ int process_load_for_slot(const char* filename, struct process** process, int pr
     vector_overwrite(process_vector, process_slot, &_process, sizeof(&_process));
 
 out:
-    if(ISERR(res)){
-        if(_process && _process->task){
-            task_free(_process->task);
-        }
-        // TODO(g-fix): leaks _process and _process->stack on error.
+    if(ISERR(res) && _process){
+        process_load_cleanup(_process);
     }
     return res;
-}
-
-// Lecture 108 - vector-walk variants of the allocation
-// bookkeeping. process_find_free_allocation_index now appends a
-// zeroed slot when no free entry exists; the new
-// process_allocation_set_map factors out the paging + slot
-// update.
-int process_find_free_allocation_index(struct process* process){
-    int    res             = 0;
-    bool   found           = false;
-    size_t allocation_size = vector_count(process->allocations);
-    for(size_t i = 0; i < allocation_size; i++){
-        struct process_allocation allocation;
-        res = vector_at(process->allocations, i, &allocation, sizeof(allocation));
-        if(res < 0){
-            break;
-        }
-        if(allocation.ptr == NULL){
-            res   = i;
-            found = true;
-            break;
-        }
-    }
-    if(!found){
-        struct process_allocation allocation = {0};
-        res = vector_push(process->allocations, &allocation);
-    }
-    return res;
-}
-
-int process_allocation_set_map(struct process* process, int allocation_entry_index,
-                               void* ptr, size_t size){
-    int res = paging_map_to(process->paging_desc, ptr, ptr,
-                            paging_align_address(ptr + size),
-                            PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
-    if(res < 0){
-        goto out;
-    }
-
-    struct process_allocation allocation;
-    res = vector_at(process->allocations, allocation_entry_index,
-                    &allocation, sizeof(allocation));
-    if(res < 0){
-        goto out;
-    }
-    allocation.ptr  = ptr;
-    allocation.end  = ptr + size;
-    allocation.size = size;
-    vector_overwrite(process->allocations, allocation_entry_index,
-                     &allocation, sizeof(allocation));
-out:
-    return res;
-}
-
-// Lecture 108 - by-start-addr lookup. Fills `allocation_out`
-// with a COPY of the matched record and returns 0; returns
-// -EIO when the address is not the start of any allocation.
-// L109 will add process_get_allocation_by_addr for range
-// queries; for L108 only the strict-start matcher exists.
-int process_get_allocation_by_start_addr(struct process* process, void* addr,
-                                         struct process_allocation* allocation_out){
-    size_t total_allocations = vector_count(process->allocations);
-    for(size_t i = 0; i < total_allocations; i++){
-        struct process_allocation allocation;
-        int res = vector_at(process->allocations, i, &allocation, sizeof(allocation));
-        if(res < 0){
-            break;
-        }
-        if(allocation.ptr == addr){
-            *allocation_out = allocation;
-            return 0;
-        }
-    }
-    return -EIO;
-}
-
-// Lecture 115 - look up an allocation by ptr and report its
-// index. Returns -ENOTFOUND on miss; 0 on hit with the index
-// written to *index_out if non-NULL.
-int process_allocation_exists(struct process* process, void* ptr, size_t* index_out){
-    int res = -ENOTFOUND;
-    size_t total_allocations = vector_count(process->allocations);
-    for(size_t i = 0; i < total_allocations; i++){
-        struct process_allocation allocation;
-        res = vector_at(process->allocations, i, &allocation, sizeof(allocation));
-        if(res < 0){
-            break;
-        }
-        if(allocation.ptr == ptr){
-            if(index_out){
-                *index_out = i;
-            }
-            res = 0;
-            break;
-        }
-    }
-    return res;
-}
-
-// Lecture 115 - userland realloc. Translate the user virtual
-// pointer, call krealloc, then update the existing
-// process_allocation slot through process_allocation_set_map.
-//
-// Upstream bug preserved verbatim: the assignment
-//   old_phys_ptr = old_virt_ptr;
-// is overwritten by task_virtual_address_to_physical on the
-// next line. The `if(old_phys_ptr)` guard is therefore
-// effectively `if(old_virt_ptr != NULL)`. Documented inline
-// to keep the per-commit diff against upstream linear.
-void* process_realloc(struct process* process, void* old_virt_ptr, size_t new_size){
-    int    res                  = 0;
-    void*  new_ptr              = NULL;
-    void*  old_phys_ptr         = NULL;
-    size_t old_allocation_index = 0;
-
-    // Lecture 201 - realloc(NULL, n) is malloc(n). Without this
-    // early-out the lookup below fails on a NULL needle and
-    // userland sees -ENOTFOUND instead of a fresh allocation.
-    if(old_virt_ptr == NULL){
-        return process_malloc(process, new_size);
-    }
-
-    res = process_allocation_exists(process, old_virt_ptr, &old_allocation_index);
-    if(res < 0){
-        goto out;
-    }
-
-    old_phys_ptr = old_virt_ptr;
-    if(old_phys_ptr){
-        old_phys_ptr = task_virtual_address_to_physical(process->task, old_virt_ptr);
-        if(!old_phys_ptr){
-            res = -ENOMEM;
-            goto out;
-        }
-    }
-
-    new_ptr = krealloc(old_phys_ptr, new_size);
-    if(!new_ptr){
-        res = -ENOMEM;
-        goto out;
-    }
-
-    res = process_allocation_set_map(process, (int)old_allocation_index,
-                                     new_ptr, new_size);
-    if(res < 0){
-        goto out;
-    }
-
-out:
-    return new_ptr;
-}
-
-void* process_malloc(struct process* process, size_t size){
-    int   res = 0;
-    // Identity-mapped per page into the process: never a slab object.
-    void* ptr = kpage_zalloc(size);
-    if(!ptr){
-        res = -ENOMEM;
-        goto out_err;
-    }
-
-    int index = process_find_free_allocation_index(process);
-    if(index < 0){
-        res = -ENOMEM;
-        goto out_err;
-    }
-
-    res = process_allocation_set_map(process, index, ptr, size);
-    if(res < 0){
-        goto out_err;
-    }
-    return ptr;
-
-out_err:
-    if(ptr){
-        kfree(ptr);
-    }
-    return 0;
-}
-
-static bool process_is_process_pointer(struct process* process, void* ptr){
-    size_t total_allocations = vector_count(process->allocations);
-    for(size_t i = 0; i < total_allocations; i++){
-        struct process_allocation allocation;
-        int res = vector_at(process->allocations, i, &allocation, sizeof(allocation));
-        if(res < 0){
-            break;
-        }
-        if(allocation.ptr == ptr){
-            return true;
-        }
-    }
-    return false;
-}
-
-// Lecture 108 - vector-walk variant. Upstream's L108 commit
-// accidentally left this function array-indexing through
-// `process->allocations[i]`, which would index into the vector
-// pointer instead of the elements. The upstream binary still
-// happens to compile because struct vector has a `.ptr` field
-// the array-index syntax silently lands on. We deviate from
-// upstream verbatim and walk the vector properly; the upstream
-// shape would never actually clear a freed slot.
-static void process_allocation_unjoin(struct process* process, void* ptr){
-    size_t total_allocations = vector_count(process->allocations);
-    for(size_t i = 0; i < total_allocations; i++){
-        struct process_allocation allocation;
-        int res = vector_at(process->allocations, i, &allocation, sizeof(allocation));
-        if(res < 0){
-            break;
-        }
-        if(allocation.ptr == ptr){
-            allocation.ptr  = NULL;
-            allocation.end  = NULL;
-            allocation.size = 0;
-            vector_overwrite(process->allocations, i, &allocation, sizeof(allocation));
-        }
-    }
-}
-
-int process_terminate_allocations(struct process* process){
-    size_t total_allocations = vector_count(process->allocations);
-    for(size_t i = 0; i < total_allocations; i++){
-        struct process_allocation allocation;
-        int res = vector_at(process->allocations, i, &allocation, sizeof(allocation));
-        if(res < 0){
-            break;
-        }
-        if(allocation.ptr){
-            process_free(process, allocation.ptr);
-        }
-    }
-    return 0;
 }
 
 int process_free_binary_data(struct process* process){
@@ -892,7 +955,7 @@ int process_free_elf_data(struct process* process){
     return 0;
 }
 
-int process_free_program_data(struct process* process){
+static int process_free_program_data(struct process* process){
     int res = 0;
     switch(process->filetype){
         case PROCESS_FILETYPE_BINARY:
@@ -1017,14 +1080,9 @@ out:
 // fopen and records the descriptor on the process's file_handles
 // vector so process exit can fclose it.
 //
-// Upstream bug preserved verbatim:
-//   kzalloc(sizeof(struct process_file_handler*))
-// allocates the size of a POINTER, not the struct, AND uses the
-// typo `_handler` instead of `_handle`. Reading or writing any
-// field beyond the first 8 bytes (fd) lands in the next heap
-// block. The typo and the size mistake are documented inline;
-// callers must not depend on the file_path/mode being readable
-// until upstream fixes both.
+// The book allocated sizeof(struct process_file_handler*),
+// a pointer's worth (and with the typo `_handler`), so the path and
+// mode were written past the end of the block. Now the full struct.
 int process_fopen(struct process* process, const char* path, const char* mode){
     int res = 0;
     int fd  = fopen(path, mode);
@@ -1034,24 +1092,25 @@ int process_fopen(struct process* process, const char* path, const char* mode){
     }
     res = fd;
 
-    // sic - "_handler" and pointer-sized allocation per upstream.
-    struct process_file_handle* handle = kzalloc(sizeof(struct process_file_handler*));
+    struct process_file_handle* handle = kzalloc(sizeof(struct process_file_handle));
     if(!handle){
         res = -ENOMEM;
         goto out;
     }
     handle->fd = fd;
-    strncpy(handle->file_path, path, sizeof(handle->file_path));
-    strncpy(handle->mode,      mode, sizeof(handle->mode));
+    strncpy(handle->file_path, path, sizeof(handle->file_path) - 1);
+    strncpy(handle->mode,      mode, sizeof(handle->mode) - 1);
 
     vector_push(process->file_handles, &handle);
 out:
-    if(res < 0){
+    if(res < 0 && fd > 0){
         fclose(fd);
     }
     return res;
 }
 
+// Every file syscall goes through this, so a process can only
+// use descriptors it opened.
 struct process_file_handle* process_file_handle_get(struct process* process, int fd){
     size_t total_handles = vector_count(process->file_handles);
     for(size_t i = 0; i < total_handles; i++){
@@ -1064,160 +1123,74 @@ struct process_file_handle* process_file_handle_get(struct process* process, int
     return NULL;
 }
 
-// Lecture 109 - is the supplied virtual address inside the user
-// program stack region? The stack grows downward, so START is
-// the high address and END is the low one.
-bool process_is_stack_memory(struct process* process, void* addr){
-    (void)process;
-    return (uintptr_t)addr >= SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_END
-        && (uintptr_t)addr <= SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START;
-}
+// Lecture 107 - userland fread.
+//
+// The book checked the buffer against its allocation
+// with broken arithmetic (it subtracted an offset from an absolute
+// address), translated the first byte and let the kernel fread write
+// through it, so a read could run off the page into the kernel heap.
+// Now the whole user range must be writable, and the data goes
+// through a kernel bounce page and copy_to_user.
+#define PROCESS_FREAD_CHUNK 4096
 
-// Lecture 109 - range query against the per-process allocation
-// table + the user stack region. Fills `allocation_request_out`
-// with the matching record plus a `peek` block describing how
-// many bytes remain past `addr`. Returns 0 on hit, -EIO when no
-// allocation covers the address.
-int process_get_allocation_by_addr(struct process* process, void* addr,
-                                   struct process_allocation_request* allocation_request_out){
-    memset(allocation_request_out, 0, sizeof(struct process_allocation_request));
-
-    if(process_is_stack_memory(process, addr)){
-        uint64_t addr_int         = (uint64_t)addr;
-        uint64_t stack_size       = SAMOS_USER_PROGRAM_STACK_SIZE;
-        // Stack grows down: total bytes left = bytes between addr
-        // and the high end of the stack region.
-        uint64_t total_bytes_left = SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START - addr_int;
-        allocation_request_out->allocation.ptr  = (void*)SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_END;
-        allocation_request_out->allocation.end  = (void*)SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START;
-        allocation_request_out->allocation.size = stack_size;
-        allocation_request_out->flags |= PROCESS_ALLOCATION_REQUEST_IS_STACK_MEMORY;
-        allocation_request_out->peek.addr             = addr;
-        allocation_request_out->peek.end              = (void*)SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START;
-        allocation_request_out->peek.total_bytes_left = total_bytes_left;
-        return 0;
-    }
-
-    size_t total_allocations = vector_count(process->allocations);
-    for(size_t i = 0; i < total_allocations; i++){
-        struct process_allocation allocation;
-        int res = vector_at(process->allocations, i, &allocation, sizeof(allocation));
-        if(res < 0){
-            break;
-        }
-        uint64_t allocation_addr     = (uint64_t)allocation.ptr;
-        uint64_t allocation_addr_end = (uint64_t)allocation.end;
-        if((uint64_t)addr >= allocation_addr
-           && (uint64_t)addr <= allocation_addr_end){
-            // Upstream bug preserved verbatim: bytes_left is
-            // computed as `allocation_addr_end - bytes_used`
-            // instead of `allocation_addr_end - (uint64_t)addr`.
-            // Since `bytes_used = addr - allocation_addr`, the
-            // subtraction yields the SUM of end + addr - 2*start
-            // which only matches the correct value at the
-            // allocation start. Carrying the upstream form for
-            // diff hygiene; the validate path overstates the
-            // available space which makes -EINVARG return less
-            // often than it should. Inert at L110 because
-            // bytes_used is always 0 there (fread hits the start
-            // of a freshly allocated buffer).
-            size_t bytes_used = (uint64_t)addr - allocation_addr;
-            size_t bytes_left = allocation_addr_end - bytes_used;
-            allocation_request_out->allocation            = allocation;
-            allocation_request_out->peek.addr             = addr;
-            allocation_request_out->peek.end              = (void*)allocation_addr_end;
-            allocation_request_out->peek.total_bytes_left = bytes_left;
-            return 0;
-        }
-    }
-    return -EIO;
-}
-
-// Lecture 109 - real body. Walks the allocation table for the
-// region containing virt_addr; if `space_needed` would run off
-// the end of that region, terminate the process. The L107 stub
-// (returning 0 unconditionally) is replaced here.
-int process_validate_memory_or_terminate(struct process* process,
-                                         void* virt_addr,
-                                         size_t space_needed){
-    int res = 0;
-    struct process_allocation_request allocation_request;
-    res = process_get_allocation_by_addr(process, virt_addr, &allocation_request);
-    if(res < 0){
-        goto out;
-    }
-    if(allocation_request.peek.total_bytes_left < space_needed){
-        res = -EINVARG;
-        goto out;
-    }
-out:
-    if(res < 0){
-        process_terminate(process);
-    }
-    return res;
-}
-
-// Lecture 107 - userland fread. Validate the buffer, translate
-// it to a kernel-physical pointer, then forward to the kernel
-// fread for the cached fd.
 int process_fread(struct process* process, void* virt_ptr,
                   uint64_t size, uint64_t nmemb, int fd){
-    int res = 0;
-
     struct process_file_handle* handle = process_file_handle_get(process, fd);
     if(!handle){
-        res = -EIO;
-        goto out;
+        return -EINVARG;
+    }
+    if(size == 0 || nmemb == 0){
+        return 0;
+    }
+    if(nmemb > SAMOS_USER_SPACE_END / size){
+        return -EINVARG;
+    }
+    uint64_t total = size * nmemb;
+    if(!user_range_ok(process, virt_ptr, total, true)){
+        return -EFAULT;
     }
 
-    size_t true_size = size * nmemb;
-    res = process_validate_memory_or_terminate(process, virt_ptr, true_size);
-    if(res < 0){
-        goto out;
+    char* bounce = kmalloc(PROCESS_FREAD_CHUNK);
+    if(!bounce){
+        return -ENOMEM;
     }
-
-    void* phys_ptr = task_virtual_address_to_physical(process->task, virt_ptr);
-    if(!phys_ptr){
-        goto out;
-    }
-
-    res = fread(phys_ptr, size, nmemb, handle->fd);
-    if(res < 0){
-        goto out;
-    }
-out:
-    return res;
-}
-
-// Lecture 112 - shorthand. Walks the process's paging descriptor
-// to translate a virtual address to its physical backing.
-void* process_virtual_address_to_physical(struct process* process, void* virt_addr){
-    return paging_get_physical_address(process->paging_desc, virt_addr);
-}
-
-// Lecture 112 - userland fstat. Validate the user buffer fits in
-// one allocation, translate it, forward to the kernel fstat.
-int process_fstat(struct process* process, int fd, struct file_stat* virt_filestat_addr){
     int res = 0;
-    res = process_validate_memory_or_terminate(process, virt_filestat_addr,
-                                               sizeof(*virt_filestat_addr));
-    if(res < 0){
-        goto out;
+    uint64_t done = 0;
+    while(done < total){
+        uint32_t chunk = (uint32_t)((total - done) < PROCESS_FREAD_CHUNK ? (total - done) : PROCESS_FREAD_CHUNK);
+        int got = fread(bounce, 1, chunk, handle->fd);
+        if(got < 0){
+            res = got;
+            break;
+        }
+        if(got > 0 && copy_to_user(process, (char*)virt_ptr + done, bounce, (size_t)got) < 0){
+            res = -EFAULT;
+            break;
+        }
+        done += (uint64_t)got;
+        if((uint32_t)got < chunk){
+            break;
+        }
     }
+    kfree(bounce);
+    return res < 0 ? res : (int)(done / size);
+}
 
-    struct file_stat* phys_filestat_addr =
-        process_virtual_address_to_physical(process, virt_filestat_addr);
-    if(!phys_filestat_addr){
-        res = -EINVARG;
-        goto out;
+// Lecture 112 - userland fstat.
+//
+// Checks that the process owns fd (the book did not) and
+// writes the result with copy_to_user.
+int process_fstat(struct process* process, int fd, struct file_stat* virt_filestat_addr){
+    struct process_file_handle* handle = process_file_handle_get(process, fd);
+    if(!handle){
+        return -EINVARG;
     }
-
-    res = fstat(fd, phys_filestat_addr);
+    struct file_stat stat;
+    int res = fstat(handle->fd, &stat);
     if(res < 0){
-        goto out;
+        return res;
     }
-out:
-    return res;
+    return copy_to_user(process, virt_filestat_addr, &stat, sizeof(stat));
 }
 
 // Lecture 111 - userland fseek. Look up the handle on the
@@ -1283,6 +1256,9 @@ static int process_count_command_arguments(struct command_argument* root_argumen
     return i;
 }
 
+// `root_argument` is a kernel list (syscall 7 copies the
+// user's list first). argv and the strings are user memory written
+// through their kernel view; argv holds user addresses.
 int process_inject_arguments(struct process* process, struct command_argument* root_argument){
     int res = 0;
     struct command_argument* current = root_argument;
@@ -1293,20 +1269,22 @@ int process_inject_arguments(struct process* process, struct command_argument* r
         goto out;
     }
 
-    char** argv = process_malloc(process, sizeof(const char*) * argc);
+    char** kargv = NULL;
+    char** argv = process_malloc_kernel(process, sizeof(const char*) * argc, (void**)&kargv);
     if(!argv){
         res = -ENOMEM;
         goto out;
     }
 
     while(current){
-        char* argument_str = process_malloc(process, sizeof(current->argument));
+        char* kstr = NULL;
+        char* argument_str = process_malloc_kernel(process, sizeof(current->argument), (void**)&kstr);
         if(!argument_str){
             res = -ENOMEM;
             goto out;
         }
-        strncpy(argument_str, current->argument, sizeof(current->argument));
-        argv[i] = argument_str;
+        strncpy(kstr, current->argument, sizeof(current->argument) - 1);
+        kargv[i] = argument_str;
         current = current->next;
         i++;
     }
@@ -1316,28 +1294,6 @@ int process_inject_arguments(struct process* process, struct command_argument* r
 
 out:
     return res;
-}
-
-void process_free(struct process* process, void* ptr){
-    // Lecture 108 - by-start-addr lookup fills a COPY of the
-    // record; we read .ptr / .size off the copy.
-    struct process_allocation allocation;
-    int res = process_get_allocation_by_start_addr(process, ptr, &allocation);
-    if(res < 0){
-        return;
-    }
-
-    res = paging_map_to(process->paging_desc,
-                        allocation.ptr,
-                        allocation.ptr,
-                        paging_align_address(allocation.ptr + allocation.size),
-                        0x00);
-    if(res < 0){
-        return;
-    }
-
-    process_allocation_unjoin(process, ptr);
-    kfree(ptr);
 }
 
 int process_load(const char* filename, struct process** process){
@@ -1367,42 +1323,35 @@ int process_load_switch(const char* filename, struct process** process){
     return res;
 }
 
-// Lecture 166 - map a kernel-side physical range into the
-// process address space. Caller's phys range MUST be
-// page-aligned at both ends. Hands back the virt pointer.
-int process_map_into_userspace(struct process* process, void* phys_ptr,
+// Lecture 166 - map a kernel buffer into the process address
+// space. Must be page-aligned at both ends. Hands back the virt
+// pointer.
+//
+// `kernel_ptr` is a kernel virtual address; each page is
+// translated to its frame. The range is recorded as FOREIGN: the
+// process may unmap it but never frees the memory behind it.
+int process_map_into_userspace(struct process* process, void* kernel_ptr,
                                size_t t_size, int map_flags,
                                void** virt_addr_out){
-    int res = 0;
-    void* virt_ptr = NULL;
-    void* end_phys_addr = phys_ptr + t_size;
-    if(!paging_is_aligned(phys_ptr)){
-        res = -EINVARG;
-        goto out;
+    if(!paging_is_aligned(kernel_ptr) || !paging_is_aligned((char*)kernel_ptr + t_size) ||
+       t_size == 0){
+        return -EINVARG;
     }
-    if(!paging_is_aligned(end_phys_addr)){
-        res = -EINVARG;
-        goto out;
+    uintptr_t uva = process_va_reserve(process, t_size);
+    if(!uva){
+        return -ENOMEM;
     }
-
-    virt_ptr = process_malloc(process, t_size);
-    if(!virt_ptr){
-        res = -ENOMEM;
-        goto out;
+    int res = process_map_pages(process, uva, kernel_ptr, t_size,
+                                (map_flags & ~PAGING_IS_PRESENT) | PAGING_NO_EXECUTE);
+    if(res >= 0){
+        res = process_allocation_record(process, uva, t_size, kernel_ptr, PROCESS_ALLOCATION_FOREIGN);
     }
-
-    map_flags |= PAGING_ACCESS_FROM_ALL;
-    // SamOs paging_map_range takes a PAGE count, not a byte
-    // count. Upstream passes bytes; we convert here so the
-    // existing paging API stays consistent.
-    size_t total_pages = t_size / PAGING_PAGE_SIZE;
-    res = paging_map_range(process->paging_desc, virt_ptr, phys_ptr, total_pages, map_flags);
     if(res < 0){
-        goto out;
+        process_unmap_pages(process, uva, t_size);
+        return res;
     }
-    *virt_addr_out = virt_ptr;
-out:
-    return res;
+    *virt_addr_out = (void*)uva;
+    return 0;
 }
 
 // Lecture 166 - map a graphics_info's pixel buffer into
@@ -1434,8 +1383,7 @@ int process_map_graphics_framebuffer_pixels_into_userspace(struct process* proce
         paging_align_value_to_upper_page(graphics_width * graphics_height *
                                          sizeof(struct framebuffer_pixel));
 
-    int map_flags = PAGING_ACCESS_FROM_ALL | PAGING_CACHE_DISABLED |
-                    PAGING_IS_PRESENT | PAGING_IS_WRITEABLE;
+    int map_flags = PAGING_CACHE_DISABLED | PAGING_IS_WRITEABLE;
 
     res = process_map_into_userspace(process, pixels, memory_size, map_flags,
                                      (void**)virt_addr_out);

@@ -168,7 +168,8 @@ static void kernel_tss_init(void)
     // whatever sits below. paging_map with flags=0 unmaps the
     // page (the "unmap idiom" introduced in L27). With the IST
     // stack for #DF, that overflow now ends in a register dump.
-    paging_map(kernel_desc(), tss_stack_low, tss_stack_low, 0);
+    // The stack is a direct-map address; flags 0 unmaps it.
+    paging_map(kernel_desc(), tss_stack_low, NULL, 0);
 
     memset(&tss, 0x00, sizeof(tss));
     tss.rsp0        = (uint64_t)tss_stack_high;
@@ -356,17 +357,20 @@ void kernel_main(void)
     // real memory the guard is harmless and the mapping fires.
     // Upstream PeachOS64 commits this code unguarded: a deferred
     // bug they accept until L22 lands.
-    kernel_paging_desc = paging_desc_new(PAGING_MAP_LEVEL_4);
+    //
+    // paging_kernel_desc_new builds the real kernel
+    // address space: the direct map of RAM, the kernel image at
+    // SAMOS_KERNEL_VMA with W^X, and every upper-half PML4 slot so
+    // processes can share them. No identity map, so a NULL or user
+    // pointer dereferenced in the kernel faults.
+    kernel_paging_desc = paging_kernel_desc_new();
     if (!kernel_paging_desc)
     {
         panic("Failed to create kernel paging descriptor\n");
     }
-    paging_map_e820_memory_regions(kernel_paging_desc);
 
-    // Lecture 23 - now that the new PML4 maps every E820 usable
-    // region AND the first 1 MiB (BIOS / VGA / boot / kernel),
-    // switch CR3 to it. The L21 marker print is gone; if we got
-    // here without faulting, paging_switch worked.
+    // Lecture 23 - switch CR3 to it. The L21 marker print is gone;
+    // if we got here without faulting, paging_switch worked.
     paging_switch(kernel_paging_desc);
     boot_marker_set(BM_STAGE_PAGING_SWITCHED, 0);
 

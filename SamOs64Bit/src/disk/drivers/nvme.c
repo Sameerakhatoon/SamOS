@@ -89,14 +89,14 @@ static int nvme_admin_cmd_raw(struct disk* disk, uint8_t opcode, uint32_t nsid,
 static int nvme_create_io_cq(struct disk* disk, uint16_t qid, uint16_t qsize, void* cq_virt){
     uint32_t cdw10 = ((uint32_t)(qsize - 1) << 16) | qid;
     uint32_t cdw11 = 0x01;
-    return nvme_admin_cmd_raw(disk, 0x05, 0, (uint64_t)(uintptr_t)cq_virt, cdw10, cdw11);
+    return nvme_admin_cmd_raw(disk, 0x05, 0, paging_kernel_virt_to_phys(cq_virt), cdw10, cdw11);
 }
 
 static int nvme_create_io_sq(struct disk* disk, uint16_t qid, uint16_t qsize,
                              void* sq_virt, uint16_t cqid){
     uint32_t cdw10 = ((uint32_t)(qsize - 1) << 16) | qid;
     uint32_t cdw11 = ((uint32_t)cqid << 16) | 0x01;
-    return nvme_admin_cmd_raw(disk, 0x01, 0, (uint64_t)(uintptr_t)sq_virt, cdw10, cdw11);
+    return nvme_admin_cmd_raw(disk, 0x01, 0, paging_kernel_virt_to_phys(sq_virt), cdw10, cdw11);
 }
 
 static struct nvme_disk_driver_private* nvme_pci_private_new(struct pci_device* dev){
@@ -139,13 +139,19 @@ static void nvme_disk_driver_write_reg(struct disk* d, uint32_t off, uint32_t va
 // Lecture 192 - identity-map BAR0 (or 2 pages as fallback) into
 // the kernel address space with PCD set so MMIO accesses hit
 // the device.
+// Into the direct map; base_address_nvme becomes the
+// kernel virtual address of the registers.
+// The size is capped: pci_size_bars reports a 32-bit BAR size with
+// the top half set. The identity map hid that (every page
+// was re-mapped to itself); a direct-map mapping of that "size"
+// fails. The registers and queue 0/1 doorbells fit in 16 KiB.
 static void nvme_map_mmio_once(struct nvme_disk_driver_private* p){
-    uintptr_t base = (uintptr_t)p->base_address_nvme;
-    uint32_t sz = p->device->bars[0].size ? p->device->bars[0].size : 0x2000;
-    const uint32_t flags = PAGING_IS_PRESENT | PAGING_IS_WRITEABLE | PAGING_CACHE_DISABLED;
-    for(uintptr_t off = 0; off < sz; off += 0x1000){
-        paging_map(kernel_desc(), (void*)(base + off), (void*)(base + off), flags);
+    uint64_t base = (uint64_t)(uintptr_t)p->base_address_nvme;
+    uint64_t sz = p->device->bars[0].size;
+    if(sz == 0 || sz > 0x4000){
+        sz = 0x4000;
     }
+    p->base_address_nvme = paging_map_mmio(base, sz, PAGING_CACHE_DISABLED);
 }
 
 static inline struct nvme_submission_queue_entry* nvme_submission_queue_tail(struct nvme_disk_driver_private* p){
@@ -187,7 +193,7 @@ static int nvme_admin_send_command(struct disk* disk, uint8_t opcode,
     cmd.command = NVME_COMMAND_BITS_BUILD(opcode, 0, 0, 0);
     cmd.nsid    = nsid;
 
-    uint64_t prp1 = (uint64_t)(uintptr_t)data;
+    uint64_t prp1 = data ? paging_kernel_virt_to_phys(data) : 0;
     cmd.data_ptr1 = (uint32_t)(prp1 & 0xFFFFFFFFu);
     cmd.data_ptr2 = (uint32_t)(prp1 >> 32);
 
@@ -258,6 +264,10 @@ static int nvme_disk_driver_mount_for_device(struct disk_driver* driver,
     }
     p->base_address_nvme = nvme_pci_mmio_base(dev);
     nvme_map_mmio_once(p);
+    if(!p->base_address_nvme){
+        nvme_pci_device_private_free(p);
+        return -EIO;
+    }
 
     struct disk* disk = NULL;
     res = disk_create_new(driver, NULL, SAMOS_DISK_TYPE_REAL, 0, 0,
@@ -293,8 +303,8 @@ static int nvme_disk_driver_mount_for_device(struct disk_driver* driver,
                                  ? NVME_ADMIN_COMPLETION_QUEUE_TOTAL_ENTRIES : mqes;
     p->submission_queue.tail = 0;
     p->completion_queue.head = 0;
-    p->submission_queue.ptr = kzalloc(sizeof(*p->submission_queue.ptr) * p->submission_queue.size);
-    p->completion_queue.ptr = kzalloc(sizeof(*p->completion_queue.ptr) * p->completion_queue.size);
+    p->submission_queue.ptr = kpage_zalloc(sizeof(*p->submission_queue.ptr) * p->submission_queue.size);
+    p->completion_queue.ptr = kpage_zalloc(sizeof(*p->completion_queue.ptr) * p->completion_queue.size);
     if(!p->submission_queue.ptr || !p->completion_queue.ptr){
         nvme_disk_driver_unmount(disk);
         return -ENOMEM;
@@ -303,8 +313,8 @@ static int nvme_disk_driver_mount_for_device(struct disk_driver* driver,
     uint32_t aqa = ((p->completion_queue.size - 1u) << 16) |
                    ((p->submission_queue.size - 1u) << 0);
     nvme_disk_driver_write_reg(disk, NVME_BASE_REGISTER_AQA, aqa);
-    nvme_write64(p, NVME_BASE_REGISTER_ASQ, (uint64_t)(uintptr_t)p->submission_queue.ptr);
-    nvme_write64(p, NVME_BASE_REGISTER_ACQ, (uint64_t)(uintptr_t)p->completion_queue.ptr);
+    nvme_write64(p, NVME_BASE_REGISTER_ASQ, paging_kernel_virt_to_phys(p->submission_queue.ptr));
+    nvme_write64(p, NVME_BASE_REGISTER_ACQ, paging_kernel_virt_to_phys(p->completion_queue.ptr));
 
     {
         uint32_t cc = 0;
@@ -337,8 +347,11 @@ static int nvme_disk_driver_mount_for_device(struct disk_driver* driver,
     p->io_completion_queue.head = 0;
     p->io_completion_queue.phase = 1;
 
-    p->io_submission_queue.ptr = kzalloc(sizeof(struct nvme_submission_queue_entry) * io_entries);
-    p->io_completion_queue.ptr = kzalloc(sizeof(struct nvme_completion_queue_entry) * io_entries);
+    // Queues must be page aligned (QEMU refuses a queue whose
+    // PRP has offset bits). kzalloc of 1 KiB is a slab object that
+    // was page aligned only by luck; kpage_zalloc always is.
+    p->io_submission_queue.ptr = kpage_zalloc(sizeof(struct nvme_submission_queue_entry) * io_entries);
+    p->io_completion_queue.ptr = kpage_zalloc(sizeof(struct nvme_completion_queue_entry) * io_entries);
     if(!p->io_submission_queue.ptr || !p->io_completion_queue.ptr){
         nvme_disk_driver_unmount(disk);
         return -ENOMEM;
@@ -371,14 +384,16 @@ static int nvme_io_submit_and_poll(struct disk* disk, uint8_t opcode,
     if(first_span > bytes){
         first_span = bytes;
     }
-    uint64_t prp1 = (uint64_t)addr;
+    // The device wants physical addresses; each page is
+    // translated on its own.
+    uint64_t prp1 = paging_kernel_virt_to_phys((void*)addr);
     uint64_t prp2 = 0;
     if(bytes > first_span){
         uint32_t remain = bytes - first_span;
         if(remain > page_size){
             remain = page_size;
         }
-        prp2 = (uint64_t)(addr + first_span);
+        prp2 = paging_kernel_virt_to_phys((void*)(addr + first_span));
         uint32_t described = first_span + remain;
         nlb = (uint16_t)((described + NVME_SECTOR_SIZE - 1) / NVME_SECTOR_SIZE);
     }

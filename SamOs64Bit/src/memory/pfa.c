@@ -7,6 +7,11 @@
 #include "status.h"
 #include "memory/heap/heap.h"
 #include "string/string.h"
+#include "memory/paging/paging.h"
+
+// The frame table and every frame it hands out are direct-map
+// addresses; the reserved ranges below stay physical.
+#define PFA_VIRT(p) ((uintptr_t)PAGING_PHYS_TO_VIRT(p))
 
 // End of the kernel image including .bss (linker.ld).
 extern char samos_kernel_end[];
@@ -119,7 +124,7 @@ void pfa_init(void){
     //     the boot stack kernel.asm points rsp at, growing down from
     //     SAMOS_BOOT_STACK_TOP towards the image;
     //   - the E820-format map the loader wrote at 0x210000.
-    uintptr_t image_end = (uintptr_t)samos_kernel_end;
+    uintptr_t image_end = (uintptr_t)samos_kernel_end - SAMOS_KERNEL_VMA;
     if(image_end < SAMOS_BOOT_STACK_TOP){
         image_end = SAMOS_BOOT_STACK_TOP;
     }
@@ -134,23 +139,23 @@ void pfa_init(void){
     }
     pfa_add_reserved(home, home + table_bytes);
 
-    pfa_frame_table.entries = (HEAP_BLOCK_TABLE_ENTRY*)home;
+    pfa_frame_table.entries = (HEAP_BLOCK_TABLE_ENTRY*)PFA_VIRT(home);
     pfa_frame_table.total   = frames;
-    if(heap_create(&pfa_frame_heap, (void*)lo, (void*)hi, &pfa_frame_table) < 0){
+    if(heap_create(&pfa_frame_heap, (void*)PFA_VIRT(lo), (void*)PFA_VIRT(hi), &pfa_frame_table) < 0){
         panic("pfa: cannot create the frame table\n");
     }
 
     // Start with everything reserved, open up the usable regions,
     // then close the ranges in use again.
-    heap_reserve_range(&pfa_frame_heap, lo, hi);
+    heap_reserve_range(&pfa_frame_heap, PFA_VIRT(lo), PFA_VIRT(hi));
     for(size_t i = 0; i < total; i++){
         struct e820_entry* r = e820_entry(i);
         if(r->type == 1){
-            heap_unreserve_range(&pfa_frame_heap, r->base_addr, r->base_addr + r->length);
+            heap_unreserve_range(&pfa_frame_heap, PFA_VIRT(r->base_addr), PFA_VIRT(r->base_addr + r->length));
         }
     }
     for(size_t i = 0; i < pfa_reserved_total; i++){
-        heap_reserve_range(&pfa_frame_heap, pfa_reserved[i].start, pfa_reserved[i].end);
+        heap_reserve_range(&pfa_frame_heap, PFA_VIRT(pfa_reserved[i].start), PFA_VIRT(pfa_reserved[i].end));
     }
 
     print("pfa: ");

@@ -5,6 +5,7 @@
 #include "memory/paging/paging.h"
 #include "status.h"
 #include "memory/memory.h"
+#include "config.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -75,8 +76,11 @@ struct multiheap_single_heap* multiheap_get_heap_for_address(struct multiheap* m
 // called EVERY pointer virtual and then dereferenced the (still
 // NULL) shadow heap. Harmless while kfree was a no-op; fatal once it
 // is real. No pointer is virtual until the arena exists.
+// The arena is a fixed kernel range (SAMOS_KERNEL_HEAP_ARENA_BASE), the same size as the direct map, not "above the last heap".
 bool multiheap_is_address_virtual(struct multiheap* mh, void* ptr){
-    return multiheap_is_ready(mh) && ptr >= mh->max_end_data_addr;
+    return multiheap_is_ready(mh)
+        && (uintptr_t)ptr >= SAMOS_KERNEL_HEAP_ARENA_BASE
+        && (uintptr_t)ptr <  SAMOS_KERNEL_HEAP_ARENA_BASE + SAMOS_DIRECT_MAP_SIZE;
 }
 
 // Lecture 30 - ready / can_add_heap predicates. Once
@@ -95,8 +99,9 @@ bool multiheap_can_add_heap(struct multiheap* mh){
 // physical owner by subtracting the virtual-arena base. The
 // inverse mapping (phys -> virt) is built into the page tables
 // the defragmenter installs.
+// The "physical" side is the sub-heap's direct-map address.
 void* multiheap_virtual_address_to_physical(struct multiheap* mh, void* ptr){
-    return (void*)((uintptr_t)ptr - (uintptr_t)mh->max_end_data_addr);
+    return (void*)((uintptr_t)ptr - SAMOS_KERNEL_HEAP_ARENA_BASE + SAMOS_DIRECT_MAP_BASE);
 }
 
 // Lecture 28 - find the sub-heap whose SHADOW heap (paging_heap)
@@ -335,8 +340,8 @@ int multiheap_free(struct multiheap* mh, void* ptr){
         }
         for(size_t i = 0; i < total_blocks; i++){
             void* vaddr_for_block = (void*)((uintptr_t)ptr + (i * SAMOS_HEAP_BLOCK_SIZE));
-            void* data_phys_addr  = paging_get_physical_address(paging_current_descriptor(),
-                                                                 vaddr_for_block);
+            void* data_phys_addr  = PAGING_PHYS_TO_VIRT(paging_get_physical_address(
+                                        paging_current_descriptor(), vaddr_for_block));
             // Recurse with the physical backing. The recursion
             // is bounded: the inner call's pointer is physical,
             // so it lands in the phys_heap branch and returns
@@ -433,13 +438,16 @@ static void* multiheap_alloc_second_pass(struct multiheap* mh, size_t size){
     void* vcur = vstart;
     for(size_t i = 0; i < total_blocks; i++){
         void* phys = heap_zalloc(chosen->heap, SAMOS_HEAP_BLOCK_SIZE);
-        if(!phys || paging_map(desc, vcur, phys, PAGING_IS_WRITEABLE | PAGING_IS_PRESENT) < 0){
+        // The sub-heap hands out direct-map addresses; the
+        // page table wants the frame's physical address.
+        if(!phys || paging_map(desc, vcur, (void*)((uintptr_t)phys - SAMOS_DIRECT_MAP_BASE),
+                               PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_NO_EXECUTE) < 0){
             if(phys){
                 heap_free(chosen->heap, phys);
             }
             for(size_t j = 0; j < i; j++){
                 void* v = (char*)vstart + j * SAMOS_HEAP_BLOCK_SIZE;
-                heap_free(chosen->heap, paging_get_physical_address(desc, v));
+                heap_free(chosen->heap, PAGING_PHYS_TO_VIRT(paging_get_physical_address(desc, v)));
             }
             // Releases the shadow range; its free callback unmaps.
             heap_free(chosen->paging_heap, vstart);
@@ -471,6 +479,10 @@ void multiheap_paging_heap_free_block(void* ptr){
 //
 // At L27 nothing actually calls this; "Lecture 32 - calling
 // multiheap_ready" is when the wiring goes live.
+static void* multiheap_arena_address(void* direct_map_addr){
+    return (void*)((uintptr_t)direct_map_addr - SAMOS_DIRECT_MAP_BASE + SAMOS_KERNEL_HEAP_ARENA_BASE);
+}
+
 int multiheap_ready(struct multiheap* mh){
     int res = 0;
     mh->flags |= MULTIHEAP_FLAG_IS_READY;
@@ -480,8 +492,8 @@ int multiheap_ready(struct multiheap* mh){
         panic("multiheap_ready: paging not set up\n");
     }
 
-    void* max_end_addr = multiheap_get_max_memory_end_address(mh);
-    mh->max_end_data_addr = max_end_addr;
+    // The arena moved to a fixed kernel range.
+    mh->max_end_data_addr = (void*)SAMOS_KERNEL_HEAP_ARENA_BASE;
 
     struct multiheap_single_heap* cur = mh->first_multiheap;
     while(cur){
@@ -490,8 +502,8 @@ int multiheap_ready(struct multiheap* mh){
             // physical sub-heap's address space directly atop
             // max_end_addr so virtual_to_physical is a simple
             // subtraction (matches L25's helper).
-            void* vstart = (char*)max_end_addr + (uintptr_t)cur->heap->saddr;
-            void* vend   = (char*)max_end_addr + (uintptr_t)cur->heap->eaddr;
+            void* vstart = multiheap_arena_address(cur->heap->saddr);
+            void* vend   = multiheap_arena_address(cur->heap->eaddr);
 
             // Shadow bitmap + heap header come out of the
             // starting heap (the multiheap bootstrap arena).
@@ -516,13 +528,10 @@ int multiheap_ready(struct multiheap* mh){
                 panic("multiheap_ready: cannot create shadow heap\n");
             }
 
-            // Reserve the virtual range in the page tables but
-            // mark not-present (flags=0). First access to a
-            // shadow page faults; the alloc callback (later
-            // lecture) will turn it on.
-            if(paging_map_to(paging_desc, vstart, vstart, vend, 0) < 0){
-                panic("multiheap_ready: cannot map the virtual arena\n");
-            }
+            // The book "reserved" the range here with
+            // not-present entries, building page tables for the
+            // whole arena up front. paging_map makes them on demand
+            // in the shared upper half, so nothing is mapped.
 
             // Only the free side is hooked at L27 - it unmaps
             // the page on free.

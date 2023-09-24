@@ -181,14 +181,18 @@ static void selftest_vector_ops(void) {
 
 // Pick a known mapping (the kernel itself at 0x100000) and
 // verify paging_get_physical_address recovers it.
+// (G23): physical 0x100000 is reached through the direct map,
+// kernel code through SAMOS_KERNEL_VMA, and the old identity
+// address is not mapped at all.
 static void selftest_paging_lookup(void) {
     struct paging_desc* d = kernel_desc();
     if (!d) { mark_fail(BM_FEATURE_PAGING_LOOKUP); return; }
-    void* v = (void*)0x100000ULL;
-    void* p = paging_get_physical_address(d, v);
-    // Identity-mapped low memory; p should equal v.
-    if (p == v) mark_pass(BM_FEATURE_PAGING_LOOKUP);
-    else         mark_fail(BM_FEATURE_PAGING_LOOKUP);
+    uintptr_t code = (uintptr_t)selftest_paging_lookup;
+    int ok = paging_get_physical_address(d, PAGING_PHYS_TO_VIRT(0x100000)) == (void*)0x100000ULL
+          && paging_get_physical_address(d, (void*)code) == (void*)(code - SAMOS_KERNEL_VMA)
+          && paging_get_physical_address(d, (void*)0x100000ULL) == NULL;
+    if (ok) mark_pass(BM_FEATURE_PAGING_LOOKUP);
+    else    mark_fail(BM_FEATURE_PAGING_LOOKUP);
 }
 
 // CPUID leaf 0 must return the vendor signature in ebx/edx/ecx.

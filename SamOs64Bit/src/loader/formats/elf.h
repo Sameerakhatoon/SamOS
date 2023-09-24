@@ -47,6 +47,11 @@
 #define EI_NIDENT   16
 #define EI_CLASS    4
 #define EI_DATA     5
+#define EI_VERSION  6
+
+// e_version / e_ident[EI_VERSION], e_machine.
+#define EV_CURRENT  1
+#define EM_X86_64   62
 
 // ELF class (e_ident[EI_CLASS]).
 #define ELFCLASSNONE 0

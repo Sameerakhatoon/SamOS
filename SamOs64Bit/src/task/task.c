@@ -8,10 +8,9 @@
 //     paging_4gb_chunk (which built a 2-level 4 GiB identity
 //     map). task_init calls paging_desc_new(PAGING_MAP_LEVEL_4).
 //   - task_free uses paging_desc_free (lands in L43).
-//   - copy_string_from_task uses the new paging_get +
-//     paging_map API to remap a kernel-side scratch page into
-//     the task's address space, copy, then map it back to its
-//     original state. References kernel_desc() (lands in L44).
+//   - copy_string_from_task (remap a kernel scratch page
+//     into the task, switch CR3, strncpy) is gone; syscalls use
+//     uaccess.c.
 //   - ELF entry points are supported again since the L65
 //     elfloader.
 //
@@ -28,6 +27,7 @@
 #include "string/string.h"
 #include "idt/idt.h"
 #include "loader/formats/elfloader.h"  // L65 - elf loader back
+#include "uaccess.h"                   // Checked user access
 
 static int  task_init(struct task* task, struct process* process);
 static void task_list_remove(struct task* task);
@@ -75,8 +75,11 @@ out:
     return task;
 }
 
+// No current task gives the head (NULL when the ring is
+// empty). The book dereferenced current_task anyway and read 0 from
+// page 0, which was identity-mapped; it is not any more.
 struct task* task_get_next(){
-    if(!current_task->next){
+    if(!current_task || !current_task->next){
         return task_head;
     }
     return current_task->next;
@@ -167,17 +170,6 @@ void task_current_save_state(struct trap_frame* frame){
     task_save_state(task, frame);
 }
 
-int task_page_task(struct task* task){
-    user_registers();
-    paging_switch(task_paging_desc(task));
-    return 0;
-}
-
-void* task_virtual_address_to_physical(struct task* task, void* virtual_address){
-    // L113 - paging descriptor lives on the process now.
-    return paging_get_physical_address(task->process->paging_desc, virtual_address);
-}
-
 void task_next(){
     // Lecture 197 - rotate through the ring skipping sleepers.
     // If everyone is asleep, udelay 100us and try again.
@@ -198,73 +190,18 @@ void task_next(){
 // Pull a 64-bit value off the task's stack at `index` slots
 // from the top. Used by syscall handlers to read arguments the
 // user pushed before invoking int 0x80.
+//
+// Read with copy_from_user instead of switching to the
+// task's CR3 and dereferencing its rsp, so a user rsp that points
+// at the kernel or at nothing gives 0 instead of a kernel read or a
+// kernel #PF.
 void* task_get_stack_item(struct task* task, int index){
-    void* result = 0;
-    uint64_t* sp_ptr = (uint64_t*)task->registers.rsp;
-    task_page_task(task);
-    result = (void*)sp_ptr[index];
-    kernel_page();
-    return result;
-}
-
-// Lecture 40 - rewritten under the 4-level paging API.
-//
-// Allocates a kernel-side scratch page from the heap, then
-// reaches into the TASK'S page tables and overrides the entry
-// covering that scratch page so the task can see it too.
-// Switches CR3 to the task's PML4, strncpy'd the user string
-// into the scratch, switches back to the kernel PML4, and
-// restores the original PT entry on the task side.
-//
-// References kernel_desc() (L44) and paging_desc_free's
-// related machinery; not buildable until those land.
-int copy_string_from_task(struct task* task, void* virtual, void* phys, int max){
-    if(max >= PAGING_PAGE_SIZE){
-        return -EINVARG;
+    uint64_t value = 0;
+    uint64_t addr = task->registers.rsp + (uint64_t)index * sizeof(uint64_t);
+    if(copy_from_user(task->process, &value, (void*)addr, sizeof(value)) < 0){
+        return 0;
     }
-    int res = 0;
-    char* tmp = kzalloc(max);
-    if(!tmp){
-        res = -ENOMEM;
-        goto out;
-    }
-
-    // Resolve the kernel-side virtual address of the scratch
-    // to a physical address (kernel runs identity-mapped at
-    // setup time so this is usually a no-op; the lookup keeps
-    // it future-proof against non-identity kernel mappings).
-    void* phys_tmp = paging_get_physical_address(kernel_desc(), tmp);
-    struct paging_desc* task_desc = task_paging_desc(task);
-
-    // Save the current task-side mapping so we can restore it.
-    struct paging_desc_entry old_entry;
-    memcpy(&old_entry, paging_get(task_desc, phys_tmp), sizeof(struct paging_desc_entry));
-    int old_entry_flags = 0;
-    old_entry_flags |= old_entry.read_write | old_entry.present | old_entry.user_supervisor;
-
-    // Install a writeable+present mapping in the task's PML4
-    // covering the scratch.
-    paging_map(task_desc, phys_tmp, phys_tmp,
-               PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
-
-    // Switch to the task's address space, copy the string,
-    // switch back.
-    task_page_task(task);
-    strncpy(tmp, virtual, max);
-    kernel_page();
-
-    // Push the result into the kernel-side caller buffer.
-    strncpy(phys, tmp, max);
-
-    // Restore the task's original mapping.
-    paging_map(task_desc, phys_tmp,
-               (void*)((uint64_t)(old_entry.address) << 12),
-               old_entry_flags);
-out:
-    if(tmp){
-        kfree(tmp);
-    }
-    return res;
+    return (void*)value;
 }
 
 static int task_init(struct task* task, struct process* process){

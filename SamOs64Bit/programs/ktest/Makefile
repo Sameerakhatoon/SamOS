@@ -6,7 +6,7 @@ INCLUDES=-I../stdlib/src
 all: ./ktest.elf
 
 ./ktest.elf: $(FILES) ../stdlib/stdlib.elf
-	x86_64-elf-gcc -g -T ./linker.ld -o ./ktest.elf -ffreestanding -O0 -nostdlib -fpic -g $(FILES) ../stdlib/stdlib.elf
+	x86_64-elf-gcc -g -T ./linker.ld -Wl,-z,max-page-size=0x1000 -o ./ktest.elf -ffreestanding -O0 -nostdlib -fpic -g $(FILES) ../stdlib/stdlib.elf
 
 ./build/ktest.o: ./ktest.c
 	mkdir -p build

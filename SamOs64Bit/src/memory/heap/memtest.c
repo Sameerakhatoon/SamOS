@@ -39,17 +39,19 @@ static int memtest_pfa(void){
     struct heap* h = pfa_heap();
     CHECK(h->free_blocks + h->used_blocks + h->reserved_blocks == h->total_blocks);
 
-    // Everything in use at kernel entry is reserved.
-    CHECK(pfa_is_reserved((void*)SAMOS_KERNEL_LOCATION));
-    CHECK(pfa_is_reserved((void*)(samos_kernel_end - 1)));
-    CHECK(pfa_is_reserved((void*)(SAMOS_BOOT_STACK_TOP - 8)));
-    CHECK(pfa_is_reserved((void*)SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION));
+    // Everything in use at kernel entry is reserved. Frames are
+    // direct-map addresses, the kernel image is at SAMOS_KERNEL_VMA.
+    CHECK(pfa_is_reserved(PAGING_PHYS_TO_VIRT(SAMOS_KERNEL_LOCATION)));
+    CHECK(pfa_is_reserved(PAGING_PHYS_TO_VIRT(samos_kernel_end - 1 - SAMOS_KERNEL_VMA)));
+    CHECK(pfa_is_reserved(PAGING_PHYS_TO_VIRT(SAMOS_BOOT_STACK_TOP - 8)));
+    CHECK(pfa_is_reserved(PAGING_PHYS_TO_VIRT(SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION)));
     CHECK(pfa_is_reserved((void*)h->table->entries));
     CHECK(pfa_is_reserved((void*)(h->table->entries + h->table->total - 1)));
-    CHECK(pfa_is_reserved((void*)0x6000));   // boot markers, below 1 MiB
+    CHECK(pfa_is_reserved(PAGING_PHYS_TO_VIRT(0x6000)));   // boot markers, below 1 MiB
+    CHECK(PAGING_IS_DIRECT_MAP(h->saddr));
 
     // A reserved frame cannot be freed.
-    CHECK(pfa_free_frames((void*)SAMOS_KERNEL_LOCATION) < 0);
+    CHECK(pfa_free_frames(PAGING_PHYS_TO_VIRT(SAMOS_KERNEL_LOCATION)) < 0);
 
     size_t before = pfa_free_frame_count();
     uint8_t* f = pfa_alloc_frames(4);
@@ -262,12 +264,19 @@ static int memtest_steady_cycle(void){
     p[10] = krealloc(p[10], 5000);   // frames shrink
     CHECK(p[10] && ((uint8_t*)p[10])[0] == 10);
 
+    // Page tables take physical addresses; the descriptor
+    // shares the kernel half, which paging_desc_free must leave alone.
     struct paging_desc* d = paging_desc_new(PAGING_MAP_LEVEL_4);
     CHECK(d);
-    CHECK(paging_map(d, (void*)0x400000, p[9], PAGING_IS_PRESENT | PAGING_IS_WRITEABLE) == 0);
-    CHECK(paging_map(d, (void*)0x401000, (uint8_t*)p[9] + BS, PAGING_IS_PRESENT) == 0);
-    CHECK(paging_map(d, (void*)0x7F0000000000ULL, p[8], PAGING_IS_PRESENT) == 0);
-    CHECK(paging_get_physical_address(d, (void*)0x401000) == (uint8_t*)p[9] + BS);
+    uint64_t phys9 = paging_kernel_virt_to_phys(p[9]);
+    CHECK(paging_map(d, (void*)0x400000, (void*)phys9, PAGING_IS_PRESENT | PAGING_IS_WRITEABLE) == 0);
+    CHECK(paging_map(d, (void*)0x401000, (void*)(phys9 + BS), PAGING_IS_PRESENT) == 0);
+    CHECK(paging_map(d, (void*)0x7F0000000000ULL, (void*)paging_kernel_virt_to_phys(p[8]),
+                     PAGING_IS_PRESENT) == 0);
+    CHECK(paging_get_physical_address(d, (void*)0x401000) == (void*)(phys9 + BS));
+    CHECK(paging_map(d, (void*)SAMOS_DIRECT_MAP_BASE, NULL, PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL) < 0);
+    CHECK(d->pml->entries[PAGING_KERNEL_PML4_FIRST].address ==
+          kernel_desc()->pml->entries[PAGING_KERNEL_PML4_FIRST].address);
     paging_desc_free(d);
 
     for(size_t i = 0; i < STEADY_SLOTS; i++){

@@ -3,15 +3,24 @@
 #include "task/process.h"   // L158 - process_print / process_print_char
 #include "keyboard/keyboard.h"
 #include "kernel.h"
+#include "task/uaccess.h"
+#include "status.h"
 
 // SYSTEM_COMMAND1_PRINT: pop the user's char* off the stack, copy the
-// string out of user-space using the page-table portal trick, hand it
-// to the kernel's print().
+// string out of user-space, hand it to the kernel's print().
+//
+// strncpy_from_user instead of the page-table portal
+// trick (copy_string_from_task), which copied from whatever address
+// the user named, kernel included. A bad pointer prints nothing and
+// returns -EFAULT; a string longer than the buffer is cut short.
 void* isr80h_command1_print(struct trap_frame* frame){
     void* user_space_msg_buffer = task_get_stack_item(task_current(), 0);
 
     char buf[1024];
-    copy_string_from_task(task_current(), user_space_msg_buffer, buf, sizeof(buf));
+    long res = strncpy_from_user(task_current()->process, buf, user_space_msg_buffer, sizeof(buf));
+    if(res == -EFAULT){
+        return ERROR(res);
+    }
 
     // Lecture 158 - route through the process's sysout window
     // instead of the kernel console.

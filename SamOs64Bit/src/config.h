@@ -92,6 +92,29 @@
 #define SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START           0x3FF000
 #define SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_END             (SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START - SAMOS_USER_PROGRAM_STACK_SIZE)
 
+// Address-space layout.
+//
+//   0x0000000000000000  user space: nothing below the stack guard,
+//   0x00000000003FA000    the guard page (never mapped),
+//   0x00000000003FB000    the 16 KiB user stack,
+//   0x0000000000400000    ELF segments,
+//   0x0000000010000000    process_malloc allocations, one guard page
+//                         apart, up to SAMOS_USER_SPACE_END.
+//   0xFFFF800000000000  direct map of physical memory (RAM, low MiB,
+//                       MMIO mapped on demand), supervisor, NX.
+//   0xFFFFC00000000000  multiheap defragment arena (kpalloc).
+//   0xFFFFFFFF80000000  kernel image (+ physical address).
+//
+// The upper half (PML4 slots 256-511) is built once and shared by
+// every process; the lower half belongs to the process alone.
+#define SAMOS_USER_SPACE_END            0x0000800000000000ULL
+#define SAMOS_USER_HEAP_START           0x0000000010000000ULL
+#define SAMOS_USER_STACK_GUARD          (SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_END - 0x1000)
+#define SAMOS_DIRECT_MAP_BASE           0xFFFF800000000000ULL
+#define SAMOS_DIRECT_MAP_SIZE           0x0000400000000000ULL
+#define SAMOS_KERNEL_HEAP_ARENA_BASE    0xFFFFC00000000000ULL
+#define SAMOS_KERNEL_VMA                0xFFFFFFFF80000000ULL
+
 // Lecture 40 + L41 fix - user segment selectors point at the
 // L39 user GDT entries with RPL=3 OR'd in. The L39 GDT lays out
 // the user code seg at slot 0x28 and the user data seg at

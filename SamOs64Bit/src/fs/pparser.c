@@ -91,6 +91,11 @@ static struct path_part* pathparser_parse_path_part(struct path_part* last_part,
 }
 
 void pathparser_free(struct path_root* root){
+    // free(NULL) is a no-op. The book read root->first from
+    // page 0, which is no longer mapped.
+    if(!root){
+        return;
+    }
     struct path_part* part = root->first;
     while(part){
         struct path_part* next_part = part->next;

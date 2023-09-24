@@ -21,5 +21,8 @@
 #define ENOTDIR        17  // Path component is not a directory
 #define EISDIR         18  // File operation on a directory
 #define ENOTEMPTY      19  // Directory not empty
+#define EFAULT         20  // Bad user pointer (unmapped, kernel, no access)
+#define ENAMETOOLONG   21  // User string longer than the kernel buffer
+#define EBADEXEC       22  // Malformed ELF (not EINFORMAT: no flat-binary fallback)
 
 #endif

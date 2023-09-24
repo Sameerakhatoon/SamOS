@@ -10,6 +10,9 @@
 #include "task/process.h"
 #include "idt/idt.h"
 #include "fs/file.h"   // L112 - struct file_stat for fstat handler
+#include "task/uaccess.h"
+#include "status.h"
+#include "kernel.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -64,31 +67,24 @@ void* isr80h_command11_fclose(struct trap_frame* frame){
     return NULL;
 }
 
+// The book translated the first byte of each string
+// and handed the result to fopen as a kernel pointer, so the strings
+// could run on past their page. Both are copied into kernel buffers
+// now; a path that does not fit SAMOS_MAX_PATH is -ENAMETOOLONG.
 void* isr80h_command10_fopen(struct trap_frame* frame){
     (void)frame;
-    int   fd                  = 0;
-    void* filename_virt_addr  = NULL;
-    void* mode_virt_addr      = NULL;
+    struct process* process = task_current()->process;
+    char filename[SAMOS_MAX_PATH];
+    char mode[4];
 
-    filename_virt_addr = task_get_stack_item(task_current(), 0);
-    filename_virt_addr = task_virtual_address_to_physical(task_current(), filename_virt_addr);
-    if(!filename_virt_addr){
-        fd = -1;
-        goto out;
+    long res = strncpy_from_user(process, filename, task_get_stack_item(task_current(), 0),
+                                 sizeof(filename));
+    if(res >= 0){
+        res = strncpy_from_user(process, mode, task_get_stack_item(task_current(), 1),
+                                sizeof(mode));
     }
-
-    mode_virt_addr = task_get_stack_item(task_current(), 1);
-    mode_virt_addr = task_virtual_address_to_physical(task_current(), mode_virt_addr);
-    if(!mode_virt_addr){
-        fd = -1;
-        goto out;
+    if(res < 0){
+        return ERROR(res);
     }
-
-    fd = process_fopen(task_current()->process, filename_virt_addr, mode_virt_addr);
-    if(fd <= 0){
-        goto out;
-    }
-
-out:
-    return (void*)(int64_t)fd;
+    return (void*)(int64_t)process_fopen(process, filename, mode);
 }

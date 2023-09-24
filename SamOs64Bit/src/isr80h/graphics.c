@@ -8,6 +8,7 @@
 #include "task/task.h"
 #include "task/process.h"
 #include "task/userlandptr.h"
+#include "task/uaccess.h"
 
 struct userland_graphics* isr80h_graphics_make_userland_metadata(struct process* process,
                                                                  struct graphics_info* graphics_info){
@@ -17,9 +18,11 @@ struct userland_graphics* isr80h_graphics_make_userland_metadata(struct process*
         return NULL;
     }
 
-    struct userland_graphics* userland_graphics_metadata =
-        process_malloc(process, sizeof(struct userland_graphics));
-    if(!userland_graphics_metadata){
+    // User memory, filled in through its kernel view.
+    struct userland_graphics* userland_graphics_metadata = NULL;
+    void* user_addr = process_malloc_kernel(process, sizeof(struct userland_graphics),
+                                            (void**)&userland_graphics_metadata);
+    if(!user_addr){
         return NULL;
     }
 
@@ -29,7 +32,7 @@ struct userland_graphics* isr80h_graphics_make_userland_metadata(struct process*
     userland_graphics_metadata->y            = graphics_info->relative_y;
     userland_graphics_metadata->userland_ptr = userland_graphic_ptr;
 
-    return userland_graphics_metadata;
+    return user_addr;
 }
 
 // Lecture 166 - hand the kernel framebuffer pixels back to
@@ -46,15 +49,16 @@ void* isr80h_command20_graphics_pixels_get(struct trap_frame* frame){
         return NULL;
     }
 
-    userland_graphics_ptr =
-        task_virtual_address_to_physical(task_current(), userland_graphics_ptr);
-    if(!userland_graphics_ptr){
+    // Copy the handle in.
+    struct userland_graphics userland_graphics;
+    if(copy_from_user(task_current()->process, &userland_graphics, userland_graphics_ptr,
+                      sizeof(userland_graphics)) < 0){
         return NULL;
     }
 
     struct graphics_info* kernel_land_graphics_ptr =
         process_userland_pointer_kernel_ptr(task_current()->process,
-                                            userland_graphics_ptr->userland_ptr);
+                                            userland_graphics.userland_ptr);
     if(!kernel_land_graphics_ptr){
         return NULL;
     }
@@ -91,11 +95,16 @@ void* isr80h_command22_graphics_create(struct trap_frame* frame){
         return NULL;
     }
 
-    userland_graphics_ptr = (struct userland_graphics*)
-        task_virtual_address_to_physical(task_current(), userland_graphics_ptr);
+    // Copy the handle in; the book did not even check the
+    // translation for NULL here.
+    struct userland_graphics userland_graphics;
+    if(copy_from_user(task_current()->process, &userland_graphics, userland_graphics_ptr,
+                      sizeof(userland_graphics)) < 0){
+        return NULL;
+    }
     struct graphics_info* kernel_land_graphics_ptr =
         process_userland_pointer_kernel_ptr(task_current()->process,
-                                            userland_graphics_ptr->userland_ptr);
+                                            userland_graphics.userland_ptr);
     if(!kernel_land_graphics_ptr){
         return NULL;
     }
@@ -112,9 +121,10 @@ void* isr80h_command22_graphics_create(struct trap_frame* frame){
         return NULL;
     }
 
-    struct userland_graphics* userland_child_graphics_metadata =
-        process_malloc(task_current()->process, sizeof(struct userland_graphics));
-    if(!userland_child_graphics_metadata){
+    struct userland_graphics* userland_child_graphics_metadata = NULL;
+    void* user_addr = process_malloc_kernel(task_current()->process, sizeof(struct userland_graphics),
+                                            (void**)&userland_child_graphics_metadata);
+    if(!user_addr){
         return NULL;
     }
 
@@ -124,5 +134,5 @@ void* isr80h_command22_graphics_create(struct trap_frame* frame){
     userland_child_graphics_metadata->y            = child_graphics->relative_y;
     userland_child_graphics_metadata->userland_ptr = userland_child_graphics;
 
-    return (void*)userland_child_graphics_metadata;
+    return user_addr;
 }

@@ -13,6 +13,7 @@
 #include "task/task.h"
 #include "task/process.h"
 #include "task/userlandptr.h"
+#include "task/uaccess.h"
 
 #include "status.h"
 #include "kernel.h"
@@ -38,9 +39,10 @@ void* isr80h_command16_window_create(struct trap_frame* frame){
     struct process_window* win = NULL;
     void* window_title_user_ptr = task_get_stack_item(task_current(), 0);
     char win_title[WINDOW_MAX_TITLE];
-    res = copy_string_from_task(task_current(), window_title_user_ptr,
-                                win_title, sizeof(win_title));
-    if(res < 0){
+    // A title longer than the buffer is cut short.
+    if(strncpy_from_user(task_current()->process, win_title, window_title_user_ptr,
+                         sizeof(win_title)) == -EFAULT){
+        res = -EFAULT;
         goto out;
     }
 
@@ -97,10 +99,11 @@ void* isr80h_command18_get_window_event(struct trap_frame* frame){
         goto out;
     }
 
-    win_event_out = task_virtual_address_to_physical(task_current(),
-                                                     win_event_out_virtual_address);
-    if(!win_event_out){
-        res = -EINVARG;
+    // Check the buffer before popping, write it with
+    // copy_to_user (the book wrote through the translated first byte).
+    if(!user_range_ok(task_current()->process, win_event_out_virtual_address,
+                      sizeof(*win_event_out), true)){
+        res = -EFAULT;
         goto out;
     }
 
@@ -110,7 +113,11 @@ void* isr80h_command18_get_window_event(struct trap_frame* frame){
         goto out;
     }
 
+    struct window_event_userland win_event_user = {0};
+    win_event_out = &win_event_user;
     window_event_to_userland(&win_event_kern, win_event_out);
+    res = copy_to_user(task_current()->process, win_event_out_virtual_address,
+                       win_event_out, sizeof(*win_event_out));
 out:
     // Upstream returns the int status as a void*. Preserve the
     // sign-extension behaviour by casting through intptr_t.
@@ -185,13 +192,14 @@ void* isr80h_command23_window_redraw_region(struct trap_frame* frame){
 void* isr80h_command24_update_window_title(struct window* window,
                                            struct trap_frame* frame){
     int res = 0;
-    const char* title_ptr = task_virtual_address_to_physical(task_current(),
-                                                             task_get_stack_item(task_current(), 2));
-    if(!title_ptr){
-        res = -EINVARG;
+    // Copied in; the book used the translated first byte.
+    char title[WINDOW_MAX_TITLE];
+    if(strncpy_from_user(task_current()->process, title,
+                         task_get_stack_item(task_current(), 2), sizeof(title)) == -EFAULT){
+        res = -EFAULT;
         goto out;
     }
-    window_title_set(window, title_ptr);
+    window_title_set(window, title);
 out:
     return (void*)(intptr_t)res;
 }

@@ -247,7 +247,8 @@ typedef enum {
 // Pack stage + value into the marker slot.
 static inline void boot_marker_set(boot_marker_stage_t stage, uint32_t value)
 {
-    volatile uint64_t* slots = (volatile uint64_t*)BOOT_MARKER_BASE;
+    // Through the direct map; the region is still physical 0x6000.
+    volatile uint64_t* slots = (volatile uint64_t*)(0xFFFF800000000000ULL + BOOT_MARKER_BASE);
     uint64_t magic = (BOOT_MARKER_MAGIC_PREFIX << 32) | ((uint64_t)stage << 24);
     slots[stage] = magic | (uint64_t)value;
 }

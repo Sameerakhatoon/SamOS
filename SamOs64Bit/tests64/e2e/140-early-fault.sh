@@ -14,6 +14,6 @@ MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.
 boot_and_dump 20 '^System halted'
 expect_serial '^boot_info: cmdline "samos.early_fault_test"$' "loader passed the command line"
 expect_serial '^EARLY FAULT: vector 0x0000000000000006 ' "#UD reported by the early IDT"
-expect_serial '^  rip 0x00000000001' "register dump with a kernel rip"
+expect_serial '^  rip 0xffffffff801' "register dump with a kernel rip (higher half)"
 expect_no_serial 'Hello 64-bit' "kernel stopped at the fault"
 echo "PASS: e2e/140 early fault"

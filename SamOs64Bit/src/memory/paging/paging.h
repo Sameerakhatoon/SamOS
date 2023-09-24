@@ -14,11 +14,24 @@ enum
 };
 typedef uint8_t paging_map_level_t;
 
+#include "config.h"
+
+#define PAGING_NO_EXECUTE       0x100       // NX (bit 63 of the entry)
 #define PAGING_CACHE_DISABLED   0b00010000
 #define PAGING_WRITE_THROUGH    0b00001000
 #define PAGING_ACCESS_FROM_ALL  0b00000100  // U=1: ring 3 can see this page
 #define PAGING_IS_WRITEABLE     0b00000010
 #define PAGING_IS_PRESENT       0b00000001
+
+// The direct map: physical address p is kernel virtual
+// SAMOS_DIRECT_MAP_BASE + p. Every kmalloc pointer and every page
+// table is a direct-map address; page-table entries hold physical ones.
+#define PAGING_PHYS_TO_VIRT(p)  ((void*)((uintptr_t)(p) + SAMOS_DIRECT_MAP_BASE))
+#define PAGING_IS_DIRECT_MAP(v) ((uintptr_t)(v) >= SAMOS_DIRECT_MAP_BASE && \
+                                 (uintptr_t)(v) <  SAMOS_DIRECT_MAP_BASE + SAMOS_DIRECT_MAP_SIZE)
+
+// The upper half of a PML4: slots 256-511 are the kernel's.
+#define PAGING_KERNEL_PML4_FIRST 256
 
 #define PAGING_TOTAL_ENTRIES_PER_TABLE  512
 #define PAGING_PAGE_SIZE                4096
@@ -89,6 +102,22 @@ void* paging_get_physical_address(struct paging_desc* desc, void* virtual_addres
 // PDPT -> PD -> PT and returns a pointer to the PT leaf entry,
 // or NULL if any intermediate table entry is missing.
 struct paging_desc_entry* paging_get(struct paging_desc* desc, void* virtual_address);
+
+// Kernel address space and translation.
+// paging_kernel_desc_new builds the kernel descriptor: every upper
+// half PML4 slot, the direct map and the kernel image with W^X.
+// paging_desc_new then shares those slots with each new descriptor.
+struct paging_desc* paging_kernel_desc_new(void);
+// Physical address behind a kernel virtual address (direct map,
+// kernel image, else a walk of the kernel tables). 0 if unmapped.
+uint64_t paging_kernel_virt_to_phys(void* virt);
+// Map [phys, phys + size) into the direct map with `flags`
+// (MMIO: PCI BARs). Returns the kernel virtual address or NULL.
+void* paging_map_mmio(uint64_t phys, uint64_t size, int flags);
+// Walk `desc` for a user access to `virt`: every level present and
+// U=1, and RW=1 at every level when `write`. Returns 0 and the
+// physical address of the byte, or -EFAULT.
+int   paging_user_translate(struct paging_desc* desc, uintptr_t virt, bool write, uint64_t* phys_out);
 
 // Asm helpers (paging.asm).
 void  paging_load_directory(uintptr_t* directory);

@@ -12,10 +12,21 @@
 ;   * A minimal exception IDT is installed before the GDT swap, so a
 ;     fault during early boot prints a register dump on COM1
 ;     (early_fault.c) instead of triple-faulting into a reset.
+;
+; The kernel runs in the higher half. The loader
+; still jumps to physical 0x100000, where the .boot stub below runs
+; on the firmware's identity map. It loads boot page tables that map
+; the first GiB three times (identity, the direct map at
+; 0xFFFF800000000000 and the kernel window at 0xFFFFFFFF80000000)
+; and jumps to higher_half_entry. kernel_main replaces the tables
+; with the real kernel address space (paging_kernel_desc_new), which
+; has no identity map at all.
 
 [BITS 64]
 
-%define SAMOS_BOOT_STACK_TOP 0x200000     ; = SAMOS_KERNEL_WINDOW_END in config.h
+%define SAMOS_BOOT_STACK_TOP 0x200000           ; = SAMOS_KERNEL_WINDOW_END in config.h
+%define KERNEL_VMA           0xFFFFFFFF80000000 ; = SAMOS_KERNEL_VMA
+%define DIRECT_MAP_BASE      0xFFFF800000000000 ; = SAMOS_DIRECT_MAP_BASE
 
 global _start
 global kernel_registers
@@ -33,13 +44,57 @@ DATA_SEG           equ 0x10
 LONG_MODE_CODE_SEG equ 0x18
 LONG_MODE_DATA_SEG equ 0x20
 
-section .text
+; ------------------------------------------------------------------
+; Identity-mapped entry stub, linked at its load address.
+; ------------------------------------------------------------------
+section .boot
 
 _start:
     cli
     cld
-    mov r12, rdi                       ; boot_info, survives the calls below
-    mov rsp, SAMOS_BOOT_STACK_TOP
+    mov r12, rdi                       ; boot_info (physical)
+    mov rsp, SAMOS_BOOT_STACK_TOP      ; physical, identity-mapped by the firmware
+    mov rax, boot_pml4
+    mov cr3, rax
+    mov rax, higher_half_entry
+    jmp rax
+
+; Boot page tables. One PD maps physical [0, 1 GiB) with 2 MiB
+; pages; it is reached from PML4 slot 0 (identity, for the jump
+; above), slot 256 (direct map) and slot 511 / PDPT slot 510
+; (kernel window). paging_kernel_desc_new replaces all of it.
+align 4096
+boot_pml4:
+    dq boot_pdpt_low + 0x03            ; 0x0000000000000000
+    times 255 dq 0
+    dq boot_pdpt_low + 0x03            ; 0xFFFF800000000000
+    times 254 dq 0
+    dq boot_pdpt_high + 0x03           ; 0xFFFFFF8000000000
+
+align 4096
+boot_pdpt_low:
+    dq boot_pd + 0x03
+    times 511 dq 0
+
+align 4096
+boot_pdpt_high:
+    times 510 dq 0
+    dq boot_pd + 0x03                  ; 0xFFFFFFFF80000000
+    dq 0
+
+align 4096
+boot_pd:
+    %assign addr 0x00000000
+    %rep 512
+        dq addr + 0x83                 ; Present | RW | PS=1
+        %assign addr addr + 0x200000
+    %endrep
+
+section .text
+
+higher_half_entry:
+    mov rax, KERNEL_VMA + SAMOS_BOOT_STACK_TOP
+    mov rsp, rax
     xor rbp, rbp
 
     ; Zero .bss. The loader already zeroed the window, but the kernel
@@ -50,6 +105,9 @@ _start:
     xor eax, eax
     rep stosb
 
+    ; boot_info through the direct map: the identity map goes away.
+    mov rax, DIRECT_MAP_BASE
+    add r12, rax
     mov [samos_boot_info_ptr], r12
 
     ; Early IDT, gates pointing at the firmware's code selector
@@ -60,8 +118,6 @@ _start:
 
     jmp long_mode_entry
 
-; Lecture 15: kernel_registers() - reload ds/es/fs/gs with the
-; 64-bit data selector. See L34-L35 doc for rationale.
 kernel_registers:
     mov ax, LONG_MODE_DATA_SEG
     mov ds, ax
@@ -71,12 +127,8 @@ kernel_registers:
     ret
 
 long_mode_entry:
-    ; Lecture 74 - install our own page tables: the first GiB
-    ; identity-mapped via 2-MiB PS=1 leaves.
-    mov rax, PML4_Table
-    mov cr3, rax
-
-    ; Lecture 74 - install our own GDT.
+    ; Lecture 74 - install our own GDT. (our page tables are
+    ; already live, loaded by _start.)
     lgdt [gdt_descriptor]
 
     mov ax, LONG_MODE_DATA_SEG
@@ -88,7 +140,8 @@ long_mode_entry:
 
     ; Lecture 74 - far return to reload CS from our new GDT.
     push QWORD LONG_MODE_CODE_SEG
-    push QWORD long_mode_new_gdt_complete
+    mov rax, long_mode_new_gdt_complete
+    push rax
     retfq
 
 long_mode_new_gdt_complete:
@@ -237,6 +290,10 @@ early_idtr:
     dw 32 * 16 - 1
     dq early_idt
 
+; Written at run time (TSS slot, framebuffer values), so
+; .data: .text is mapped read-only.
+section .data
+
 ; ------------------------------------------------------------------
 ; Global descriptor table (GDT)
 ; ------------------------------------------------------------------
@@ -302,29 +359,6 @@ gdt_end:
 gdt_descriptor:
     dw gdt_end - gdt - 1            ; Limit
     dq gdt                          ; L74 - 8-byte base in long mode
-
-; ------------------------------------------------------------------
-; 4-level page-table skeleton: PML4 -> PDPT -> PD with 2-MiB pages.
-; Identity-maps the first 1 GiB via 2-MiB PS=1 leaves.
-; ------------------------------------------------------------------
-align 4096
-PML4_Table:
-    dq PDPT_TABLE + 0x03            ; Present + RW
-    times 511 dq 0
-
-align 4096
-PDPT_TABLE:
-    dq PD_Table + 0x03
-    times 511 dq 0
-
-align 4096
-PD_Table:
-    %assign addr 0x00000000
-    %rep 512
-        dq addr + 0x83              ; Present | RW | PS=1
-        %assign addr addr + 0x200000
-    %endrep
-
 
 ; Lecture 87 - root graphics_info instance. The layout below MUST
 ; mirror struct graphics_info in src/graphics/graphics.h.

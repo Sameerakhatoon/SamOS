@@ -820,9 +820,11 @@ void graphics_setup(struct graphics_info* main_graphics_info){
     main_graphics_info->starting_x  = 0;
     main_graphics_info->starting_y  = 0;
 
+    // The pages were direct-map RAM; now they alias the
+    // framebuffer. Those RAM frames stay allocated, unused.
     paging_map_to(kernel_desc(), new_framebuffer_memory, real_framebuffer,
                   real_framebuffer_end,
-                  PAGING_IS_WRITEABLE | PAGING_IS_PRESENT);
+                  PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_NO_EXECUTE);
 
     loaded_graphics_info = main_graphics_info;
 

@@ -7,8 +7,7 @@
 ; xmm0-15 from in[15..46], pushes `arg` twice (stack items 0 and 1),
 ; does int 0x80 with rax = cmd, then stores rax and the same
 ; registers to out[0..46]. Everything except rax (the syscall result)
-; must come back unchanged. No .bss: the loader does not give a
-; program fresh BSS pages yet.
+; must come back unchanged.
 
 [BITS 64]
 section .text
@@ -104,5 +103,34 @@ ktest_regs_roundtrip:
     pop r13
     pop r12
     pop rbp
+    pop rbx
+    ret
+
+; Raw syscalls for the isolation probes.
+;
+; long ktest_syscall(long cmd, long a0, long a1, long a2, long a3)
+;   a0 is stack item 0, a1 item 1, ... Returns rax.
+global ktest_syscall
+ktest_syscall:
+    push r8                            ; item 3
+    push rcx                           ; item 2
+    push rdx                           ; item 1
+    push rsi                           ; item 0
+    mov rax, rdi
+    int 0x80
+    add rsp, 32
+    ret
+
+; long ktest_syscall_rsp(long cmd, unsigned long rsp)
+;   int 0x80 with the user rsp set to `rsp` (a kernel address, say),
+;   so the kernel reads the arguments from there.
+global ktest_syscall_rsp
+ktest_syscall_rsp:
+    push rbx
+    mov rbx, rsp
+    mov rax, rdi
+    mov rsp, rsi
+    int 0x80
+    mov rsp, rbx
     pop rbx
     ret

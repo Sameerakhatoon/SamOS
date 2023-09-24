@@ -5,6 +5,15 @@
 // new 4-level descriptor trees at runtime (one per process later),
 // paging_map* to install ranges in them, paging_switch() to load
 // CR3 with the new top-level table.
+//
+// The kernel lives in the upper half. Page-table
+// entries hold physical addresses and the tables themselves are
+// reached through the direct map (PAGING_PHYS_TO_VIRT). The kernel
+// descriptor owns PML4 slots 256-511 and every other descriptor
+// points the same slots at the same PDPTs, so the kernel half is
+// shared and never freed with a process. Kernel pages are
+// supervisor-only; an intermediate entry gets U=1 only when a user
+// page is mapped under it, and never in the upper half.
 
 #include "paging.h"
 #include "memory/heap/kheap.h"
@@ -16,14 +25,40 @@
 
 static struct paging_desc* current_paging_desc = 0;
 
+// The kernel descriptor, whose upper half every new
+// descriptor copies (paging_kernel_desc_new).
+static struct paging_desc* paging_kernel_template = 0;
+
+// linker.ld - kernel image sections (kernel virtual addresses).
+extern char _kernel_text_start[];
+extern char _kernel_text_end[];
+extern char _kernel_rodata_start[];
+extern char _kernel_rodata_end[];
+extern char _kernel_data_start[];
+
 // L31 - paging_null_entry is defined further down; forward-
 // declare it so paging_get (which we hoisted to the top with
 // the other L27..L29 helpers) can call it.
 static bool paging_null_entry(struct paging_desc_entry* entry);
 
+// The table an entry points at, through the direct map.
+static struct paging_desc_entry* paging_entry_table(struct paging_desc_entry* entry){
+    return (struct paging_desc_entry*)PAGING_PHYS_TO_VIRT(((uint64_t)entry->address) << 12);
+}
+
+static uint64_t paging_direct_to_phys(void* virt){
+    return (uint64_t)(uintptr_t)virt - SAMOS_DIRECT_MAP_BASE;
+}
+
+// One zeroed 4 KiB table. kpage_zalloc: whole frames, never a slab
+// object, so the table is page aligned.
+static struct paging_desc_entry* paging_table_new(void){
+    return kpage_zalloc(sizeof(struct paging_desc_entry) * PAGING_TOTAL_ENTRIES_PER_TABLE);
+}
+
 struct paging_pml_entries* paging_pml4_entries_new(void)
 {
-    return kzalloc(sizeof(struct paging_pml_entries));
+    return (struct paging_pml_entries*)paging_table_new();
 }
 
 // Lecture 43 - recursive teardown of a paging tree.
@@ -63,12 +98,8 @@ static void paging_desc_entry_free(struct paging_desc_entry* table_entry,
         // non-null ones at level-1.
         for(int i = 0; i < PAGING_TOTAL_ENTRIES_PER_TABLE; i++){
             struct paging_desc_entry* entry = &table_entry[i];
-            if(!paging_null_entry(entry)){
-                struct paging_desc_entry* child =
-                    (struct paging_desc_entry*)(((uint64_t)entry->address) << 12);
-                if(child){
-                    paging_desc_entry_free(child, level - 1);
-                }
+            if(!paging_null_entry(entry) && entry->address){
+                paging_desc_entry_free(paging_entry_table(entry), level - 1);
             }
         }
     }
@@ -81,23 +112,14 @@ static void paging_desc_entry_free(struct paging_desc_entry* table_entry,
 
 // Lecture 43 - free an entire paging_desc tree.
 //
-// The PML4 is walked one entry at a time. Non-null entries
-// recurse into their PDPT (level-1 of 4 = 3). After the recursion
-// we free the PML entries block and the descriptor itself.
-//
-// This is the function task_free has been waiting for since
-// L40 - now dying tasks can release their page-table trees
-// instead of leaking ~MB per dead process.
+// Only the lower half. PML4 slots 256-511 point at the
+// kernel's shared PDPTs.
 void paging_desc_free(struct paging_desc* desc){
     paging_map_level_t level = desc->level;
-    for(int i = 0; i < PAGING_TOTAL_ENTRIES_PER_TABLE; i++){
+    for(int i = 0; i < PAGING_KERNEL_PML4_FIRST; i++){
         struct paging_desc_entry* entry = &desc->pml->entries[i];
-        if(!paging_null_entry(entry)){
-            struct paging_desc_entry* child =
-                (struct paging_desc_entry*)(((uint64_t)entry->address) << 12);
-            if(child){
-                paging_desc_entry_free(child, level - 1);
-            }
+        if(!paging_null_entry(entry) && entry->address){
+            paging_desc_entry_free(paging_entry_table(entry), level - 1);
         }
     }
     kfree(desc->pml);
@@ -140,51 +162,32 @@ struct paging_desc* paging_current_descriptor(void){
 //
 // SamOs deviation: upstream has cut-paste bugs in the
 // intermediate null checks (testing the entries-array pointer
-// against a zero struct instead of the relevant entry). The
-// upstream version still works in practice because if pml4_entry
-// is non-null then the PDPT it points at is a real allocated
-// table and its first entry being zero just means PDPT[0] is
-// unmapped - which is fine since we index with pdpt_index, not
-// 0. We write the clean walk anyway.
+// against a zero struct instead of the relevant entry). We write
+// the clean walk.
 struct paging_desc_entry* paging_get(struct paging_desc* desc, void* virt){
     uint64_t va = (uint64_t)virt;
-    size_t pml4_idx = (va >> 39) & 0x1FF;
-    size_t pdpt_idx = (va >> 30) & 0x1FF;
-    size_t pd_idx   = (va >> 21) & 0x1FF;
-    size_t pt_idx   = (va >> 12) & 0x1FF;
-
-    struct paging_desc_entry* pml4_entry = &desc->pml->entries[pml4_idx];
-    if(paging_null_entry(pml4_entry)){
-        return NULL;
+    size_t idx[3] = { (va >> 39) & 0x1FF, (va >> 30) & 0x1FF, (va >> 21) & 0x1FF };
+    struct paging_desc_entry* table = desc->pml->entries;
+    for(int level = 0; level < 3; level++){
+        struct paging_desc_entry* entry = &table[idx[level]];
+        if(!entry->present){
+            return NULL;
+        }
+        table = paging_entry_table(entry);
     }
-
-    struct paging_desc_entry* pdpt =
-        (struct paging_desc_entry*)(((uint64_t)pml4_entry->address) << 12);
-    struct paging_desc_entry* pdpt_entry = &pdpt[pdpt_idx];
-    if(paging_null_entry(pdpt_entry)){
-        return NULL;
-    }
-
-    struct paging_desc_entry* pd =
-        (struct paging_desc_entry*)(((uint64_t)pdpt_entry->address) << 12);
-    struct paging_desc_entry* pd_entry = &pd[pd_idx];
-    if(paging_null_entry(pd_entry)){
-        return NULL;
-    }
-
-    struct paging_desc_entry* pt =
-        (struct paging_desc_entry*)(((uint64_t)pd_entry->address) << 12);
-    return &pt[pt_idx];
+    return &table[(va >> 12) & 0x1FF];
 }
 
 // Lecture 29 - virtual-to-physical helper. Uses paging_get to
 // find the leaf entry, reconstructs the physical address as
 // (entry.address << 12) + (virtual_address & 0xFFF). Returns
-// NULL when the walk fails (which is also what the L29 stub
-// version of paging_get always returns).
+// NULL when the walk fails.
+//
+// Also NULL for a leaf that is not present (an unmapped
+// page used to come back as its stale frame).
 void* paging_get_physical_address(struct paging_desc* desc, void* virtual_address){
     struct paging_desc_entry* entry = paging_get(desc, virtual_address);
-    if(!entry){
+    if(!entry || !entry->present){
         return NULL;
     }
     uint64_t physical_base = ((uint64_t)entry->address) << 12;
@@ -195,7 +198,7 @@ void* paging_get_physical_address(struct paging_desc* desc, void* virtual_addres
 void paging_switch(struct paging_desc* desc)
 {
     current_paging_desc = desc;
-    paging_load_directory((uintptr_t*)(&desc->pml->entries[0]));
+    paging_load_directory((uintptr_t*)paging_direct_to_phys(desc->pml));
 }
 
 struct paging_desc* paging_desc_new(paging_map_level_t root_map_level)
@@ -216,6 +219,15 @@ struct paging_desc* paging_desc_new(paging_map_level_t root_map_level)
         return NULL;
     }
     desc->level = root_map_level;
+
+    // Share the kernel half.
+    if (paging_kernel_template)
+    {
+        for (int i = PAGING_KERNEL_PML4_FIRST; i < PAGING_TOTAL_ENTRIES_PER_TABLE; i++)
+        {
+            desc->pml->entries[i] = paging_kernel_template->pml->entries[i];
+        }
+    }
     return desc;
 }
 
@@ -230,12 +242,48 @@ static bool paging_null_entry(struct paging_desc_entry* entry)
     return memcmp(entry, &null_desc, sizeof(struct paging_desc_entry)) == 0;
 }
 
+static bool paging_is_canonical(uintptr_t va)
+{
+    return va < SAMOS_USER_SPACE_END || va >= SAMOS_DIRECT_MAP_BASE;
+}
+
+// Make sure `entry` points at a table, allocating it on demand.
+// The book set U=1 on every intermediate entry ("Lecture 59
+// hot-fix"), so a later user mapping anywhere could reach through a
+// table the kernel had built. Now U=1 is added only on the way to a
+// user page, which paging_map allows only in the lower half.
+static int paging_intermediate(struct paging_desc_entry* entry, bool user)
+{
+    if (paging_null_entry(entry))
+    {
+        struct paging_desc_entry* table = paging_table_new();
+        if (!table)
+        {
+            return -ENOMEM;   // The book mapped page 0 here
+        }
+        entry->address    = paging_direct_to_phys(table) >> 12;
+        entry->present    = 1;
+        entry->read_write = 1;
+    }
+    if (user)
+    {
+        entry->user_supervisor = 1;
+    }
+    return 0;
+}
+
 // Install one virt -> phys 4-KiB mapping. Allocates missing
 // intermediate tables (PDPT, PD, PT) on demand from kheap.
+// `phys` is a PHYSICAL address. flags 0 unmaps.
 int paging_map(struct paging_desc* desc, void* virt, void* phys, int flags)
 {
-    int res = 0;
     uintptr_t va = (uintptr_t)virt;
+    bool user = (flags & PAGING_ACCESS_FROM_ALL) != 0;
+
+    if (!paging_is_canonical(va) || (user && va >= SAMOS_USER_SPACE_END))
+    {
+        return -EINVARG;
+    }
 
     // 48-bit canonical virtual address layout:
     //   bits 47..39 PML4 index
@@ -243,122 +291,56 @@ int paging_map(struct paging_desc* desc, void* virt, void* phys, int flags)
     //   bits 29..21 PD index
     //   bits 20..12 PT index
     //   bits 11..0  offset within the 4-KiB page
-    size_t pml4_index = (va >> 39) & 0x1FF;
-    size_t pdpt_index = (va >> 30) & 0x1FF;
-    size_t pd_index   = (va >> 21) & 0x1FF;
-    size_t pt_index   = (va >> 12) & 0x1FF;
-
-    // Lecture 59 hot-fix: every intermediate entry gets U=1
-    // (= user-accessible) unconditionally, ALSO on existing
-    // entries.
-    //
-    // For a user-mode access to reach the leaf, EVERY entry in
-    // PML4 -> PDPT -> PD -> PT must have user_supervisor=1. If
-    // a previous map call (e.g. paging_map_e820_memory_regions)
-    // created the intermediate entry without U=1, a later
-    // user-mode mapping at the same address would have a U=1
-    // leaf but U=0 intermediates -> ring 3 walk still fails.
-    //
-    // The leaf's U bit is what controls effective access; making
-    // intermediates always-user is safe and matches what
-    // PeachOS / Linux / most kernels do.
-    struct paging_desc_entry* pml4_entry = &desc->pml->entries[pml4_index];
-    if (paging_null_entry(pml4_entry))
+    size_t idx[3] = { (va >> 39) & 0x1FF, (va >> 30) & 0x1FF, (va >> 21) & 0x1FF };
+    struct paging_desc_entry* table = desc->pml->entries;
+    for (int level = 0; level < 3; level++)
     {
-        void* new_pdpt = kzalloc(
-            sizeof(struct paging_desc_entry) * PAGING_TOTAL_ENTRIES_PER_TABLE);
-        if (!new_pdpt)
+        struct paging_desc_entry* entry = &table[idx[level]];
+        int res = paging_intermediate(entry, user);
+        if (res < 0)
         {
-            return -ENOMEM;   // The book mapped page 0 here
+            return res;
         }
-        pml4_entry->address        = ((uintptr_t)new_pdpt) >> 12;
-        pml4_entry->present        = 1;
-        pml4_entry->read_write     = 1;
+        table = paging_entry_table(entry);
     }
-    pml4_entry->user_supervisor = 1;
+    struct paging_desc_entry* pt_entry = &table[(va >> 12) & 0x1FF];
+    bool was_mapped = !paging_null_entry(pt_entry);
 
-    struct paging_desc_entry* pdpt_entries =
-        (struct paging_desc_entry*)((uintptr_t)(pml4_entry->address) << 12);
-    struct paging_desc_entry* pdpt_entry = &pdpt_entries[pdpt_index];
-    if (paging_null_entry(pdpt_entry))
+    struct paging_desc_entry leaf = { 0 };
+    if (flags)
     {
-        void* new_pd = kzalloc(
-            sizeof(struct paging_desc_entry) * PAGING_TOTAL_ENTRIES_PER_TABLE);
-        if (!new_pd)
-        {
-            return -ENOMEM;   // The book mapped page 0 here
-        }
-        pdpt_entry->address        = ((uintptr_t)new_pd) >> 12;
-        pdpt_entry->present        = 1;
-        pdpt_entry->read_write     = 1;
+        leaf.address         = ((uintptr_t)phys) >> 12;
+        leaf.present         = (flags & PAGING_IS_PRESENT)     ? 1 : 0;
+        leaf.read_write      = (flags & PAGING_IS_WRITEABLE)   ? 1 : 0;
+        leaf.user_supervisor = user ? 1 : 0;
+        leaf.pwt             = (flags & PAGING_WRITE_THROUGH)  ? 1 : 0;
+        leaf.pcd             = (flags & PAGING_CACHE_DISABLED) ? 1 : 0;
+        leaf.execute_disable = (flags & PAGING_NO_EXECUTE)     ? 1 : 0;
     }
-    pdpt_entry->user_supervisor = 1;
-
-    struct paging_desc_entry* pd_entries =
-        (struct paging_desc_entry*)((uintptr_t)(pdpt_entry->address) << 12);
-    struct paging_desc_entry* pd_entry = &pd_entries[pd_index];
-    if (paging_null_entry(pd_entry))
-    {
-        void* new_pt = kzalloc(
-            sizeof(struct paging_desc_entry) * PAGING_TOTAL_ENTRIES_PER_TABLE);
-        if (!new_pt)
-        {
-            return -ENOMEM;   // The book mapped page 0 here
-        }
-        pd_entry->address        = ((uintptr_t)new_pt) >> 12;
-        pd_entry->present        = 1;
-        pd_entry->read_write     = 1;
-    }
-    pd_entry->user_supervisor = 1;
-
-    struct paging_desc_entry* pt_entries =
-        (struct paging_desc_entry*)((uintptr_t)(pd_entry->address) << 12);
-    struct paging_desc_entry* pt_entry = &pt_entries[pt_index];
+    *pt_entry = leaf;
 
     // If this PT slot was previously mapped to something else, flush
     // the TLB so the next memory access reflects the new mapping.
-    if (!paging_null_entry(pt_entry))
+    if (was_mapped)
     {
         paging_invalidate_tlb_entry(virt);
     }
-
-    pt_entry->address        = ((uintptr_t)phys) >> 12;
-    pt_entry->present        = (flags & PAGING_IS_PRESENT)        ? 1 : 0;
-    pt_entry->read_write     = (flags & PAGING_IS_WRITEABLE)      ? 1 : 0;
-    // L59 hot-fix - propagate the caller's user bit.
-    pt_entry->user_supervisor = (flags & PAGING_ACCESS_FROM_ALL)   ? 1 : 0;
-
-    return res;
+    return 0;
 }
 
-// Lecture 21 - walk the BIOS E820 dump and identity-map every
-// type-1 (usable) region into `desc`. The E820 buffer at 0x7E00
-// survives kheap_init since L20 moved the bitmap to 16 MiB, so
-// this can be called any time after kheap_init.
+// Lecture 21 - walk the E820 dump and map every usable region.
+//
+// Into the kernel's direct map, supervisor-only and NX,
+// instead of identity-mapping it user-writable into every process.
+// The first MiB stays mapped (boot markers at 0x6000), and so do the
+// loader's kernel window and boot data area (SAMOS_E820_TYPE_KERNEL).
 //
 // Misaligned bases get aligned UP (round to next page); misaligned
-// ends get aligned DOWN (round to current page). This intentionally
-// excludes any sub-page leftover on either side - those would have
-// been usable RAM but we can only map whole pages anyway.
+// ends get aligned DOWN (round to current page).
 int paging_map_e820_memory_regions(struct paging_desc* desc)
 {
-    // Lecture 23 - unconditionally identity-map the first 1 MiB.
-    // Real-mode BIOS data, IVT remnants, VGA (0xB8000), boot
-    // sector at 0x7C00, E820 dump at 0x7E00, kernel image at
-    // 0x100000 - they all live here. Marking them present in
-    // the new descriptor lets us paging_switch without
-    // immediately faulting on a banner write.
-    //
-    // L59-fix: also pass PAGING_ACCESS_FROM_ALL (U=1) so the
-    // TSS structure (which the CPU reads automatically during
-    // ring-3 -> ring-0 gate dispatch) is reachable through a
-    // task PML4 walk even when CPL=3 at the moment of fault.
-    // Without U=1 on the kernel pages, a #PF on user code
-    // triggers a #DF because the CPU can't fetch tss.rsp0.
-    // This is exactly the same workaround the 32-bit PeachOS
-    // used; we make it explicit.
-    int res = paging_map_to(desc, (void*)0x00, (void*)0x00, (void*)0x100000,
-                            PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
+    const int flags = PAGING_IS_PRESENT | PAGING_IS_WRITEABLE | PAGING_NO_EXECUTE;
+    int res = paging_map_to(desc, PAGING_PHYS_TO_VIRT(0), (void*)0x00, (void*)0x100000, flags);
     if (res < 0)
     {
         return res;
@@ -375,25 +357,132 @@ int paging_map_e820_memory_regions(struct paging_desc* desc)
             continue;
         }
 
-        void* base_addr = (void*)(uintptr_t)entry->base_addr;
-        void* end_addr  = (void*)(uintptr_t)(entry->base_addr + entry->length);
-
-        if (!paging_is_aligned(base_addr))
+        void* base_addr = paging_align_address((void*)(uintptr_t)entry->base_addr);
+        void* end_addr  = paging_align_to_lower_page((void*)(uintptr_t)(entry->base_addr + entry->length));
+        if (end_addr <= base_addr)
         {
-            base_addr = paging_align_address(base_addr);
+            continue;
         }
-        if (!paging_is_aligned(end_addr))
-        {
-            end_addr = paging_align_to_lower_page(end_addr);
-        }
-
-        res = paging_map_to(desc, base_addr, base_addr, end_addr,
-                            PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL);
+        res = paging_map_to(desc, PAGING_PHYS_TO_VIRT(base_addr), base_addr, end_addr, flags);
         if (res < 0)
         {
             return res;
         }
     }
+    return 0;
+}
+
+// Map kernel image pages [start, end) to their physical
+// addresses (virtual - SAMOS_KERNEL_VMA).
+static int paging_map_kernel_image(struct paging_desc* desc, void* start, void* end, int flags)
+{
+    void* s = paging_align_to_lower_page(start);
+    void* e = paging_align_address(end);
+    return paging_map_to(desc, s, (void*)((uintptr_t)s - SAMOS_KERNEL_VMA),
+                         (void*)((uintptr_t)e - SAMOS_KERNEL_VMA), flags);
+}
+
+// The kernel address space. Replaces kernel.asm's boot
+// tables, which also identity-map the first GiB.
+struct paging_desc* paging_kernel_desc_new(void)
+{
+    if (paging_kernel_template)
+    {
+        panic("paging_kernel_desc_new: called twice\n");
+    }
+    struct paging_desc* desc = paging_desc_new(PAGING_MAP_LEVEL_4);
+    if (!desc)
+    {
+        return NULL;
+    }
+
+    // Every upper-half PML4 slot gets its PDPT now, so a process
+    // descriptor made later sees all kernel mappings, present and
+    // future, through its copied slots.
+    for (int i = PAGING_KERNEL_PML4_FIRST; i < PAGING_TOTAL_ENTRIES_PER_TABLE; i++)
+    {
+        if (paging_intermediate(&desc->pml->entries[i], false) < 0)
+        {
+            return NULL;
+        }
+    }
+
+    // W^X for the kernel itself: text RX, rodata R, data/.bss and the
+    // boot stack (top of the window) RW.
+    if (paging_map_e820_memory_regions(desc) < 0 ||
+        paging_map_kernel_image(desc, _kernel_text_start, _kernel_text_end,
+                                PAGING_IS_PRESENT) < 0 ||
+        paging_map_kernel_image(desc, _kernel_rodata_start, _kernel_rodata_end,
+                                PAGING_IS_PRESENT | PAGING_NO_EXECUTE) < 0 ||
+        paging_map_kernel_image(desc, _kernel_data_start,
+                                (void*)(SAMOS_KERNEL_VMA + SAMOS_KERNEL_WINDOW_END),
+                                PAGING_IS_PRESENT | PAGING_IS_WRITEABLE | PAGING_NO_EXECUTE) < 0)
+    {
+        return NULL;
+    }
+
+    paging_kernel_template = desc;
+    return desc;
+}
+
+uint64_t paging_kernel_virt_to_phys(void* virt)
+{
+    uintptr_t va = (uintptr_t)virt;
+    if (PAGING_IS_DIRECT_MAP(va))
+    {
+        return va - SAMOS_DIRECT_MAP_BASE;
+    }
+    if (va >= SAMOS_KERNEL_VMA)
+    {
+        return va - SAMOS_KERNEL_VMA;
+    }
+    if (!paging_kernel_template)
+    {
+        return 0;
+    }
+    return (uint64_t)(uintptr_t)paging_get_physical_address(paging_kernel_template, virt);
+}
+
+void* paging_map_mmio(uint64_t phys, uint64_t size, int flags)
+{
+    if (!paging_kernel_template || size == 0)
+    {
+        return NULL;
+    }
+    uint64_t start = phys & ~(uint64_t)(PAGING_PAGE_SIZE - 1);
+    uint64_t end   = paging_align_value_to_upper_page(phys + size);
+    flags |= PAGING_IS_PRESENT | PAGING_IS_WRITEABLE | PAGING_NO_EXECUTE;
+    if (paging_map_to(paging_kernel_template, PAGING_PHYS_TO_VIRT(start), (void*)start,
+                      (void*)end, flags) < 0)
+    {
+        return NULL;
+    }
+    return PAGING_PHYS_TO_VIRT(phys);
+}
+
+int paging_user_translate(struct paging_desc* desc, uintptr_t virt, bool write, uint64_t* phys_out)
+{
+    if (virt >= SAMOS_USER_SPACE_END)
+    {
+        return -EFAULT;
+    }
+    size_t idx[4] = { (virt >> 39) & 0x1FF, (virt >> 30) & 0x1FF,
+                      (virt >> 21) & 0x1FF, (virt >> 12) & 0x1FF };
+    struct paging_desc_entry* table = desc->pml->entries;
+    struct paging_desc_entry* entry = NULL;
+    for (int level = 0; level < 4; level++)
+    {
+        entry = &table[idx[level]];
+        if (!entry->present || !entry->user_supervisor || (write && !entry->read_write))
+        {
+            return -EFAULT;
+        }
+        if (level < 3)
+        {
+            table = paging_entry_table(entry);
+        }
+    }
+    *phys_out = (((uint64_t)entry->address) << 12) | (virt & 0xFFF);
     return 0;
 }
 

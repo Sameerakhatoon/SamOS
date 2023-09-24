@@ -41,12 +41,10 @@ static inline void ahci_port_write(struct ahci_port_private* p, uint32_t reg, ui
     ahci_write(p->hba, AHCI_PORT_BASE(p->port) + reg, v);
 }
 
-// The device needs physical addresses. Today the kernel is
-// identity mapped, but the memory manager work may change that, so translate
-// through the kernel page tables and fall back to identity.
+// The device needs physical addresses. Kernel memory is
+// direct-mapped, so translate; there is no identity fallback.
 static uint64_t ahci_phys(void* virt){
-    void* phys = paging_get_physical_address(kernel_desc(), virt);
-    return phys ? (uint64_t)(uintptr_t)phys : (uint64_t)(uintptr_t)virt;
+    return paging_kernel_virt_to_phys(virt);
 }
 
 static void* ahci_alloc_aligned(size_t size, size_t align){
@@ -57,13 +55,9 @@ static void* ahci_alloc_aligned(size_t size, size_t align){
     return (void*)((raw + align - 1) & ~(uintptr_t)(align - 1));
 }
 
-static void ahci_map_mmio(uint64_t base, uint64_t size){
-    const uint32_t flags = PAGING_IS_PRESENT | PAGING_IS_WRITEABLE | PAGING_CACHE_DISABLED;
-    uint64_t start = base & ~0xFFFull;
-    for(uint64_t off = 0; off < size + (base - start); off += 0x1000){
-        paging_map(kernel_desc(), (void*)(uintptr_t)(start + off),
-                   (void*)(uintptr_t)(start + off), flags);
-    }
+// The registers go into the direct map.
+static void* ahci_map_mmio(uint64_t base, uint64_t size){
+    return paging_map_mmio(base, size, PAGING_CACHE_DISABLED);
 }
 
 static int ahci_wait_clear(struct ahci_port_private* p, uint32_t reg, uint32_t bits){
@@ -284,14 +278,17 @@ static int ahci_mount_controller(struct disk_driver* driver, struct pci_device* 
         return -ENOMEM;
     }
     hba->device = dev;
-    hba->abar   = (volatile uint8_t*)(uintptr_t)base;
 
     pci_enable_bus_master(dev);
     // The ABAR is the 0x100 bytes of HBA registers plus 0x80 per
     // port: 0x1100 at most. Do not trust bar->size: pci_size_bars
     // computes ~mask + 1 in 64 bits for a 32-bit BAR, so the top
     // half is all ones.
-    ahci_map_mmio(base, 0x1100);
+    hba->abar = ahci_map_mmio(base, 0x1100);
+    if(!hba->abar){
+        kfree(hba);
+        return -ENOMEM;
+    }
     ahci_bios_handoff(hba);
     ahci_write(hba, AHCI_HBA_GHC, ahci_read(hba, AHCI_HBA_GHC) | AHCI_GHC_AE);
 

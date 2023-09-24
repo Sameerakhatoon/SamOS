@@ -1,46 +1,61 @@
-/* Lecture 66 - tight ELF for fast PIO load.
+/* Two PT_LOAD segments: code and constants (R X), then data
+ * and .bss (R W), each starting on its own page.
  *
- * The original linker script used ALIGN(4096) on every section.
- * OUTPUT_FORMAT(elf64-x86-64) mirrors file offsets to VMAs, so
- * with .text at 0x400000+0 and .asm at 0x400000+4096 and so on,
- * the file ends up 2+ MiB even when the actual code is a few
- * KiB. Each sector loaded over ATA-PIO costs ~10 ms in QEMU
- * TCG (port IO emulation + DRQ polling) so 2 MiB = 40 sec
- * just to read the file.
+ * The kernel maps every segment with the permissions in p_flags and
+ * refuses a segment that is both writable and executable (W^X), and
+ * gives each segment fresh zeroed pages, so .bss is zero. That
+ * retires the old one-segment workaround.
  *
- * Tightening alignment to 16 bytes shrinks the file from
- * ~2 MiB to ~10 KiB. The user code still aligns on natural
- * boundaries; we just don't pad full pages between sections.
+ * The Makefile links with -z max-page-size=0x1000: a segment's file
+ * offset then only has to match its address modulo 4 KiB, not 2 MiB,
+ * and the file stays a few KiB (the L66 load-time concern).
  */
 ENTRY(_start)
 OUTPUT_FORMAT(elf64-x86-64)
+
+PHDRS
+{
+    text PT_LOAD FLAGS(5);   /* PF_R | PF_X */
+    data PT_LOAD FLAGS(6);   /* PF_R | PF_W */
+}
+
 SECTIONS
 {
     . = 0x400000;
 
     .text : ALIGN(16)
     {
-        *(.text)
-    }
+        *(.text .text.*)
+    } :text
 
     .asm : ALIGN(16)
     {
         *(.asm)
-    }
+    } :text
 
     .rodata : ALIGN(16)
     {
-        *(.rodata)
-    }
+        *(.rodata .rodata.*)
+    } :text
+
+    . = ALIGN(4096);
 
     .data : ALIGN(16)
     {
-        *(.data)
-    }
+        *(.data .data.*)
+        *(.got .got.*)
+    } :data
 
     .bss : ALIGN(16)
     {
         *(COMMON)
-        *(.bss)
+        *(.bss .bss.*)
+    } :data
+
+    /DISCARD/ :
+    {
+        *(.eh_frame)
+        *(.comment)
+        *(.note*)
     }
 }

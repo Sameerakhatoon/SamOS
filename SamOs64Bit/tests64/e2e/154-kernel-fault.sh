@@ -20,7 +20,7 @@ boot_and_dump 20 'KERNEL PANIC'
 # cr4: OSFXSR, OSXMMEXCPT; efer: LME, LMA, NXE
 expect_serial '^cpu: cr0 0x0000000080010033 cr4 0x[0-9a-f]{13}6[0-9a-f]{2} efer 0x0000000000000d00$' "cpu_init set CR0, CR4 and EFER"
 expect_serial '^KERNEL FAULT: #UD vector 0x0000000000000006 error 0x0000000000000000$' "#UD in kernel mode reported"
-expect_serial '^  rip 0x00000000001[0-9a-f]{5} cs 0x0000000000000018 ' "register dump with a kernel rip and cs"
+expect_serial '^  rip 0xffffffff801[0-9a-f]{5} cs 0x0000000000000018 ' "register dump with a higher-half kernel rip and cs"
 expect_serial '^  r13 0x' "dump covers r8-r15"
 expect_serial 'KERNEL PANIC: CPU exception in kernel mode' "kernel fault panics"
 expect_no_serial 'EARLY FAULT' "the full IDT handled it, not the early one"

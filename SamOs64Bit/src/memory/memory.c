@@ -1,6 +1,10 @@
 #include "memory.h"
 #include "config.h"
 
+// The map is read through the direct map.
+#define E820_COUNT   ((uint16_t*)(SAMOS_DIRECT_MAP_BASE + SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION))
+#define E820_ENTRIES ((struct e820_entry*)(SAMOS_DIRECT_MAP_BASE + SAMOS_MEMORY_MAP_LOCATION))
+
 // Lecture 18 - E820 readers. boot.asm puts the entries at
 // SAMOS_MEMORY_MAP_LOCATION (0x7E00) and the count at
 // SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION (0x7DFE - reused boot
@@ -11,20 +15,20 @@
 // Lecture 20 - typed helpers for multiheap to iterate E820.
 
 size_t e820_total_entries(void){
-    return *((uint16_t*)SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION);
+    return *E820_COUNT;
 }
 
 struct e820_entry* e820_entry(size_t index){
     if(index >= e820_total_entries()){
         return NULL;
     }
-    struct e820_entry* entries = (struct e820_entry*)SAMOS_MEMORY_MAP_LOCATION;
+    struct e820_entry* entries = E820_ENTRIES;
     return &entries[index];
 }
 
 size_t e820_total_accessible_memory(void){
-    size_t total_entries        = *((uint16_t*)SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION);
-    struct e820_entry* entries  = (struct e820_entry*)SAMOS_MEMORY_MAP_LOCATION;
+    size_t total_entries        = *E820_COUNT;
+    struct e820_entry* entries  = E820_ENTRIES;
     size_t total = 0;
     for(size_t i = 0; i < total_entries; i++){
         if(entries[i].type == 1){ // usable
@@ -35,8 +39,8 @@ size_t e820_total_accessible_memory(void){
 }
 
 struct e820_entry* e820_largest_free_entry(void){
-    size_t total_entries        = *((uint16_t*)SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION);
-    struct e820_entry* entries  = (struct e820_entry*)SAMOS_MEMORY_MAP_LOCATION;
+    size_t total_entries        = *E820_COUNT;
+    struct e820_entry* entries  = E820_ENTRIES;
     struct e820_entry* chosen   = NULL;
     for(size_t i = 0; i < total_entries; i++){
         if(entries[i].type != 1){
