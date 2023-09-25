@@ -28,9 +28,7 @@
 #include "status.h"
 #include "kernel.h"
 
-// L122-L123 forward decls. window_bring_to_top lands in L122.
-// window.o stays unlinked so missing bodies are inert.
-void window_bring_to_top(struct window* window);
+// L123+ forward decls; window.o lands in FILES at L122.
 
 // Vector of struct window* - every live window registers here.
 struct vector* windows_vector = NULL;
@@ -135,6 +133,26 @@ void window_unfocus(struct window* old_focused_window){
                            old_focused_window->root_graphics->width,
                            old_focused_window->root_graphics->height);
     // TODO L146 - emit WINDOW_EVENT_TYPE_LOST_FOCUS.
+}
+
+// Lecture 122 - bring a window to the top by giving it the
+// highest z_index in the screen's children. Walks the last
+// child (already the topmost after L121's sort) and stamps
+// our window with `that.z_index + 1`.
+void window_bring_to_top(struct window* window){
+    size_t last_index = 0;
+    struct graphics_info* screen_graphics = graphics_screen_info();
+    size_t child_count = vector_count(screen_graphics->children);
+    if(child_count > 0){
+        struct graphics_info* child_graphics = NULL;
+        size_t child_index = child_count - 1;
+        vector_at(screen_graphics->children, child_index,
+                  &child_graphics, sizeof(child_graphics));
+        if(child_graphics){
+            last_index = child_graphics->z_index;
+        }
+    }
+    window_set_z_index(window, last_index + 1);
 }
 
 // Lecture 121 - focus a window: unfocus the previous, bring
