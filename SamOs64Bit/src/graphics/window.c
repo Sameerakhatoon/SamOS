@@ -189,6 +189,77 @@ void window_focus(struct window* window){
                                        window->root_graphics->height);
 }
 
+// Lecture 123 - event handler registration walks.
+void window_event_handler_unregister(struct window* window, WINDOW_EVENT_HANDLER handler){
+    vector_pop_element(window->event_handlers.handlers, &handler, sizeof(handler));
+}
+
+void window_event_handler_register(struct window* window, WINDOW_EVENT_HANDLER handler){
+    vector_push(window->event_handlers.handlers, &handler);
+}
+
+// Upstream-typo wrapper: L123 calls `vecotr_at` (sic) in
+// window_drop_event_handlers; not a real vector lib function.
+// We forward to vector_at so the call site stays verbatim in
+// the diff while the build stays clean.
+static inline int vecotr_at(struct vector* vec, size_t index,
+                            void* data_out, size_t size){
+    return vector_at(vec, index, data_out, size);
+}
+
+void window_drop_event_handlers(struct window* window){
+    WINDOW_EVENT_HANDLER handler = NULL;
+    vecotr_at(window->event_handlers.handlers, 0, &handler, sizeof(handler));
+    while(handler){
+        window_event_handler_unregister(window, handler);
+        vector_at(window->event_handlers.handlers, 0, &handler, sizeof(handler));
+    }
+}
+
+// Lecture 123 - full window teardown. graphics_info_free
+// recurses through children, so the title bar + 4 borders +
+// body surfaces all release through the one root call.
+void window_free(struct window* window){
+    window_drop_event_handlers(window);
+    vector_free(window->event_handlers.handlers);
+    vector_pop_element(windows_vector, &window, sizeof(window));
+    terminal_free(window->terminal);
+    terminal_free(window->title_bar_terminal);
+    graphics_info_free(window->root_graphics);
+    kfree(window);
+}
+
+// Lecture 123 - dispatch an event to every registered handler.
+void window_event_push(struct window* window, struct window_event* event){
+    event->window = window;
+    event->win_id = window->id;
+    size_t total_handlers = vector_count(window->event_handlers.handlers);
+    for(size_t i = 0; i < total_handlers; i++){
+        WINDOW_EVENT_HANDLER handler = NULL;
+        vector_at(window->event_handlers.handlers, i, &handler, sizeof(handler));
+        if(handler){
+            handler(window, event);
+        }
+    }
+}
+
+// Lecture 123 - push WINDOW_CLOSE, free, repaint.
+void window_close(struct window* window){
+    struct window_event event = {0};
+    event.type = WINDOW_EVENT_TYPE_WINDOW_CLOSE;
+    window_event_push(window, &event);
+    window_free(window);
+    graphics_redraw_all();
+}
+
+// Lecture 123 - default per-window event handler. Stub: L144+
+// adds real focus / mouse / keyboard / close dispatch.
+int window_event_handler(struct window* window, struct window_event* win_event){
+    (void)window;
+    (void)win_event;
+    return 0;
+}
+
 // Lecture 119 (part 1 of window_create).
 //
 // Upstream bug preserved verbatim: this function returns
@@ -433,7 +504,9 @@ struct window* window_create(struct graphics_info* graphics_info,
     size_t child_count = vector_count(window->root_graphics->children);
     window_set_z_index(window, child_count + 1);
 
-    // L121+ - register window event handler.
+    // Lecture 123 - register the default per-window event
+    // handler so subsequent events have a consumer.
+    window_event_handler_register(window, window_event_handler);
 
     window_focus(window);
     graphics_redraw_all();
