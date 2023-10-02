@@ -25,6 +25,7 @@
 #include "task/task.h"
 #include "task/process.h"
 #include "isr80h/isr80h.h"
+#include "io/tsc.h"           // L129 - udelay
 #include "keyboard/keyboard.h"
 #include "fs/file.h"
 #include "fs/pparser.h"
@@ -337,17 +338,16 @@ void kernel_main(void)
     // test program actually runs. SIMPLE.BIN was kept for the
     // L67-L69 ATA-PIO speed budget; with fread under test we
     // accept the longer load time.
-    // Lecture 122 - drop a "Test Window" onto the screen and
-    // spin so the L119-L122 chain (window_create + the new
-    // helpers in window.c) can be observed visually under OVMF.
-    // The earlier process_load_switch + task_run_first_ever_task
-    // pair is commented out for the duration of the window-test
-    // window; L154+ wires user programs back through windows.
-    struct window* win = window_create(graphics_screen_info(), NULL,
-                                       "Test Window",
-                                       50, 50, 300, 300, 0, 4395327);
-    (void)win;
-    while(1){
+    // Lecture 129 - swap the L122 Test Window for a 10-second
+    // udelay smoke loop. Each iteration prints "Another second"
+    // and waits 1_000_000 microseconds. With the L128 frequency
+    // overshoot bug still live the messages burst near-instantly
+    // (canary); a frequency-fix follow-up will make them tick at
+    // 1 Hz. After the loop the normal user-program path is
+    // restored.
+    for(size_t i = 0; i < 10; i++){
+        print("Another second\n");
+        udelay(1000000);
     }
     int res = process_load_switch("@:/blank.elf", &p);
     if(res != SAMOS_ALL_OK){
