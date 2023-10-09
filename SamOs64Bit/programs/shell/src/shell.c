@@ -172,8 +172,9 @@ static int shell_cat_one(const char* name){
         return -1;
     }
 
-    // The kernel's fread does not advance the file position, so
-    // seek to each chunk explicitly.
+    // Seek to each chunk explicitly. Written when the kernel's fread
+    // did not advance the position; since the storage work it does, so the seek
+    // is redundant but harmless.
     char chunk[SHELL_CAT_CHUNK + 1];
     uint32_t offset = 0;
     int res = 0;

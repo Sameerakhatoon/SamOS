@@ -160,11 +160,20 @@ int disk_create_new(struct disk_driver* driver,
     disk->driver_private = driver_private_data;
     disk->hardware_disk  = hardware_disk;
 
+    // A disk that could not be registered is freed here; the
+    // caller frees its own private data on any error.
+    res = vector_push(disk_vector, &disk);
+    if(res < 0){
+        if(type == SAMOS_DISK_TYPE_REAL){
+            kfree(disk->cache);
+        }
+        kfree(disk);
+        return res;
+    }
     if(disk_out){
         *disk_out = disk;
     }
-    res = vector_push(disk_vector, &disk);
-    return res < 0 ? res : 0;
+    return 0;
 }
 
 int disk_mount_all(){

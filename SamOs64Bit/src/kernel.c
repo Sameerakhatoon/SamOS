@@ -424,8 +424,8 @@ void kernel_main(void)
     boot_marker_set(BM_STAGE_FS_RESOLVED, 0);
     disk_search_and_init();
 
-    // Lecture 82 - now that disks are enumerated, parse GPT
-    // headers and spin up a virtual disk per partition.
+    // Lecture 82 - moved the GPT scan into disk_search_and_init;
+    // gpt_init only reports whether any GPT partition was found.
     gpt_init();
 
     // Marker fires AFTER gpt_init so the value reflects whether

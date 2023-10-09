@@ -8,7 +8,10 @@
 #include "memory/paging/paging.h"
 #include "memory/memory.h"
 #include "io/pci.h"
+#include "io/serial.h"
 #include "kernel.h"
+#include "disk/poll.h"
+#include "boot/cmdline.h"
 
 static uint32_t nvme_disk_driver_read_reg(struct disk* d, uint32_t off);
 static void     nvme_disk_driver_write_reg(struct disk* d, uint32_t off, uint32_t val);
@@ -33,13 +36,44 @@ static inline void nvme_write64(struct nvme_disk_driver_private* p, uint32_t off
     nvme_write32(p, off + 4, (uint32_t)(v >> 32));
 }
 
+// Completion and ready waits use the TSC
+// deadline PATA and AHCI use (disk/poll.h), not a loop count that a
+// busy host runs through before the device answers.
+static bool nvme_cqe_phase_is(struct nvme_completion_queue_entry* cqe, uint32_t phase){
+    uint32_t st = ((volatile struct nvme_completion_queue_entry*)cqe)->status_phase_and_command_identifier;
+    return ((st >> 16) & 1u) == phase;
+}
+
+static bool nvme_wait_phase(struct nvme_completion_queue_entry* cqe, uint32_t phase){
+    uint64_t deadline = disk_poll_deadline();
+    while(!nvme_cqe_phase_is(cqe, phase)){
+        if(disk_poll_expired(deadline)){
+            return nvme_cqe_phase_is(cqe, phase);
+        }
+        __asm__ __volatile__("pause");
+    }
+    return true;
+}
+
+// Waits for CSTS.RDY to read `ready`.
+static bool nvme_wait_ready(struct nvme_disk_driver_private* p, uint32_t ready){
+    uint64_t deadline = disk_poll_deadline();
+    while((nvme_read32(p, NVME_BASE_REGISTER_CSTS) & 1u) != ready){
+        if(disk_poll_expired(deadline)){
+            return (nvme_read32(p, NVME_BASE_REGISTER_CSTS) & 1u) == ready;
+        }
+        __asm__ __volatile__("pause");
+    }
+    return true;
+}
+
 // Lecture 192 - submit one admin command and busy-wait for its
 // completion phase bit to flip. Returns 0 on status==0, -EIO on
 // nonzero status, -ETIMEOUT on poll exhaustion.
-static int nvme_admin_cmd_raw(struct disk* disk, uint8_t opcode, uint32_t nsid,
+// Takes the private data, not a disk, so the controller can
+// be brought up before a disk is registered for it.
+static int nvme_admin_cmd_raw(struct nvme_disk_driver_private* p, uint8_t opcode, uint32_t nsid,
                               uint64_t prp1, uint32_t cdw10, uint32_t cdw11){
-    struct nvme_disk_driver_private* p = disk_private_data_driver(disk);
-
     struct nvme_submission_queue_entry cmd;
     memset(&cmd, 0, sizeof(cmd));
     cmd.command   = NVME_COMMAND_BITS_BUILD(opcode, 0, 0, 0);
@@ -56,18 +90,10 @@ static int nvme_admin_cmd_raw(struct disk* disk, uint8_t opcode, uint32_t nsid,
         new_tail = 0;
     }
     p->submission_queue.tail = new_tail;
-    nvme_disk_driver_write_reg(disk, NVME_SQTDBL_OFFSET(0, p->doorbell_stride),
-                               p->submission_queue.tail);
+    nvme_write32(p, NVME_SQTDBL_OFFSET(0, p->doorbell_stride), p->submission_queue.tail);
 
     struct nvme_completion_queue_entry* cqe = p->completion_queue.ptr + p->completion_queue.head;
-    for(int i = 0; i < 1000000; ++i){
-        uint32_t st = cqe->status_phase_and_command_identifier;
-        if(((st >> 16) & 1u) == p->admin_cq_phase){
-            break;
-        }
-        __asm__ __volatile__("pause");
-    }
-    if(((cqe->status_phase_and_command_identifier >> 16) & 1u) != p->admin_cq_phase){
+    if(!nvme_wait_phase(cqe, p->admin_cq_phase)){
         return -ETIMEOUT;
     }
 
@@ -80,23 +106,22 @@ static int nvme_admin_cmd_raw(struct disk* disk, uint8_t opcode, uint32_t nsid,
         p->admin_cq_phase ^= 1u;
     }
     p->completion_queue.head = new_head;
-    nvme_disk_driver_write_reg(disk, NVME_CQTDBL_OFFSET(0, p->doorbell_stride),
-                               p->completion_queue.head);
+    nvme_write32(p, NVME_CQTDBL_OFFSET(0, p->doorbell_stride), p->completion_queue.head);
 
     return (status == 0u) ? 0 : -EIO;
 }
 
-static int nvme_create_io_cq(struct disk* disk, uint16_t qid, uint16_t qsize, void* cq_virt){
+static int nvme_create_io_cq(struct nvme_disk_driver_private* p, uint16_t qid, uint16_t qsize, void* cq_virt){
     uint32_t cdw10 = ((uint32_t)(qsize - 1) << 16) | qid;
     uint32_t cdw11 = 0x01;
-    return nvme_admin_cmd_raw(disk, 0x05, 0, paging_kernel_virt_to_phys(cq_virt), cdw10, cdw11);
+    return nvme_admin_cmd_raw(p, 0x05, 0, paging_kernel_virt_to_phys(cq_virt), cdw10, cdw11);
 }
 
-static int nvme_create_io_sq(struct disk* disk, uint16_t qid, uint16_t qsize,
+static int nvme_create_io_sq(struct nvme_disk_driver_private* p, uint16_t qid, uint16_t qsize,
                              void* sq_virt, uint16_t cqid){
     uint32_t cdw10 = ((uint32_t)(qsize - 1) << 16) | qid;
     uint32_t cdw11 = ((uint32_t)cqid << 16) | 0x01;
-    return nvme_admin_cmd_raw(disk, 0x01, 0, paging_kernel_virt_to_phys(sq_virt), cdw10, cdw11);
+    return nvme_admin_cmd_raw(p, 0x01, 0, paging_kernel_virt_to_phys(sq_virt), cdw10, cdw11);
 }
 
 static struct nvme_disk_driver_private* nvme_pci_private_new(struct pci_device* dev){
@@ -109,10 +134,21 @@ static struct nvme_disk_driver_private* nvme_pci_private_new(struct pci_device* 
     return p;
 }
 
+// Stop the controller before its queues are freed, so it
+// cannot DMA into memory that has been handed out again.
 static void nvme_pci_device_private_free(struct nvme_disk_driver_private* p){
-    if(p){
-        kfree(p);
+    if(!p){
+        return;
     }
+    if(p->base_address_nvme){
+        nvme_write32(p, NVME_BASE_REGISTER_CC, nvme_read32(p, NVME_BASE_REGISTER_CC) & ~1u);
+        nvme_wait_ready(p, 0);
+    }
+    kfree(p->submission_queue.ptr);
+    kfree(p->completion_queue.ptr);
+    kfree(p->io_submission_queue.ptr);
+    kfree(p->io_completion_queue.ptr);
+    kfree(p);
 }
 
 static bool nvme_pci_device(struct pci_device* dev){
@@ -212,14 +248,7 @@ static int nvme_admin_send_command(struct disk* disk, uint8_t opcode,
                                p->submission_queue.tail);
 
     struct nvme_completion_queue_entry* cqe = p->completion_queue.ptr + p->completion_queue.head;
-    for(int i = 0; i < 1000000; ++i){
-        uint32_t st = cqe->status_phase_and_command_identifier;
-        if(((st >> 16) & 1u) == p->admin_cq_phase){
-            break;
-        }
-        __asm__ __volatile__("pause");
-    }
-    if(((cqe->status_phase_and_command_identifier >> 16) & 1u) != p->admin_cq_phase){
+    if(!nvme_wait_phase(cqe, p->admin_cq_phase)){
         return -ETIMEOUT;
     }
     uint32_t st = cqe->status_phase_and_command_identifier;
@@ -269,28 +298,14 @@ static int nvme_disk_driver_mount_for_device(struct disk_driver* driver,
         return -EIO;
     }
 
-    struct disk* disk = NULL;
-    res = disk_create_new(driver, NULL, SAMOS_DISK_TYPE_REAL, 0, 0,
-                          NVME_SECTOR_SIZE, p, &disk);
-    if(res < 0){
-        nvme_pci_device_private_free(p);
-        return res;
-    }
-
-    {
-        uint32_t cc = nvme_disk_driver_read_reg(disk, NVME_BASE_REGISTER_CC);
-        cc &= ~1u;
-        nvme_disk_driver_write_reg(disk, NVME_BASE_REGISTER_CC, cc);
-        for(int i = 0; i < 5000; ++i){
-            if((nvme_disk_driver_read_reg(disk, NVME_BASE_REGISTER_CSTS) & 1u) == 0){
-                break;
-            }
-            __asm__ __volatile__("pause");
-        }
-        if((nvme_disk_driver_read_reg(disk, NVME_BASE_REGISTER_CSTS) & 1u) != 0){
-            nvme_disk_driver_unmount(disk);
-            return -EIO;
-        }
+    // The disk is registered only once the controller is up.
+    // It used to be registered first, and a failure below freed `p`
+    // while the disk stayed in the disk vector, so the partition scan
+    // read through freed memory.
+    nvme_write32(p, NVME_BASE_REGISTER_CC, nvme_read32(p, NVME_BASE_REGISTER_CC) & ~1u);
+    if(!nvme_wait_ready(p, 0)){
+        res = -EIO;
+        goto fail;
     }
 
     uint64_t cap  = nvme_read64(p, NVME_BASE_REGISTER_CAP);
@@ -306,13 +321,13 @@ static int nvme_disk_driver_mount_for_device(struct disk_driver* driver,
     p->submission_queue.ptr = kpage_zalloc(sizeof(*p->submission_queue.ptr) * p->submission_queue.size);
     p->completion_queue.ptr = kpage_zalloc(sizeof(*p->completion_queue.ptr) * p->completion_queue.size);
     if(!p->submission_queue.ptr || !p->completion_queue.ptr){
-        nvme_disk_driver_unmount(disk);
-        return -ENOMEM;
+        res = -ENOMEM;
+        goto fail;
     }
 
     uint32_t aqa = ((p->completion_queue.size - 1u) << 16) |
                    ((p->submission_queue.size - 1u) << 0);
-    nvme_disk_driver_write_reg(disk, NVME_BASE_REGISTER_AQA, aqa);
+    nvme_write32(p, NVME_BASE_REGISTER_AQA, aqa);
     nvme_write64(p, NVME_BASE_REGISTER_ASQ, paging_kernel_virt_to_phys(p->submission_queue.ptr));
     nvme_write64(p, NVME_BASE_REGISTER_ACQ, paging_kernel_virt_to_phys(p->completion_queue.ptr));
 
@@ -323,18 +338,12 @@ static int nvme_disk_driver_mount_for_device(struct disk_driver* driver,
         cc |= (6u << 16);  // IOSQES
         cc |= (4u << 20);  // IOCQES
         cc |= 1u;          // CC.EN
-        nvme_disk_driver_write_reg(disk, NVME_BASE_REGISTER_CC, cc);
+        nvme_write32(p, NVME_BASE_REGISTER_CC, cc);
     }
 
-    for(int i = 0; i < 5000; ++i){
-        if((nvme_disk_driver_read_reg(disk, NVME_BASE_REGISTER_CSTS) & 1u) == 1u){
-            break;
-        }
-        __asm__ __volatile__("pause");
-    }
-    if((nvme_disk_driver_read_reg(disk, NVME_BASE_REGISTER_CSTS) & 1u) != 1u){
-        nvme_disk_driver_unmount(disk);
-        return -EIO;
+    if(!nvme_wait_ready(p, 1)){
+        res = -EIO;
+        goto fail;
     }
 
     p->admin_cq_phase = 1;
@@ -353,21 +362,40 @@ static int nvme_disk_driver_mount_for_device(struct disk_driver* driver,
     p->io_submission_queue.ptr = kpage_zalloc(sizeof(struct nvme_submission_queue_entry) * io_entries);
     p->io_completion_queue.ptr = kpage_zalloc(sizeof(struct nvme_completion_queue_entry) * io_entries);
     if(!p->io_submission_queue.ptr || !p->io_completion_queue.ptr){
-        nvme_disk_driver_unmount(disk);
-        return -ENOMEM;
+        res = -ENOMEM;
+        goto fail;
     }
 
-    res = nvme_create_io_cq(disk, 1, io_entries, p->io_completion_queue.ptr);
+    res = nvme_create_io_cq(p, 1, io_entries, p->io_completion_queue.ptr);
     if(res < 0){
-        nvme_disk_driver_unmount(disk);
-        return res;
+        goto fail;
     }
-    res = nvme_create_io_sq(disk, 1, io_entries, p->io_submission_queue.ptr, 1);
+    res = nvme_create_io_sq(p, 1, io_entries, p->io_submission_queue.ptr, 1);
     if(res < 0){
-        nvme_disk_driver_unmount(disk);
-        return res;
+        goto fail;
     }
+    // e2e hook (162): fail at the last step, where the old code had
+    // long since registered the disk.
+    if(boot_cmdline_has("samos.nvme_fail_test")){
+        res = -EIO;
+        goto fail;
+    }
+
+    struct disk* disk = NULL;
+    res = disk_create_new(driver, NULL, SAMOS_DISK_TYPE_REAL, 0, 0,
+                          NVME_SECTOR_SIZE, p, &disk);
+    if(res < 0){
+        goto fail;
+    }
+    serial_write("nvme: controller ready, disk ");
+    serial_write(itoa(disk->id));
+    serial_write("\n");
     return 0;
+
+fail:
+    nvme_pci_device_private_free(p);
+    serial_write("nvme: mount failed, no disk registered\n");
+    return res;
 }
 
 // Lecture 194 - IO submit-and-poll. Build a one-or-two-page
@@ -421,14 +449,7 @@ static int nvme_io_submit_and_poll(struct disk* disk, uint8_t opcode,
                                p->io_submission_queue.tail);
 
     struct nvme_completion_queue_entry* cqe = p->io_completion_queue.ptr + p->io_completion_queue.head;
-    for(int i = 0; i < 1000000; ++i){
-        uint32_t st = cqe->status_phase_and_command_identifier;
-        if(((st >> 16) & 1u) == p->io_completion_queue.phase){
-            break;
-        }
-        __asm__ __volatile__("pause");
-    }
-    if(((cqe->status_phase_and_command_identifier >> 16) & 1u) != p->io_completion_queue.phase){
+    if(!nvme_wait_phase(cqe, p->io_completion_queue.phase)){
         return -ETIMEOUT;
     }
 

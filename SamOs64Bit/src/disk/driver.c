@@ -1,5 +1,6 @@
 // Lecture 184 - disk-driver registry. Stores known drivers in a
-// vector, dispatches mount + mount_partition through the vtable.
+// vector, dispatches mount through the vtable (the storage work dropped
+// mount_partition).
 
 #include "driver.h"
 #include "lib/vector/vector.h"

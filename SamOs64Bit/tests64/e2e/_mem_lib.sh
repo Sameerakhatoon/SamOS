@@ -6,7 +6,8 @@
 #   Boots with -m <ram>, then asserts that kernel_main got past the
 #   multiheap, that every BM_FEATURE_MEM_* self-test passed (a
 #   failing one stores its memtest.c line number instead of 1), and
-#   that the frame allocator manages at least <min_mib> MiB.
+#   that the frame allocator manages at least <min_mib> MiB, including
+#   the reclaimed loader memory.
 
 mem_boot_and_check() {
     local ram=$1 seconds=$2 min_mib=$3
@@ -24,4 +25,6 @@ mem_boot_and_check() {
     # once the storage and core tracks fix them.
     expect_stage_value 183 -le 4 "slab objects leaked per process cycle ($ram)"
     expect_stage_value 181 -ge "$min_mib" "frame allocator manages >= $min_mib MiB ($ram)"
+    # Loader and boot-services memory goes to the PFA.
+    expect_serial '^pfa: reclaimed [1-9][0-9]* KiB of loader memory' "loader memory reclaimed ($ram)"
 }

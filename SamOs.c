@@ -221,7 +221,7 @@ EFI_STATUS ReadFileFromCurrentFilesystem(CHAR16* FileName,
 // Choose a framebuffer mode the kernel can draw to. The graphics code
 // writes 32-bit B,G,R,X pixels. Keep the firmware's current mode if it
 // is BGRX; otherwise switch to the BGRX mode closest to 1024x768; fall
-// back to an RGBX mode (colours swapped, still usable). BitMask and
+// back to an RGBX mode (the kernel swaps red and blue). BitMask and
 // BltOnly modes have no linear framebuffer we understand.
 STATIC EFI_STATUS SetupGraphics(struct samos_boot_info* Info)
 {

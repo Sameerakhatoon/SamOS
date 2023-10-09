@@ -13,8 +13,15 @@
 #include "memory/memory.h"
 #include "lib/vector/vector.h"
 #include "status.h"
+#include "io/serial.h"
+#include "boot/boot_info.h"
+#include "boot/cmdline.h"
 
 static struct graphics_info* loaded_graphics_info  = NULL;
+
+// The drawing code works in B,G,R,X. On an RGBX framebuffer
+// red and blue are swapped on the way to the screen.
+static bool fb_swap_red_blue = false;
 
 // Every graphics_info ever registered. The root is index 0; child
 // surfaces will land here as the system grows.
@@ -185,6 +192,11 @@ void graphics_paste_pixels_to_framebuffer(struct graphics_info* src_info,
             if(have_key &&
                memcmp(&p, &src_info->transparency_key, sizeof(p)) == 0){
                 continue;
+            }
+            if(fb_swap_red_blue){
+                uint8_t red = p.red;
+                p.red  = p.blue;
+                p.blue = red;
             }
 
             screen->framebuffer[(dst_abs_y + ly) * screen->pixels_per_scanline
@@ -791,10 +803,32 @@ void graphics_info_children_free(struct graphics_info* graphics_info){
     }
 }
 
+// The loader's pixel format. e2e hook: samos.fb_format=<n>
+// on the command line overrides it.
+static uint32_t graphics_fb_format(void){
+    const char* forced = boot_cmdline_value("samos.fb_format");
+    if(forced && isdigit(*forced)){
+        return (uint32_t)tonumericdigit(*forced);
+    }
+    return samos_boot_info_ptr->fb_format;
+}
+
 void graphics_setup(struct graphics_info* main_graphics_info){
     if(loaded_graphics_info){
         panic("The graphic system was already loaded\n");
     }
+
+    // BGRX is drawn as is, RGBX with red and blue swapped.
+    // Anything else (a bitmask or BLT-only mode from another loader)
+    // is refused: the screen is left alone and the "framebuffer" stays
+    // plain RAM, so everything above keeps working without output.
+    uint32_t fb_format = graphics_fb_format();
+    bool fb_usable = fb_format == SAMOS_FB_FORMAT_BGRX || fb_format == SAMOS_FB_FORMAT_RGBX;
+    fb_swap_red_blue = fb_format == SAMOS_FB_FORMAT_RGBX;
+    serial_write("graphics: framebuffer format ");
+    serial_write(itoa((int)fb_format));
+    serial_write(fb_usable ? (fb_swap_red_blue ? " (RGBX)\n" : " (BGRX)\n")
+                           : " not supported, no screen output\n");
 
     real_framebuffer                     = main_graphics_info->framebuffer;
     real_framebuffer_width               = main_graphics_info->horizontal_resolution;
@@ -822,9 +856,11 @@ void graphics_setup(struct graphics_info* main_graphics_info){
 
     // The pages were direct-map RAM; now they alias the
     // framebuffer. Those RAM frames stay allocated, unused.
-    paging_map_to(kernel_desc(), new_framebuffer_memory, real_framebuffer,
-                  real_framebuffer_end,
-                  PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_NO_EXECUTE);
+    if(fb_usable){
+        paging_map_to(kernel_desc(), new_framebuffer_memory, real_framebuffer,
+                      real_framebuffer_end,
+                      PAGING_IS_WRITEABLE | PAGING_IS_PRESENT | PAGING_NO_EXECUTE);
+    }
 
     loaded_graphics_info = main_graphics_info;
 

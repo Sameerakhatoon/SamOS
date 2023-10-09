@@ -94,6 +94,11 @@ void pfa_init(void){
         panic("pfa: the firmware memory map is empty\n");
     }
 
+    // Loader and boot-services memory joins the usable RAM.
+    print("pfa: reclaimed ");
+    print(itoa((int)(e820_reclaim_loader_memory() / 1024)));
+    print(" KiB of loader memory\n");
+
     // Span of usable RAM above the low limit.
     uintptr_t lo = UINTPTR_MAX;
     uintptr_t hi = 0;
@@ -117,9 +122,10 @@ void pfa_init(void){
     }
     size_t frames = (hi - lo) / PFA_FRAME_SIZE;
 
-    // Memory in use at kernel entry that the loader still reports as
-    // usable (it takes the map before loading us; the UEFI boot work fixes that,
-    // and these reservations stay correct either way):
+    // Memory in use at kernel entry. Since the UEFI boot work the loader reports
+    // both as SAMOS_E820_TYPE_KERNEL (0x1001), so they are not in
+    // the usable set above; the reservations stay as a second line
+    // of defence against a loader that reports them as type 1:
     //   - the kernel image (.text through .bss) loaded at 1 MiB, and
     //     the boot stack kernel.asm points rsp at, growing down from
     //     SAMOS_BOOT_STACK_TOP towards the image;

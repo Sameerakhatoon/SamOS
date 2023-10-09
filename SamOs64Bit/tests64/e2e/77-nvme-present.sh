@@ -23,4 +23,7 @@ boot_and_dump 25
 # slot we use is the new BM_FEATURE_NVMe_PRESENT (96), which
 # kernel_selftest sets from a dedicated probe.
 expect_stage_value 96 -eq 1 "PCI list contains NVMe controller (0x01:0x08)"
+# The controller comes up (TSC-deadline waits) and only then
+# is its disk registered.
+expect_serial '^nvme: controller ready, disk [0-9]+$' "NVMe controller up, disk registered"
 echo "PASS: e2e/77 nvme present"

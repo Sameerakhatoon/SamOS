@@ -190,9 +190,8 @@ int ps2_mouse_init(struct mouse* mouse){
     outb(PS2_COMMUNICATION_PORT, (uint8_t)config_val);
 
     idt_register_interrupt_callback(ISR_MOUSE_INTERRUPT, ps2_mouse_handle_interrupt);
-    // NOTE: IRQ_PS2_MOUSE is 11 in idt/irq.h (the enum is off by one
-    // from IRQ 9 up). The core session owns that fix; until it lands
-    // IRQ12 stays masked and no packets arrive.
+    // IRQ_PS2_MOUSE is 12 (the interrupt work fixed the off-by-one enum), and
+    // IRQ_enable unmasks the master's cascade line for slave IRQs.
     IRQ_enable(IRQ_PS2_MOUSE);
     return 0;
 }

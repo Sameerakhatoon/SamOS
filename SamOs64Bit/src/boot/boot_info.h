@@ -30,9 +30,10 @@
 #define SAMOS_E820_TYPE_RECLAIMABLE       0x1000   // loader + boot services, free once boot_info is consumed
 #define SAMOS_E820_TYPE_KERNEL            0x1001   // kernel window and boot data area
 
-// boot_info.fb_format
-#define SAMOS_FB_FORMAT_BGRX     0   // byte order B,G,R,X (what the graphics code assumes)
-#define SAMOS_FB_FORMAT_RGBX     1   // byte order R,G,B,X (colours come out swapped)
+// boot_info.fb_format. The kernel refuses any other value and runs
+// without screen output.
+#define SAMOS_FB_FORMAT_BGRX     0   // byte order B,G,R,X (what the graphics code draws)
+#define SAMOS_FB_FORMAT_RGBX     1   // byte order R,G,B,X (the kernel swaps red and blue)
 
 struct samos_boot_info {
     unsigned long long magic;
