@@ -128,5 +128,8 @@ int                   graphics_pixel_get(struct graphics_info* graphics_info,
                                          uint32_t x, uint32_t y,
                                          struct framebuffer_pixel* pixel_out);
 void                  graphics_info_free(struct graphics_info* graphics_in);
+// Lecture 135 - recompute starting_x/y from relative_x/y +
+// parent.starting_x/y, then recurse into children.
+void                  graphics_info_recalculate(struct graphics_info* graphics_info);
 
 #endif
