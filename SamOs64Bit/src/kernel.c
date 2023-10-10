@@ -345,9 +345,17 @@ void kernel_main(void)
     // (canary); a frequency-fix follow-up will make them tick at
     // 1 Hz. After the loop the normal user-program path is
     // restored.
-    for(size_t i = 0; i < 10; i++){
-        print("Another second\n");
-        udelay(1000000);
+    // Lecture 136 - swap the L129 udelay loop for a real
+    // window_create test and spin so the L134 position helper
+    // + L135 recalculate + L136 redraw chain are exercised
+    // under OVMF.
+    struct window* win = window_create(graphics_screen_info(), NULL,
+                                       "Test Window",
+                                       100, 100, 200, 200, 0, -1);
+    if(!win){
+        print("WIndow creation problem\n");   // sic - upstream typo
+    }
+    while(1){
     }
     int res = process_load_switch("@:/blank.elf", &p);
     if(res != SAMOS_ALL_OK){

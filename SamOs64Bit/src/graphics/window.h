@@ -120,6 +120,8 @@ void            window_event_handler_register(struct window* window,
                                               WINDOW_EVENT_HANDLER handler);
 void            window_event_handler_unregister(struct window* window,
                                                 WINDOW_EVENT_HANDLER handler);
+// Lecture 136 - graphics_redraw the window's root surface.
+void            window_redraw(struct window* window);
 
 // Lecture 134 - move a window.
 int             window_position_set(struct window* window, size_t new_x, size_t new_y);
