@@ -57,6 +57,68 @@ void ps2_mouse_write(uint8_t byte){
     outb(PS2_COMMUNICATION_PORT, byte);
 }
 
+// Lecture 138 - IRQ12 packet handler. Accumulates a 3- or
+// 4-byte packet, extracts dx/dy (dy inverted so up is
+// positive) plus the left/right/middle button bits, clamps
+// the new position against the screen, and forwards the move
+// + click into the L132/L133 mouse_* API.
+void ps2_mouse_handle_interrupt(struct interrupt_frame* frame){
+    (void)frame;
+    static uint8_t packet[4];
+    static int     packet_byte_count = 0;
+    size_t  ps2_mouse_packet_size = ps2_mouse_private.mouse_packet_size;
+    uint8_t data                  = insb(PS2_COMMUNICATION_PORT);
+
+    if(packet_byte_count == 0 && !(data & 0x08)){
+        return;
+    }
+
+    packet[packet_byte_count++] = data;
+    if(packet_byte_count < (int)ps2_mouse_packet_size){
+        return;
+    }
+    packet_byte_count = 0;
+
+    int8_t dx = (int8_t)packet[1];
+    int8_t dy = (int8_t)packet[2];
+    dy = -dy;
+    uint8_t left_button   =  packet[0]       & 0x01;
+    uint8_t right_button  = (packet[0] >> 1) & 0x01;
+    uint8_t middle_button = (packet[0] >> 2) & 0x01;
+
+    int8_t scroll = 0;
+    if(ps2_mouse_packet_size == 4){
+        scroll = (int8_t)packet[3];
+    }
+    if(scroll && left_button && right_button && middle_button){
+        // supress warnings.   (sic - upstream typo)
+    }
+
+    int x_result = (int)ps2_mouse.coords.x + dx;
+    int y_result = (int)ps2_mouse.coords.y + dy;
+    struct graphics_info* screen = graphics_screen_info();
+    if(x_result < 0) x_result = 0;
+    if(y_result < 0) y_result = 0;
+    if(x_result > (int)(screen->width  - ps2_mouse.graphic.width)){
+        x_result = screen->width  - ps2_mouse.graphic.width;
+    }
+    if(y_result > (int)(screen->height - ps2_mouse.graphic.height)){
+        y_result = screen->height - ps2_mouse.graphic.height;
+    }
+    mouse_position_set(&ps2_mouse, x_result, y_result);
+
+    MOUSE_CLICK_TYPE click_type = MOUSE_NO_CLICK;
+    if(left_button){
+        click_type = MOUSE_LEFT_BUTTON_CLICKED;
+    }else if(right_button){
+        click_type = MOUSE_RIGHT_BUTTON_CLICKED;
+    }
+    if(click_type != MOUSE_NO_CLICK){
+        mouse_click(&ps2_mouse, click_type);
+    }
+    mouse_moved(&ps2_mouse);
+}
+
 int ps2_mouse_init(struct mouse* mouse){
     int res = 0;
     idt_register_interrupt_callback(ISR_MOUSE_INTERRUPT, ps2_mouse_handle_interrupt);
