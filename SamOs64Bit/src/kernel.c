@@ -355,6 +355,11 @@ void kernel_main(void)
     if(!win){
         print("WIndow creation problem\n");   // sic - upstream typo
     }
+
+    // Lecture 140 - enable interrupts so the L137-L138 PS/2
+    // mouse driver can actually fire IRQ12 callbacks.
+    enable_interrupts();
+
     while(1){
     }
     int res = process_load_switch("@:/blank.elf", &p);

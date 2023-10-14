@@ -52,8 +52,11 @@ void idt_clock(){
 }
 
 void no_interrupt_handler(){
-    // Acknowledge the interrupt to the master PIC.
+    // Acknowledge the interrupt to the master PIC. Lecture 140
+    // also EOIs the slave PIC so IRQ8..15 (which include the
+    // PS/2 mouse on IRQ12) are not held permanently masked.
     outb(0x20, 0x20);
+    outb(0xA0, 0x20);
 }
 
 // Lecture 52 - full task-aware handler restored.
@@ -76,11 +79,18 @@ void no_interrupt_handler(){
 void interrupt_handler(int interrupt, struct interrupt_frame* frame){
     kernel_page();
     if(interrupt_callbacks[interrupt] != 0){
-        task_current_save_state(frame);
+        // Lecture 140 - the L52 task_current_save_state +
+        // task_page pair is commented out because the L140
+        // window-test boot path runs the kernel without ever
+        // entering a user task; restoring the user PML4 then
+        // pagefaults. Restore once we are back on the user
+        // program path.
+        // task_current_save_state(frame);
         interrupt_callbacks[interrupt](frame);
     }
-    task_page();
+    // task_page();
     outb(0x20, 0x20);
+    outb(0xA0, 0x20);
 }
 
 int idt_register_interrupt_callback(int interrupt, INTERRUPT_CALLBACK_FUNCTION interrupt_callback){
