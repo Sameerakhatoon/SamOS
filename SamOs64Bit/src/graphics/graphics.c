@@ -6,6 +6,7 @@
 
 #include "graphics.h"
 #include "graphics/image/image.h"
+#include "graphics/window.h"   // L141 - struct window for click hit-test
 #include "kernel.h"
 #include "memory/paging/paging.h"
 #include "memory/heap/kheap.h"
@@ -40,6 +41,52 @@ bool graphics_bounds_check(struct graphics_info* graphics_info, int x, int y){
 
 struct graphics_info* graphics_screen_info(void){
     return loaded_graphics_info;
+}
+
+// L141 forward decls so graphics_mouse_click_handler can call
+// the helpers defined later in this file.
+struct graphics_info* graphics_get_at_screen_position(size_t x, size_t y,
+                                                     struct graphics_info* ignored,
+                                                     bool top_first);
+
+// Lecture 141 - bubble a click up the surface tree. If the
+// surface has a click handler installed, fire it. Otherwise
+// adjust the coords to parent-relative and recurse.
+void graphics_mouse_click(struct graphics_info* graphics,
+                          size_t rel_x_clicked, size_t rel_y_clicked,
+                          MOUSE_CLICK_TYPE type){
+    if(graphics->event_handlers.mouse_click){
+        graphics->event_handlers.mouse_click(graphics, rel_x_clicked, rel_y_clicked, type);
+        return;
+    }
+    if(graphics->parent){
+        graphics_mouse_click(graphics->parent,
+                             graphics->relative_x + rel_x_clicked,
+                             graphics->relative_y + rel_y_clicked,
+                             type);
+    }
+}
+
+// Lecture 141 - mouse-click event handler registered with the
+// mouse subsystem. Resolves the click coordinate to a leaf
+// graphics surface (skipping the mouse window's own subtree
+// so the cursor sprite never gets clicked) and bubbles up.
+void graphics_mouse_click_handler(struct mouse* mouse, int clicked_x, int clicked_y,
+                                  MOUSE_CLICK_TYPE type){
+    struct graphics_info* graphics =
+        graphics_get_at_screen_position(clicked_x, clicked_y,
+                                        mouse->graphic.window->root_graphics, true);
+    if(graphics){
+        if(clicked_x < (int)graphics->starting_x
+           || clicked_y < (int)graphics->starting_y){
+            return;
+        }
+        size_t rel_x = clicked_x - graphics->starting_x;
+        size_t rel_y = clicked_y - graphics->starting_y;
+        if(graphics_bounds_check(graphics, rel_x, rel_y)){
+            graphics_mouse_click(graphics, rel_x, rel_y, type);
+        }
+    }
 }
 
 // Copy a (clipped) rectangle from `src_info->pixels` to the
@@ -343,6 +390,111 @@ void graphics_redraw_graphics_to_screen(struct graphics_info* relative_graphics,
                            abs_screen_x, abs_screen_y, width, height);
 }
 
+// Lecture 141 - public setter to wire a per-surface click
+// handler. Used by L143+ window code to handle clicks against
+// title bar / body / close button.
+void graphics_click_handler_set(struct graphics_info* graphics,
+                                GRAPHICS_MOUSE_CLICK_FUNCTION click_function){
+    graphics->event_handlers.mouse_click = click_function;
+}
+
+// Lecture 141 - is `elem` (or any of its ancestors) the
+// `ignored` subtree root? Used by the click hit-test to skip
+// the mouse-cursor window.
+bool graphics_is_in_ignored_branch(struct graphics_info* elem,
+                                   struct graphics_info* ignored){
+    if(!ignored){
+        return false;
+    }
+    for(struct graphics_info* cur = elem; cur != NULL; cur = cur->parent){
+        if(cur == ignored){
+            return true;
+        }
+    }
+    return false;
+}
+
+// Lecture 141 - find the leaf surface containing the point
+// (x, y), skipping `ignored`. `top_first` flips the children
+// iteration so the front-most window wins.
+//
+// Upstream bugs preserved verbatim:
+//   - the fallback `return graphics` check ANDs
+//     `x < graphics->starting_y + graphics->width` (should be
+//     `+ graphics->width`, but compares against
+//     `starting_y`). Almost always wrong.
+//   - top_first uses `x >=`, top_first=false uses `x >` for
+//     the left edge. Inconsistent.
+struct graphics_info* graphics_get_child_at_position(struct graphics_info* graphics,
+                                                    size_t x, size_t y,
+                                                    struct graphics_info* ignored,
+                                                    bool top_first){
+    if(graphics_is_in_ignored_branch(graphics, ignored)){
+        return NULL;
+    }
+
+    size_t total = vector_count(graphics->children);
+    struct graphics_info* result = NULL;
+    if(top_first){
+        for(size_t i = total; i > 0; i--){
+            size_t index = i - 1;
+            struct graphics_info* child = NULL;
+            vector_at(graphics->children, index, &child, sizeof(child));
+            if(!child){
+                continue;
+            }
+            if(graphics_is_in_ignored_branch(child, ignored)){
+                continue;
+            }
+            if(x >= child->starting_x && x < child->starting_x + child->width
+               && y >= child->starting_y && y < child->starting_y + child->height){
+                result = graphics_get_child_at_position(child, x, y, ignored, top_first);
+                if(result){
+                    return result;
+                }
+                return child;
+            }
+        }
+    }else{
+        for(size_t i = 0; i < total; i++){
+            struct graphics_info* child = NULL;
+            vector_at(graphics->children, i, &child, sizeof(child));
+            if(!child){
+                continue;
+            }
+            if(graphics_is_in_ignored_branch(child, ignored)){
+                continue;
+            }
+            if(x > child->starting_x && x < child->starting_x + child->width
+               && y >= child->starting_y && y < child->starting_y + child->height){
+                result = graphics_get_child_at_position(child, x, y, ignored, top_first);
+                if(result){
+                    return result;
+                }
+                return child;
+            }
+        }
+    }
+
+    // Upstream bug preserved: the right-edge check uses
+    // `starting_y + graphics->width` rather than
+    // `starting_x + graphics->width`. Carried verbatim.
+    if(x >= graphics->starting_x
+       && x < graphics->starting_y + graphics->width
+       && y >= graphics->starting_y
+       && y < graphics->starting_y + graphics->height){
+        return graphics;
+    }
+    return NULL;
+}
+
+struct graphics_info* graphics_get_at_screen_position(size_t x, size_t y,
+                                                     struct graphics_info* ignored,
+                                                     bool top_first){
+    return graphics_get_child_at_position(graphics_screen_info(),
+                                          x, y, ignored, top_first);
+}
+
 void graphics_redraw(struct graphics_info* g){
     if(!g){
         return;
@@ -631,4 +783,15 @@ void graphics_setup(struct graphics_info* main_graphics_info){
     // Without this the screen keeps the L86 green sanity paint
     // until something else triggers a redraw.
     graphics_redraw_all();
+}
+
+// Lecture 141 - stage-two graphics init: register the click
+// handler with the mouse subsystem so any click is routed
+// into graphics_mouse_click_handler.
+//
+// Upstream-typo function name preserved verbatim
+// ("grpahics_setup_stage_two" - the `r` and `a` are swapped).
+void grpahics_setup_stage_two(struct graphics_info* main_graphics_info){
+    (void)main_graphics_info;
+    mouse_register_click_handler(NULL, graphics_mouse_click_handler);
 }
