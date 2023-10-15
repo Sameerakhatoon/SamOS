@@ -89,6 +89,39 @@ void graphics_mouse_click_handler(struct mouse* mouse, int clicked_x, int clicke
     }
 }
 
+// Lecture 142 - move event bubble up.
+void graphics_mouse_move(struct graphics_info* graphics,
+                         size_t moved_rel_x, size_t moved_rel_y,
+                         size_t moved_abs_x, size_t moved_abs_y){
+    if(graphics->event_handlers.mouse_move){
+        graphics->event_handlers.mouse_move(graphics,
+                                            moved_rel_x, moved_rel_y,
+                                            moved_abs_x, moved_abs_y);
+        return;
+    }
+    if(graphics->parent){
+        graphics_mouse_move(graphics->parent,
+                            graphics->relative_x + moved_rel_x,
+                            graphics->relative_y + moved_rel_y,
+                            moved_abs_x, moved_abs_y);
+    }
+}
+
+// Lecture 142 - mouse-subsystem move handler. Mirrors the
+// click-handler shape: find leaf, translate, bubble.
+void graphics_mouse_move_handler(struct mouse* mouse, int moved_x, int moved_y){
+    struct graphics_info* graphics =
+        graphics_get_at_screen_position(moved_x, moved_y,
+                                        mouse->graphic.window->root_graphics, true);
+    if(graphics){
+        size_t rel_x = moved_x - graphics->starting_x;
+        size_t rel_y = moved_y - graphics->starting_y;
+        if(graphics_bounds_check(graphics, rel_x, rel_y)){
+            graphics_mouse_move(graphics, rel_x, rel_y, moved_x, moved_y);
+        }
+    }
+}
+
 // Copy a (clipped) rectangle from `src_info->pixels` to the
 // physical framebuffer at (dst_abs_x, dst_abs_y). Skips pixels
 // matching src_info->transparency_key. Black-key means "no key".
@@ -396,6 +429,12 @@ void graphics_redraw_graphics_to_screen(struct graphics_info* relative_graphics,
 void graphics_click_handler_set(struct graphics_info* graphics,
                                 GRAPHICS_MOUSE_CLICK_FUNCTION click_function){
     graphics->event_handlers.mouse_click = click_function;
+}
+
+// Lecture 142 - move-handler setter.
+void graphics_move_handler_set(struct graphics_info* graphics,
+                               GRAPHICS_MOUSE_MOVE_FUNCTION move_function){
+    graphics->event_handlers.mouse_move = move_function;
 }
 
 // Lecture 141 - is `elem` (or any of its ancestors) the
@@ -794,4 +833,6 @@ void graphics_setup(struct graphics_info* main_graphics_info){
 void grpahics_setup_stage_two(struct graphics_info* main_graphics_info){
     (void)main_graphics_info;
     mouse_register_click_handler(NULL, graphics_mouse_click_handler);
+    // Lecture 142 - also wire the move handler.
+    mouse_register_move_handler(NULL, graphics_mouse_move_handler);
 }

@@ -155,4 +155,16 @@ bool                  graphics_is_in_ignored_branch(struct graphics_info* elem,
 // sic - upstream typo "grpahics_setup_stage_two" preserved.
 void                  grpahics_setup_stage_two(struct graphics_info* main_graphics_info);
 
+// Lecture 142 - move handler routing. Upstream's L142 decl in
+// graphics.h has a stray comma (`GRAPHICS_MOUSE_MOVE_FUNCTION,
+// move_function`) that would fail to parse; we write the
+// correct shape here and document the diff.
+void                  graphics_move_handler_set(struct graphics_info* graphics,
+                                                GRAPHICS_MOUSE_MOVE_FUNCTION move_function);
+void                  graphics_mouse_move(struct graphics_info* graphics,
+                                          size_t moved_rel_x, size_t moved_rel_y,
+                                          size_t moved_abs_x, size_t moved_abs_y);
+void                  graphics_mouse_move_handler(struct mouse* mouse,
+                                                  int moved_x, int moved_y);
+
 #endif
