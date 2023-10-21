@@ -428,6 +428,36 @@ bool window_owns_graphics(struct window* win, struct graphics_info* graphics){
     return graphics_has_ancestor(graphics, win->root_graphics);
 }
 
+// Lecture 147 - title bar click router. Decides between:
+// (a) click landed on the close button -> window_close;
+// (b) click landed elsewhere on the title bar -> toggle the
+//     window_moving drag-state (click again to drop).
+void window_title_bar_clicked(struct graphics_info* title_graphics,
+                              size_t rel_x, size_t rel_y,
+                              MOUSE_CLICK_TYPE type){
+    (void)type;
+    struct window* win = window_get_from_graphics(title_graphics);
+    if(win){
+        size_t close_btn_x        = win->title_bar_components.close_btn.x;
+        size_t close_btn_y        = win->title_bar_components.close_btn.y;
+        size_t close_btn_width    = win->title_bar_components.close_btn.width;
+        size_t close_btn_height   = win->title_bar_components.close_btn.height;
+        size_t close_btn_ending_x = close_btn_x + close_btn_width;
+        size_t close_btn_ending_y = close_btn_y + close_btn_height;
+        if(rel_x >= close_btn_x && rel_x < close_btn_ending_x
+           && rel_y >= close_btn_y && rel_y < close_btn_ending_y){
+            window_close(win);
+            win = NULL;
+        }else{
+            if(window_moving == win){
+                window_moving = NULL;
+            }else{
+                window_moving = win;
+            }
+        }
+    }
+}
+
 // Lecture 134 - move a window. Computes the strip uncovered
 // by the move (left-or-right band + top-or-bottom band) and
 // asks the L93 regional redraw to repaint just those rather
@@ -635,6 +665,8 @@ struct window* window_create(struct graphics_info* graphics_info,
             res = -ENOMEM;
             goto out;
         }
+        // Lecture 147 - title bar click router.
+        graphics_click_handler_set(title_bar_graphics_info, window_title_bar_clicked);
         window->title_bar_graphics = title_bar_graphics_info;
 
         border_left_graphics_info =
