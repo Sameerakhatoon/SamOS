@@ -50,6 +50,8 @@ int window_autoincrement_id_current = 100000;
 size_t window_get_largest_zindex(void);
 int    window_recalculate_zindexes(void);
 bool   window_owns_graphics(struct window* win, struct graphics_info* graphics);
+// L148 calls window_event_push from above its body; forward decl.
+void   window_event_push(struct window* window, struct window_event* event);
 
 int window_system_initialize(void){
     int res = 0;
@@ -90,11 +92,31 @@ struct window* window_get_from_graphics(struct graphics_info* graphics){
     return window;
 }
 
-// Lecture 143 - move-event handler is a TODO stub; L144+
-// will wire it up.
+// Lecture 148 - screen-level mouse move handler. If a window
+// is being dragged (`window_moving` set), recentre it on the
+// new cursor position. The first commit emitted the
+// WINDOW_EVENT_TYPE_MOUSE_MOVE event AFTER the if-block, which
+// dereferenced window_moving even when it was NULL; the L148
+// bugfix commit moves the event_push inside the if.
 void window_screen_mouse_move_handler(struct mouse* mouse,
                                       int moved_to_x, int moved_to_y){
-    (void)mouse; (void)moved_to_x; (void)moved_to_y;
+    (void)mouse;
+    if(window_moving){
+        if(window_moving->title_bar_graphics){
+            size_t abs_x = moved_to_x - (window_moving->title_bar_graphics->width  / 2);
+            size_t abs_y = moved_to_y - (window_moving->title_bar_graphics->height / 2);
+            window_position_set(window_moving, abs_x, abs_y);
+        }
+
+        size_t rel_x = moved_to_x - window_moving->root_graphics->starting_x;
+        size_t rel_y = moved_to_y - window_moving->root_graphics->starting_y;
+
+        struct window_event event = {0};
+        event.type        = WINDOW_EVENT_TYPE_MOUSE_MOVE;
+        event.data.move.x = rel_x;
+        event.data.move.y = rel_y;
+        window_event_push(window_moving, &event);
+    }
 }
 
 // Lecture 143 - find the window whose root rectangle contains
@@ -428,6 +450,16 @@ bool window_owns_graphics(struct window* win, struct graphics_info* graphics){
     return graphics_has_ancestor(graphics, win->root_graphics);
 }
 
+// Lecture 148 - title bar move handler. Stub for now; the
+// real drag work happens inside
+// window_screen_mouse_move_handler.
+void window_title_bar_mouse_moved(struct graphics_info* title_graphics,
+                                  size_t rel_x, size_t rel_y,
+                                  size_t abs_x, size_t abs_y){
+    (void)title_graphics; (void)rel_x; (void)rel_y;
+    (void)abs_x; (void)abs_y;
+}
+
 // Lecture 147 - title bar click router. Decides between:
 // (a) click landed on the close button -> window_close;
 // (b) click landed elsewhere on the title bar -> toggle the
@@ -667,6 +699,8 @@ struct window* window_create(struct graphics_info* graphics_info,
         }
         // Lecture 147 - title bar click router.
         graphics_click_handler_set(title_bar_graphics_info, window_title_bar_clicked);
+        // Lecture 148 - title bar move handler (stub).
+        graphics_move_handler_set(title_bar_graphics_info, window_title_bar_mouse_moved);
         window->title_bar_graphics = title_bar_graphics_info;
 
         border_left_graphics_info =
