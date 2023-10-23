@@ -134,4 +134,20 @@ int             window_position_set(struct window* window, size_t new_x, size_t 
 void            window_click(struct window* window, int rel_x, int rel_y,
                              MOUSE_CLICK_TYPE type);
 
+// Lecture 145 - helpers.
+bool            window_owns_graphics(struct window* win,
+                                     struct graphics_info* graphics);
+struct window*  window_focused(void);
+struct window*  window_get_from_graphics(struct graphics_info* graphics);
+void            window_redraw_region(struct window* window,
+                                     int x, int y, int width, int height);
+void            window_redraw_body_region(struct window* window,
+                                          int x, int y, int width, int height);
+void            window_title_set(struct window* window, const char* title);
+
+// Lecture 149 - dispatch an event to every handler registered
+// on the window. Used by L143-L148 dispatch sites and by
+// userspace code in L153+.
+void            window_event_push(struct window* window, struct window_event* event);
+
 #endif
