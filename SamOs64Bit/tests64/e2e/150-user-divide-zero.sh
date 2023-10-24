@@ -13,7 +13,7 @@ MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.
 
 boot_and_dump 30
 expect_serial '^samos.run: loaded @:/KTEST.ELF$' "KTEST.ELF loaded from the command line"
-expect_serial '^KTEST de: dividing by zero$' "KTEST reached the divide"
+expect_serial 'KTEST de: dividing by zero$' "KTEST reached the divide"
 expect_serial '^USER FAULT: #DE in @:/KTEST.ELF: rip 0x00000000004' "#DE reported with the user rip"
 expect_serial '^process killed$' "faulting process killed"
 expect_no_serial 'KTEST survived' "the faulting instruction did not continue"

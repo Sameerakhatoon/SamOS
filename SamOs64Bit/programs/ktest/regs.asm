@@ -1,13 +1,13 @@
 ; ktest register round trip.
 ;
 ; uint64_t ktest_regs_roundtrip(uint64_t* in, uint64_t* out,
-;                               uint64_t cmd, uint64_t arg)
+;                               uint64_t cmd)
 ;
 ; Loads rbx, rcx, rdx, rsi, rdi, rbp, r8-r15 from in[1..14] and
-; xmm0-15 from in[15..46], pushes `arg` twice (stack items 0 and 1),
-; does int 0x80 with rax = cmd, then stores rax and the same
-; registers to out[0..46]. Everything except rax (the syscall result)
-; must come back unchanged.
+; xmm0-15 from in[15..46], does int 0x80 with rax = cmd, then stores
+; rax and the same registers to out[0..46]. Everything except rax
+; (the syscall result) must come back unchanged. The syscall
+; arguments are the loaded rdi (in[5]) and rsi (in[4]).
 
 [BITS 64]
 section .text
@@ -24,9 +24,7 @@ ktest_regs_roundtrip:
     push r15
     push rsi                           ; out
     push rdx                           ; cmd
-    push rcx                           ; stack item 1
-    push rcx                           ; stack item 0
-    ; [rsp] arg, [rsp+8] arg, [rsp+16] cmd, [rsp+24] out
+    ; [rsp] cmd, [rsp+8] out
 
     movdqu xmm0,  [rdi + XMM_BASE + 0*16]
     movdqu xmm1,  [rdi + XMM_BASE + 1*16]
@@ -60,11 +58,11 @@ ktest_regs_roundtrip:
     mov r13, [rax + 96]
     mov r14, [rax + 104]
     mov r15, [rax + 112]
-    mov rax, [rsp + 16]                ; cmd
+    mov rax, [rsp]                     ; cmd
     int 0x80
 
-    push rax                           ; out is now at [rsp+32]
-    mov rax, [rsp + 32]
+    push rax                           ; out is now at [rsp+16]
+    mov rax, [rsp + 16]
     pop qword [rax + 0]
     mov [rax + 8],   rbx
     mov [rax + 16],  rcx
@@ -97,7 +95,7 @@ ktest_regs_roundtrip:
     movdqu [rax + XMM_BASE + 14*16], xmm14
     movdqu [rax + XMM_BASE + 15*16], xmm15
 
-    add rsp, 32
+    add rsp, 16
     pop r15
     pop r14
     pop r13
@@ -109,26 +107,27 @@ ktest_regs_roundtrip:
 ; Raw syscalls for the isolation probes.
 ;
 ; long ktest_syscall(long cmd, long a0, long a1, long a2, long a3)
-;   a0 is stack item 0, a1 item 1, ... Returns rax.
+;   a0..a3 go in rdi, rsi, rdx, r10. Returns rax.
 global ktest_syscall
 ktest_syscall:
-    push r8                            ; item 3
-    push rcx                           ; item 2
-    push rdx                           ; item 1
-    push rsi                           ; item 0
     mov rax, rdi
+    mov rdi, rsi
+    mov rsi, rdx
+    mov rdx, rcx
+    mov r10, r8
     int 0x80
-    add rsp, 32
     ret
 
 ; long ktest_syscall_rsp(long cmd, unsigned long rsp)
-;   int 0x80 with the user rsp set to `rsp` (a kernel address, say),
-;   so the kernel reads the arguments from there.
+;   int 0x80 with the user rsp set to `rsp` (a kernel address, say).
+;   at first the kernel read the arguments from there; since the scheduler work it
+;   reads none from the stack, and `rsp` is also the first argument.
 global ktest_syscall_rsp
 ktest_syscall_rsp:
     push rbx
     mov rbx, rsp
     mov rax, rdi
+    mov rdi, rsi
     mov rsp, rsi
     int 0x80
     mov rsp, rbx

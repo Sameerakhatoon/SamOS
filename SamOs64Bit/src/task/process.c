@@ -23,8 +23,19 @@
 #include "uaccess.h"       // Checked user access
 #include <stdbool.h>
 
-// The current process that is running.
-struct process* current_process = 0;
+// The process the keyboard falls back to when no process
+// window has the focus: the one the kernel or a parent started in
+// the foreground (process_load_switch), handed back to the parent
+// when it exits.
+static struct process* foreground_process = 0;
+
+// Exited processes whose parent has not waited for them yet.
+// Everything but the struct itself is already freed.
+static struct process* zombie_head = 0;
+
+// Pids are never reused (slots are), so a wait for an old pid
+// cannot reap a newer process in the same slot.
+static int process_next_pid = 1;
 
 // Lecture 114 - process slot table is now a vector. The
 // fixed-size array is retired; process_system_init builds the
@@ -142,18 +153,14 @@ int process_window_event_modify_for_userspace(struct window_event* event){
     return res;
 }
 
-// Lecture 162 - exposed so the event handler below can swap the
-// active process on focus.
-void process_current_set(struct process* process){
-    current_process = process;
-}
-
-// Lecture 162 - kernel-side reaction to a focus event: make this
-// process current so the next scheduler tick lands in it.
+// Lecture 162 - kernel-side reaction to a focus event. The book made
+// the focused process "current" (process_current_set), which was
+// also what the keyboard pushed to, whichever task was running.
+// keyboard_push asks window_focused() for the owner instead,
+// so there is nothing to record here.
 int process_window_event_handler_event_focus(struct window* window,
                                              struct process* process,
                                              struct window_event* event){
-    process_current_set(process);
     return 0;
 }
 
@@ -228,11 +235,13 @@ int process_window_event_handler(struct window* window, struct window_event* eve
 
 // Lecture 161 - drain one window event from the head of the ring.
 // Returns -EOUTOFRANGE when empty, -EINVARG on bad args, 0 on
-// success. Note: upstream reads index 0 unconditionally and
-// decrements total_unpopped without advancing a read head. The
-// producer side overwrites at `index % MAX`; the consumer always
-// reads slot 0. Preserved verbatim - L162+ wires the loop in
-// userland and will reveal whether this is intended.
+// success.
+//
+// SamOS divergence: the
+// book read slot 0 every time and the producer wrote at `index`,
+// which nothing ever advanced, so every event landed in slot 0 and
+// a reader got the newest event once per event pushed. `index` is
+// now the read head; events sit at index .. index + total_unpopped.
 int process_pop_window_event(struct process* process, struct window_event* event_out){
     int res = -EOUTOFRANGE;
     if(!process || !event_out){
@@ -240,7 +249,10 @@ int process_pop_window_event(struct process* process, struct window_event* event
         goto out;
     }
     if(process->window_events.total_unpopped > 0){
-        vector_at(process->window_events.vector, 0, event_out, sizeof(struct window_event));
+        vector_at(process->window_events.vector, process->window_events.index,
+                  event_out, sizeof(struct window_event));
+        process->window_events.index =
+            (process->window_events.index + 1) % PROCESS_MAX_WINDOW_EVENTS_RECORDED;
         process->window_events.total_unpopped--;
         res = 0;
     }
@@ -250,9 +262,16 @@ out:
 
 // Lecture 161 - enqueue a window event into the ring. We null
 // the kernel-only window pointer before storing because the
-// event might outlive that pointer's mapping.
+// event might outlive that pointer's mapping. A full ring
+// drops its oldest event.
 int process_push_window_event(struct process* process, struct window_event* event){
-    int element_index = process->window_events.index % PROCESS_MAX_WINDOW_EVENTS_RECORDED;
+    if(process->window_events.total_unpopped == PROCESS_MAX_WINDOW_EVENTS_RECORDED){
+        process->window_events.index =
+            (process->window_events.index + 1) % PROCESS_MAX_WINDOW_EVENTS_RECORDED;
+        process->window_events.total_unpopped--;
+    }
+    size_t element_index = (process->window_events.index + process->window_events.total_unpopped) %
+                           PROCESS_MAX_WINDOW_EVENTS_RECORDED;
     struct window_event event_copy = *event;
     event_copy.window = NULL;
     vector_overwrite(process->window_events.vector, element_index, &event_copy, sizeof(event_copy));
@@ -384,8 +403,29 @@ void process_set_sysout_window(struct process* process, struct process_window* w
     process->sysout_win = win;
 }
 
+// The process of the running task. The book kept a separate
+// current_process that focus events and process_switch moved, so it
+// could name a process that was not running.
 struct process* process_current(){
-    return current_process;
+    struct task* task = task_current();
+    return task ? task->process : NULL;
+}
+
+struct process* process_foreground(void){
+    return foreground_process;
+}
+
+// The live process with this pid, or NULL.
+struct process* process_get_by_pid(int pid){
+    size_t total = vector_count(process_vector);
+    for(size_t i = 0; i < total; i++){
+        struct process* process = NULL;
+        vector_at(process_vector, i, &process, sizeof(process));
+        if(process && process->pid == pid){
+            return process;
+        }
+    }
+    return NULL;
 }
 
 struct process* process_get(int process_id){
@@ -904,6 +944,7 @@ int process_load_for_slot(const char* filename, struct process** process, int pr
     strncpy(_process->filename, filename, sizeof(_process->filename));
     _process->stack = program_stack_ptr;
     _process->id    = process_slot;
+    _process->pid   = process_next_pid++;
 
     // Lecture 113 - the paging descriptor moves from task to
     // process. Create it BEFORE task_new so process_map_memory
@@ -970,33 +1011,63 @@ static int process_free_program_data(struct process* process){
     return res;
 }
 
-// Lecture 114 - vector walk; same effect as the old array
-// loop, plus an early break when vector_at fails (it should
-// not, but we follow upstream's defensive shape).
-void process_switch_to_any(void){
-    size_t total_process_slots = vector_count(process_vector);
-    for(size_t i = 0; i < total_process_slots; i++){
-        struct process* process = NULL;
-        int res = vector_at(process_vector, i, &process, sizeof(&process));
-        if(res < 0){
-            break;
-        }
-        if(process){
-            process_switch(process);
-            return;
-        }
-    }
-    panic("No processes to switch too\n");
-}
-
 // Lecture 114 - null the slot via vector_overwrite rather than
 // poking the array.
+// The book then switched current_process to any other process
+// and panicked with "No processes to switch too" when none was left
+// (a dead end). The scheduler idles instead.
 static void process_unlink(struct process* process){
     struct process* null_process = NULL;
     vector_overwrite(process_vector, process->id, &null_process, sizeof(&null_process));
-    if(current_process == process){
-        process_switch_to_any();
+}
+
+// An exiting parent: its live children lose their parent
+// (nobody will wait for them), its unreaped zombies are freed.
+static void process_orphan_children(struct process* parent){
+    size_t total = vector_count(process_vector);
+    for(size_t i = 0; i < total; i++){
+        struct process* process = NULL;
+        vector_at(process_vector, i, &process, sizeof(process));
+        if(process && process->parent == parent){
+            process->parent = NULL;
+        }
     }
+    struct process** link = &zombie_head;
+    while(*link){
+        struct process* zombie = *link;
+        if(zombie->parent == parent){
+            *link = zombie->zombie_next;
+            kfree(zombie);
+        } else {
+            link = &zombie->zombie_next;
+        }
+    }
+}
+
+// Waitpid for `parent`: pid > 0 is that child, anything else
+// any child. Returns the child's pid and its status in *status_out,
+// 0 if a matching child is still running, -ECHILD if there is none.
+int process_reap_child(struct process* parent, int pid, int* status_out){
+    for(struct process** link = &zombie_head; *link; link = &(*link)->zombie_next){
+        struct process* zombie = *link;
+        if(zombie->parent != parent || (pid > 0 && zombie->pid != pid)){
+            continue;
+        }
+        int child_pid = zombie->pid;
+        *status_out = zombie->exit_status;
+        *link = zombie->zombie_next;
+        kfree(zombie);
+        return child_pid;
+    }
+    size_t total = vector_count(process_vector);
+    for(size_t i = 0; i < total; i++){
+        struct process* process = NULL;
+        vector_at(process_vector, i, &process, sizeof(process));
+        if(process && process->parent == parent && (pid <= 0 || process->pid == pid)){
+            return 0;
+        }
+    }
+    return -ECHILD;
 }
 
 // Lecture 162 - the close-event handler calls here once a window
@@ -1004,26 +1075,36 @@ static void process_unlink(struct process* process){
 // vector, return its userspace mirror to the process heap,
 // kfree the kernel record.
 void process_window_closed(struct process* process, struct process_window* proc_win){
+    // Print must not go on writing to a closed window's
+    // terminal.
+    if(process->sysout_win == proc_win){
+        process->sysout_win = NULL;
+    }
     vector_pop_element(process->windows, &proc_win, sizeof(proc_win));
     process_free(process, proc_win->user_win);
     kfree(proc_win);
 }
 
+// Every way a process ends: exit(status), a fault (128 +
+// vector), kill (128 + 9). The parent's waitpid gets the status.
+int process_exit(struct process* process, int status){
+    process->exit_status = status;
+    return process_terminate(process);
+}
+
+// Frees the process completely. The book never freed
+// struct process, and bailed out half way on the first error. A
+// process with a live parent stays as a zombie (only the struct)
+// until the parent waits for it or exits; the others are freed here.
+// `process` must not be used after this call.
 int process_terminate(struct process* process){
     int res = 0;
     // Lecture 154 - tear down owned windows first; their kernel
     // backing buffers live in kheap and need to come down before
     // process_terminate_allocations walks the per-process arena.
     process_close_windows(process);
-    res = process_terminate_allocations(process);
-    if(res < 0){
-        goto out;
-    }
-
+    process_terminate_allocations(process);
     res = process_free_program_data(process);
-    if(res < 0){
-        goto out;
-    }
 
     // Lecture 105 - close every file the process opened. Safe
     // before the rest of the teardown because process_close_file_handles
@@ -1061,7 +1142,9 @@ int process_terminate(struct process* process){
     }
 
     kfree(process->stack);
+    process->stack = NULL;
     task_free(process->task);
+    process->task = NULL;
 
     // Lecture 113 - the paging descriptor moved off the task,
     // so its free now lives here.
@@ -1071,8 +1154,22 @@ int process_terminate(struct process* process){
     }
 
     process_unlink(process);
+    process_orphan_children(process);
+    if(foreground_process == process){
+        foreground_process = process->parent;
+    }
 
-out:
+    struct process* parent = process->parent;
+    if(parent){
+        process->zombie_next = zombie_head;
+        zombie_head = process;
+        if(parent->task && parent->task->state == TASK_BLOCKED &&
+           parent->task->block_reason == TASK_BLOCK_WAIT){
+            task_wake(parent->task);
+        }
+    } else {
+        kfree(process);
+    }
     return res;
 }
 
@@ -1310,8 +1407,11 @@ out:
     return res;
 }
 
+// "switch" now means: this process takes the keyboard when
+// no process window has the focus. It runs when the scheduler
+// picks it.
 int process_switch(struct process* process){
-    current_process = process;
+    foreground_process = process;
     return 0;
 }
 

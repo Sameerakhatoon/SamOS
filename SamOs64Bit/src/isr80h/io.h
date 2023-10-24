@@ -6,5 +6,6 @@ struct trap_frame;
 void* isr80h_command1_print(struct trap_frame* frame);
 void* isr80h_command2_getkey(struct trap_frame* frame);
 void* isr80h_command3_putchar(struct trap_frame* frame);
+void* isr80h_command32_getkey_block(struct trap_frame* frame);
 
 #endif

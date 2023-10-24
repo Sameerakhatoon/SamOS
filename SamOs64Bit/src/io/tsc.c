@@ -6,49 +6,86 @@
 //
 // tsc.o and tsc.asm.o (which provides `tsc_microseconds`, L129)
 // are both linked into the kernel.
+//
+// SamOS divergence. The book:
+//   - multiplied the result by 10^6 a second time, so "microseconds"
+//     were seconds and udelay(us) waited about us seconds;
+//   - asked leaves 0x15 and 0x16 without checking the CPUID max
+//     leaf, so on a CPU without them (QEMU's Skylake-Server stops at
+//     0xd) it read whatever the highest leaf returns;
+//   - divided by a frequency of 0 when neither leaf had one.
+// tsc_init now measures the TSC against PIT channel 2 and keeps the
+// CPUID value only when it agrees with the measurement.
 
 #include "tsc.h"
 #include "cpuid.h"
+#include "pit.h"
+#include "kernel.h"
+#include "string/string.h"
+
+// Used when neither CPUID nor the PIT gives a frequency, so nothing
+// ever divides by zero. Timing is then only roughly right.
+#define TSC_FALLBACK_HZ  1000000000ULL
 
 uint64_t tsc_freq_val = 0;
+static TIME_TSC tsc_boot = 0;
 
-TIME_TSC tsc_frequency(void){
-    if(tsc_freq_val != 0){
-        return tsc_freq_val;
-    }
-
-    uint32_t eax, ebx, ecx, edx;
+static uint64_t tsc_cpuid_frequency(void){
+    uint32_t max, eax, ebx, ecx, edx;
     uint64_t tsc_freq = 0;
+    cpuid(0, 0, &max, &ebx, &ecx, &edx);
 
     // CPUID leaf 0x15 - TSC and bus frequency ratio.
-    cpuid(0x15, 0, &eax, &ebx, &ecx, &edx);
-    if(eax != 0 && ebx != 0 && ecx != 0){
-        tsc_freq = ((uint64_t)ecx * (uint64_t)ebx) / (uint64_t)eax;
+    if(max >= 0x15){
+        cpuid(0x15, 0, &eax, &ebx, &ecx, &edx);
+        if(eax != 0 && ebx != 0 && ecx != 0){
+            tsc_freq = ((uint64_t)ecx * (uint64_t)ebx) / (uint64_t)eax;
+        }
     }
 
     // Fallback - CPUID leaf 0x16 base frequency (MHz).
-    if(tsc_freq == 0){
+    if(tsc_freq == 0 && max >= 0x16){
         cpuid(0x16, 0, &eax, &ebx, &ecx, &edx);
         if(eax != 0){
             tsc_freq = (uint64_t)eax * 1000000ULL;
         }
     }
+    return tsc_freq;
+}
 
-    // Upstream bug preserved verbatim: the leaf-0x16 branch
-    // already converts from MHz to Hz with the 1000000ULL
-    // multiply. This second `tsc_freq *= 1000000` overshoots
-    // the real frequency by 10^6 on every path. The leaf-0x15
-    // branch produces Hz directly (`(ecx * ebx) / eax`) and
-    // also gets the spurious multiply. The whole subsystem is
-    // off-by-1e6 until upstream fixes it; udelay then waits
-    // 10^6 times too few cycles, which on a typical 3 GHz core
-    // makes `udelay(us)` wait about `us` SECONDS instead (the
-    // cycle count is 10^6 too large) and overflow for large `us`.
-    // The file IS linked, so this is live; the scheduler work fixes it.
-    tsc_freq *= 1000000;
-    tsc_freq_val = tsc_freq;
+static void tsc_print_khz(const char* label, uint64_t hz){
+    print(label);
+    print(itoa((int)(hz / 1000)));
+    print(" kHz");
+}
 
-    return (TIME_TSC)tsc_freq;
+void tsc_init(void){
+    uint64_t cpuid_hz = tsc_cpuid_frequency();
+    uint64_t pit_hz   = pit_measure_tsc_hz();
+    uint64_t hz       = pit_hz;
+    // CPUID is exact when it is right; trust it within 2 % of the
+    // measurement.
+    if(cpuid_hz && pit_hz &&
+       cpuid_hz > pit_hz - pit_hz / 50 && cpuid_hz < pit_hz + pit_hz / 50){
+        hz = cpuid_hz;
+    }
+    if(!hz){
+        hz = cpuid_hz ? cpuid_hz : TSC_FALLBACK_HZ;
+    }
+    tsc_freq_val = hz;
+    tsc_boot     = read_tsc();
+
+    tsc_print_khz("tsc: cpuid ", cpuid_hz);
+    tsc_print_khz(", pit ", pit_hz);
+    tsc_print_khz(", using ", hz);
+    print("\n");
+}
+
+TIME_TSC tsc_frequency(void){
+    if(tsc_freq_val == 0){
+        tsc_init();
+    }
+    return (TIME_TSC)tsc_freq_val;
 }
 
 TIME_TSC read_tsc(void){
@@ -70,10 +107,19 @@ TIME_SECONDS tsc_seconds(void){
     return miliseconds / 1000;
 }
 
+// Time since tsc_init, for the uptime syscall.
+TIME_MICROSECONDS tsc_uptime_microseconds(void){
+    TIME_TSC hz    = tsc_frequency();
+    TIME_TSC delta = read_tsc() - tsc_boot;
+    return (delta / hz) * 1000000ULL + ((delta % hz) * 1000000ULL) / hz;
+}
+
+// Split so microseconds * frequency cannot overflow.
 void udelay(TIME_MICROSECONDS microseconds){
     TIME_TSC tsc_freq       = tsc_frequency();
     TIME_TSC start          = read_tsc();
-    TIME_TSC cycles_to_wait = (microseconds * tsc_freq) / 1000000;
+    TIME_TSC cycles_to_wait = (microseconds / 1000000) * tsc_freq +
+                              ((microseconds % 1000000) * tsc_freq) / 1000000;
     while((read_tsc() - start) < cycles_to_wait){
         __asm__ volatile("pause");
     }

@@ -86,10 +86,26 @@ struct process_window {
     struct window*                   kernel_win;
 };
 
+// Exit status of a process that did not call exit itself:
+// 128 + the exception vector for a fault, 128 + 9 for kill (the
+// shell's 128 + signal convention).
+#define PROCESS_EXIT_FAULT_BASE  128
+#define PROCESS_EXIT_KILLED      (128 + 9)
+
 struct process {
-    uint16_t           id;
+    uint16_t           id;        // slot in process_vector (reused)
     char               filename[SAMOS_MAX_PATH];
     struct task*       task;
+
+    // Getpid, waitpid and kill. pids are never reused.
+    // parent is NULL for a process the kernel started, or once the
+    // parent has exited. A process that exits while its parent
+    // lives stays on the zombie list (zombie_next) with only
+    // exit_status, until the parent's waitpid frees it.
+    int                pid;
+    struct process*    parent;
+    int                exit_status;
+    struct process*    zombie_next;
 
     // Lecture 113 - paging descriptor moves from task to process.
     // task_paging_desc() and task_switch() now forward through
@@ -141,9 +157,9 @@ struct process {
 
     // Lecture 160 - bounded ring of window_events delivered to
     // this process. `vector` is pre-grown to
-    // PROCESS_MAX_WINDOW_EVENTS_RECORDED; producers
-    // vector_overwrite at `index`, consumers drain
-    // total_unpopped down.
+    // PROCESS_MAX_WINDOW_EVENTS_RECORDED. `index` is the read
+    // head; producers vector_overwrite at index + total_unpopped,
+    // consumers read at index and advance it.
     struct {
         struct vector* vector;
         size_t         index;
@@ -169,6 +185,12 @@ int              process_inject_arguments(struct process* process, struct comman
 int              process_terminate(struct process* process);
 struct process*  process_current();
 struct process*  process_get(int process_id);
+
+// Exit status, wait, pids, keyboard fallback.
+int              process_exit(struct process* process, int status);
+int              process_reap_child(struct process* parent, int pid, int* status_out);
+struct process*  process_get_by_pid(int pid);
+struct process*  process_foreground(void);
 
 // Lecture 105 - per-process fopen wrapper + lookup.
 int                            process_fopen(struct process* process,

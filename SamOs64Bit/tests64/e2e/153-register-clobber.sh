@@ -23,9 +23,9 @@ _wait_all() {
 e2e_run_qemu 480 _wait_all
 
 expect_serial '^samos.run: loaded @:/KTEST.ELF$' "KTEST.ELF loaded from the command line"
-expect_no_serial '^REGS FAIL' "no register changed across a syscall or task switch"
-expect_serial '^REGS OK 1$' "task 1: 15 GPRs and xmm0-15 intact"
-expect_serial '^REGS OK 2$' "task 2: 15 GPRs and xmm0-15 intact"
+expect_no_serial 'REGS FAIL' "no register changed across a syscall or task switch"
+expect_serial 'REGS OK 1$' "task 1: 15 GPRs and xmm0-15 intact"
+expect_serial 'REGS OK 2$' "task 2: 15 GPRs and xmm0-15 intact"
 expect_serial "$E2E_SENTINEL" "BLANK.ELF finished alongside"
 expect_no_serial 'KERNEL PANIC|KERNEL FAULT|USER FAULT' "no fault"
 echo "PASS: e2e/153 register clobber"

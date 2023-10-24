@@ -21,9 +21,9 @@
 // the kernel fstat for the underlying fd.
 void* isr80h_command14_fstat(struct trap_frame* frame){
     (void)frame;
-    long fd = (long)task_get_stack_item(task_current(), 0);
+    long fd = (long)isr80h_arg(frame, 0);
     struct file_stat* virt_file_stat_addr =
-        (struct file_stat*)task_get_stack_item(task_current(), 1);
+        (struct file_stat*)isr80h_arg(frame, 1);
     return (void*)(long)process_fstat(task_current()->process, fd, virt_file_stat_addr);
 }
 
@@ -31,9 +31,9 @@ void* isr80h_command14_fstat(struct trap_frame* frame){
 //   0: fd, 1: offset, 2: whence
 void* isr80h_command13_fseek(struct trap_frame* frame){
     (void)frame;
-    long fd     = (long)task_get_stack_item(task_current(), 0);
-    long offset = (long)task_get_stack_item(task_current(), 1);
-    long whence = (long)task_get_stack_item(task_current(), 2);
+    long fd     = (long)isr80h_arg(frame, 0);
+    long offset = (long)isr80h_arg(frame, 1);
+    long whence = (long)isr80h_arg(frame, 2);
     return (void*)(long)process_fseek(task_current()->process, fd, offset, whence);
 }
 
@@ -47,10 +47,10 @@ void* isr80h_command13_fseek(struct trap_frame* frame){
 void* isr80h_command12_fread(struct trap_frame* frame){
     (void)frame;
     int    res             = 0;
-    void*  buffer_virt_addr = task_get_stack_item(task_current(), 0);
-    size_t size            = (size_t)task_get_stack_item(task_current(), 1);
-    size_t count           = (size_t)task_get_stack_item(task_current(), 2);
-    long   fd              = (long)task_get_stack_item(task_current(), 3);
+    void*  buffer_virt_addr = isr80h_arg(frame, 0);
+    size_t size            = (size_t)isr80h_arg(frame, 1);
+    size_t count           = (size_t)isr80h_arg(frame, 2);
+    long   fd              = (long)isr80h_arg(frame, 3);
 
     res = process_fread(task_current()->process, buffer_virt_addr, size, count, fd);
     return (void*)(int64_t)res;
@@ -62,7 +62,7 @@ void* isr80h_command12_fread(struct trap_frame* frame){
 // record off the per-process vector.
 void* isr80h_command11_fclose(struct trap_frame* frame){
     (void)frame;
-    int64_t fd = (int64_t)task_get_stack_item(task_current(), 0);
+    int64_t fd = (int64_t)isr80h_arg(frame, 0);
     process_fclose(task_current()->process, fd);
     return NULL;
 }
@@ -77,10 +77,10 @@ void* isr80h_command10_fopen(struct trap_frame* frame){
     char filename[SAMOS_MAX_PATH];
     char mode[4];
 
-    long res = strncpy_from_user(process, filename, task_get_stack_item(task_current(), 0),
+    long res = strncpy_from_user(process, filename, isr80h_arg(frame, 0),
                                  sizeof(filename));
     if(res >= 0){
-        res = strncpy_from_user(process, mode, task_get_stack_item(task_current(), 1),
+        res = strncpy_from_user(process, mode, isr80h_arg(frame, 1),
                                 sizeof(mode));
     }
     if(res < 0){

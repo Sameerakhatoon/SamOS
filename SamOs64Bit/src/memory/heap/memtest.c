@@ -417,45 +417,69 @@ static int memtest_stress(void){
 }
 
 // ---------------------------------------------------------------
-// Process create/exit cycles: load BLANK.ELF off disk, build its
-// task and page tables, terminate it. The process code still leaks
-// a few slab objects per cycle (fopen never frees the parsed
-// path, process_terminate never frees struct process), so this does
-// not gate on a steady heap yet. It checks that frames and bad frees
-// stay put and that the leak is the same every cycle, and stores the
-// objects leaked per cycle in BM_FEATURE_MEM_PROCESS_LEAK for the
-// e2e test to bound. Each cycle identity-maps all of RAM with 4 KiB
-// pages, so the count stays small.
+// Process create/exit cycles (the design: "a leak test that runs 1000
+// process create/exit cycles with a steady heap"): load BLANK.ELF
+// off disk, build its task and page tables, terminate it, and try a
+// load that fails. After the warm-up cycle, frames, slab objects and
+// bad frees must not move at all. BM_FEATURE_MEM_PROCESS_LEAK stores
+// the slab objects leaked over all cycles, which must be 0.
+//
+// The first version ran 8 cycles and allowed 4 leaked objects each:
+// fopen never freed its parsed path (fixed in the storage work) and
+// process_terminate never freed struct process (fixed in the scheduler work).
+//
+// The full 1000 cycles run when the command line has
+// samos.memtest=full (e2e/130-132); other boots run 8, with the
+// same zero-leak check. A cycle took 42 ms under TCG: every load
+// read BLANK.ELF over PIO again (the stream cache skipped runs of 8
+// or more sectors) and memset/memcpy were -O0 byte loops. Both are
+// fixed (streamer.c, memory.c); a cycle is now about 3 ms, so 1000
+// still cost about 3 s, too much to add to every e2e boot.
 // ---------------------------------------------------------------
-#define PROCESS_CYCLES 8
+#define PROCESS_CYCLES_FULL  1000
+#define PROCESS_CYCLES_QUICK 8
 
 static int memtest_process_cycle(void){
     struct process* proc = 0;
     CHECK(process_load("@:/BLANK.ELF", &proc) == 0);
     CHECK(proc);
     CHECK(process_terminate(proc) == 0);
+    // A load that fails must give everything back too.
+    proc = 0;
+    CHECK(process_load("@:/NOSUCH.ELF", &proc) < 0);
+    CHECK(!proc);
     return 1;
 }
 
-static int memtest_process(void){
+static int memtest_process(int cycles){
     struct kheap_stats base, now;
     int res = memtest_process_cycle();   // warm-up: streamer cache, slab pages
     if(res != 1){
         return res;
     }
     kheap_get_stats(&base);
-    for(int c = 0; c < PROCESS_CYCLES; c++){
+    TIME_MICROSECONDS start = tsc_microseconds();
+    for(int c = 0; c < cycles; c++){
         res = memtest_process_cycle();
         if(res != 1){
             return res;
         }
     }
     kheap_get_stats(&now);
+    size_t leaked = now.slab_objects_in_use - base.slab_objects_in_use;
+    print("memtest process: ");
+    print(itoa(cycles));
+    print(" create/exit cycles in ");
+    print(itoa((int)((tsc_microseconds() - start) / 1000)));
+    print(" ms, frames ");
+    print(itoa((int)(now.frames_used - base.frames_used)));
+    print(", slab objects ");
+    print(itoa((int)leaked));
+    print("\n");
+    boot_marker_set(BM_FEATURE_MEM_PROCESS_LEAK, (uint32_t)leaked);
     CHECK(now.frames_used == base.frames_used);
     CHECK(now.bad_frees == base.bad_frees);
-    size_t leaked = now.slab_objects_in_use - base.slab_objects_in_use;
-    CHECK(leaked % PROCESS_CYCLES == 0);
-    boot_marker_set(BM_FEATURE_MEM_PROCESS_LEAK, (uint32_t)(leaked / PROCESS_CYCLES));
+    CHECK(leaked == 0);
     return 1;
 }
 
@@ -472,7 +496,7 @@ static void memtest_report(boot_marker_stage_t stage, const char* name, int res)
     }
 }
 
-void memtest_run(void){
+void memtest_run(bool full){
     struct kheap_stats s;
     kheap_get_stats(&s);
     boot_marker_set(BM_FEATURE_MEM_RAM_MIB,
@@ -483,5 +507,6 @@ void memtest_run(void){
     memtest_report(BM_FEATURE_MEM_SLAB,      "slab",      memtest_slab());
     memtest_report(BM_FEATURE_MEM_STEADY,    "steady",    memtest_steady());
     memtest_report(BM_FEATURE_MEM_STRESS,    "stress",    memtest_stress());
-    memtest_report(BM_FEATURE_MEM_PROCESS,   "process",   memtest_process());
+    memtest_report(BM_FEATURE_MEM_PROCESS,   "process",
+                   memtest_process(full ? PROCESS_CYCLES_FULL : PROCESS_CYCLES_QUICK));
 }

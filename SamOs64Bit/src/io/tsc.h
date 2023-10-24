@@ -15,6 +15,10 @@ typedef uint64_t TIME_MICROSECONDS;
 typedef uint64_t TIME_MILISECONDS;     // sic - upstream spelling
 typedef uint64_t TIME_SECONDS;
 
+// Measure the frequency (CPUID checked against PIT channel
+// 2) and record the boot TSC. tsc_frequency calls it on first use.
+void              tsc_init(void);
+TIME_MICROSECONDS tsc_uptime_microseconds(void);
 TIME_TSC          tsc_frequency(void);
 void              udelay(TIME_MICROSECONDS microseconds);
 TIME_SECONDS      tsc_seconds(void);

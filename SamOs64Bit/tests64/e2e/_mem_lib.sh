@@ -12,6 +12,12 @@
 mem_boot_and_check() {
     local ram=$1 seconds=$2 min_mib=$3
     export E2E_MEM=$ram
+    # samos.memtest=full runs the 1000-cycle process leak test.
+    cp "$E2E_IMAGE" "$E2E_TMP/os.img"
+    E2E_IMAGE="$E2E_TMP/os.img"
+    printf 'samos.memtest=full\n' > "$E2E_TMP/CMDLINE.TXT"
+    MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.TXT" \
+        ::/CMDLINE.TXT || e2e_fail "mcopy CMDLINE.TXT"
     boot_and_dump "$seconds"
     expect_stage_reached 3 "multiheap ready ($ram)"
     expect_stage_value 176 -eq 1 "pfa reserves kernel, boot stack, map, frame table ($ram)"
@@ -20,10 +26,10 @@ mem_boot_and_check() {
     expect_stage_value 179 -eq 1 "1000 alloc/free cycles leave the heap steady ($ram)"
     expect_stage_value 180 -eq 1 "heap stress ($ram)"
     expect_stage_value 182 -eq 1 "process create/exit cycles: frames steady, constant leak ($ram)"
-    # Fopen leaks the parsed path (3 objects) and
-    # process_terminate leaks struct process (1). Tighten to -eq 0
-    # once the storage and core tracks fix them.
-    expect_stage_value 183 -le 4 "slab objects leaked per process cycle ($ram)"
+    # Both leaks are fixed (fopen, struct process).
+    expect_serial '^memtest process: 1000 create/exit cycles in [0-9]+ ms, frames 0, slab objects 0$' \
+        "1000 process create/exit cycles with a steady heap ($ram)"
+    expect_stage_value 183 -eq 0 "slab objects leaked over 1000 process cycles ($ram)"
     expect_stage_value 181 -ge "$min_mib" "frame allocator manages >= $min_mib MiB ($ram)"
     # Loader and boot-services memory goes to the PFA.
     expect_serial '^pfa: reclaimed [1-9][0-9]* KiB of loader memory' "loader memory reclaimed ($ram)"

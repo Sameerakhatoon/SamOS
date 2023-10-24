@@ -83,11 +83,20 @@ struct e820_entry* e820_largest_free_entry(void){
     return chosen;
 }
 
+// rep stosb / rep movsb instead of a byte loop. The kernel is
+// built -O0, so the loop cost several instructions per byte; under
+// TCG zeroing the pages of one process (ELF buffer, segments, stack,
+// event ring, about 150 KiB) took most of the 5 ms a process
+// create/exit cycle cost, and the memory manager leak test runs 1000 of them.
+// Eight bytes per iteration (TCG runs each iteration of a rep string
+// instruction separately), then the tail a byte at a time.
 void* memset(void* ptr, int c, size_t size){
-    char* c_ptr = (char*)ptr;
-    for(size_t i = 0; i < size; i++){
-        c_ptr[i] = (char)c;
-    }
+    void*    d     = ptr;
+    size_t   words = size / 8;
+    size_t   tail  = size % 8;
+    uint64_t v     = 0x0101010101010101ull * (uint8_t)c;
+    __asm__ volatile("cld; rep stosq" : "+D"(d), "+c"(words) : "a"(v) : "memory");
+    __asm__ volatile("rep stosb" : "+D"(d), "+c"(tail) : "a"(v) : "memory");
     return ptr;
 }
 
@@ -102,11 +111,17 @@ int memcmp(void* s1, void* s2, int count){
     return 0;
 }
 
+// Forward copy, like the loop it replaces (a negative len copies
+// nothing instead of running off).
 void* memcpy(void* dest, void* src, int len){
-    char* d = dest;
-    char* s = src;
-    while(len--){
-        *d++ = *s++;
+    if(len <= 0){
+        return dest;
     }
+    void*  d     = dest;
+    void*  s     = src;
+    size_t words = (size_t)len / 8;
+    size_t tail  = (size_t)len % 8;
+    __asm__ volatile("cld; rep movsq" : "+D"(d), "+S"(s), "+c"(words) : : "memory");
+    __asm__ volatile("rep movsb" : "+D"(d), "+S"(s), "+c"(tail) : : "memory");
     return dest;
 }

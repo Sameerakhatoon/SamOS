@@ -21,6 +21,23 @@ struct trap_frame {
     uint64_t ss;
 } __attribute__((packed));
 
+// The syscall convention, System V style on int 0x80:
+// rax = command, arguments in rdi, rsi, rdx, r10, r8, r9 (r10, not
+// rcx, as in the Linux syscall ABI, so the trampolines stay the same
+// for a later SYSCALL instruction), result in rax. Every other
+// register is preserved. The book pushed arguments on the user stack
+// and the kernel read them back with task_get_stack_item.
+static inline void* isr80h_arg(struct trap_frame* frame, int n){
+    switch(n){
+        case 0:  return (void*)frame->rdi;
+        case 1:  return (void*)frame->rsi;
+        case 2:  return (void*)frame->rdx;
+        case 3:  return (void*)frame->r10;
+        case 4:  return (void*)frame->r8;
+        default: return (void*)frame->r9;
+    }
+}
+
 typedef void* (*ISR80H_COMMAND)(struct trap_frame* frame);
 typedef void  (*INTERRUPT_CALLBACK_FUNCTION)(struct trap_frame* frame);
 

@@ -105,6 +105,9 @@ _shell_script() {
     run_cmd 'cat hello.txt'
     run_cmd 'nosuchprog'
     run_cmd 'hello.elf one "two three"'
+    # The shell waits for this child (1.5 s asleep) before the
+    # next prompt.
+    run_cmd 'ktest.elf sleep 1500'
     run_cmd 'echo back-at-prompt'
     # Scrolling: clear, then print more lines than the screen holds.
     run_cmd 'clear'
@@ -148,6 +151,19 @@ expect_text 'nosuchprog: command not found' "unknown command reported"
 expect_line 'hello: argc=3'               "hello.elf ran with its arguments"
 expect_line 'hello: argv[2]=two three'    "the quoted argument reached the program"
 expect_line 'back-at-prompt'              "prompt and keyboard came back after the program"
+# The shell waits for the child it starts: no prompt
+# between the command and the child's last line, then the status.
+expect_line 'hello.elf: exit status 0'    "the shell reports hello's exit status"
+expect_line 'ktest.elf: exit status 0'    "the shell reports the sleeper's exit status"
+if tr -d '\r' < "$E2E_SERIAL" | awk '
+        /^> ktest\.elf sleep 1500$/ { inside = 1; next }
+        inside && /^SLEEP 1500 ms took/ { ok = 1; exit }
+        inside && /> / { exit }
+        END { exit !ok }'; then
+    echo "  ok: no prompt until the sleeping child exited"
+else
+    echo "  FAIL: prompt came back before the child exited"; fails=$((fails + 1))
+fi
 
 if [ -s "$screen" ] && command -v python3 >/dev/null; then
     text=$(python3 "$here/screen_text.py" "$screen" "$font")

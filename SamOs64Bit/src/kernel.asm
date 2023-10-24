@@ -182,8 +182,8 @@ long_mode_new_gdt_complete:
     out 0xA1, al
 
     ; IRQ masks. Master 0xFB = all-except-cascade masked; IRQ0
-    ; (timer) STAYS MASKED so we reach user mode quietly. Slave
-    ; 0xFF = all masked.
+    ; (timer) stays masked here. kernel_main programs the PIT
+    ; and unmasks IRQ0 after idt_init. Slave 0xFF = all masked.
     mov al, 0xFB
     out 0x21, al
     mov al, 0xFF

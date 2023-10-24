@@ -27,6 +27,8 @@
 #include "task/process.h"
 #include "isr80h/isr80h.h"
 #include "io/tsc.h"           // L129 - udelay
+#include "io/pit.h"           // 100 Hz tick
+#include "idt/irq.h"          // Unmask IRQ0
 #include "io/pci.h"           // L180 - pci_init
 #include "bootmarker.h"       // e2e: stage markers for runtime tests
 #include "kernel_selftest.h"  // e2e: feature-level runtime self-tests
@@ -305,6 +307,9 @@ void kernel_main(void)
     // code that depends on them.
     cpu_init();
 
+    // TSC frequency, checked against PIT channel 2.
+    tsc_init();
+
     // e2e hook: fault before idt_init so the early IDT has
     // to catch it and dump registers on COM1.
     if (cmdline_has("samos.early_fault_test"))
@@ -398,6 +403,12 @@ void kernel_main(void)
     kernel_tss_init();
     idt_init();
     boot_marker_set(BM_STAGE_IDT_LIVE, 0);
+
+    // PIT channel 0 at 100 Hz on IRQ0,
+    // unmasked. Interrupts stay off in the kernel until the first
+    // iretq into a task (or the idle loop) sets IF.
+    pit_init(PIT_TICK_HZ);
+    IRQ_enable(IRQ_TIMER);
 
     // e2e hooks: a kernel-mode fault must panic with a
     // register dump; a fault that cannot push its frame must reach
@@ -531,7 +542,7 @@ void kernel_main(void)
     storage_selftest();
 
     // Memory-manager self-tests (leak, stress, PFA, slabs).
-    memtest_run();
+    memtest_run(cmdline_has("samos.memtest=full"));
 
     // SamOs e2e (Phase 2): if a user-side selftest ELF is on the
     // primary FS, load it as the first task and drop into ring 3
@@ -643,7 +654,9 @@ void kernel_main(void)
 
     // Lecture 140 - enable interrupts so the L137-L138 PS/2
     // mouse driver can actually fire IRQ12 callbacks.
-    enable_interrupts();
+    // No sti here any more: the timer is live, and a
+    // tick before the first task would have nothing to preempt. The
+    // iretq into the shell (or the idle loop) enables interrupts.
 
     // Lecture 208 - upstream switches the default user program
     // from blank.elf to shell.elf. The L136 `while(1){}`

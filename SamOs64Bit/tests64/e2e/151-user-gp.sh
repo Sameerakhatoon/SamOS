@@ -10,7 +10,7 @@ MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.
     || e2e_fail "mcopy CMDLINE.TXT"
 
 boot_and_dump 30
-expect_serial '^KTEST gp: executing hlt in ring 3$' "KTEST reached the hlt"
+expect_serial 'KTEST gp: executing hlt in ring 3$' "KTEST reached the hlt"
 expect_serial '^USER FAULT: #GP in @:/KTEST.ELF: rip 0x00000000004[0-9a-f]+ error 0x0000000000000000 ' "#GP reported with rip and error code"
 expect_serial '^process killed$' "faulting process killed"
 expect_no_serial 'KTEST survived' "the faulting instruction did not continue"

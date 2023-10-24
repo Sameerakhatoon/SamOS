@@ -23,12 +23,14 @@ printf 'samos.run=BADWX.ELF;KTEST.ELF badelf %s\n' "$(echo $names)" > "$E2E_TMP/
 MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.TXT" ::/CMDLINE.TXT \
     || e2e_fail "mcopy CMDLINE.TXT"
 
-boot_and_dump 60
+E2E_ALSO_WAIT='^BADELF (DONE|FAIL)$' boot_and_dump 60
 expect_serial '^samos.run: failed to load @:/BADWX.ELF$' "the kernel refuses a W+X segment"
+# Not anchored at ^: BLANK.ELF runs at the same time and its
+# unterminated '!' probe can precede a KTEST line.
 for n in $names; do
-    expect_serial "^BADELF $n rejected " "$n refused"
+    expect_serial "BADELF $n rejected " "$n refused"
 done
-expect_serial '^BADELF DONE$' "every malformed file refused"
+expect_serial 'BADELF DONE$' "every malformed file refused"
 expect_no_serial 'ACCEPTED|KTEST HELLO' "no malformed file ran"
 expect_no_serial 'KERNEL PANIC|KERNEL FAULT|USER FAULT' "no fault"
 expect_stage_value 41 -eq 1 "BLANK.ELF fread afterwards"

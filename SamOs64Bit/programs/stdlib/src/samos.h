@@ -9,8 +9,22 @@ void  samos_free(void* ptr);
 void  samos_putchar(char c);
 int   samos_getkey();
 int   samos_getkeyblock();
+// Blocks in the kernel until a key is there for this process.
+int   samos_getkey_block();
 void  samos_terminal_readline(char* out, int max, bool output_while_typing);
-void  samos_process_load_start(const char* filename);
+// Returns the child's pid (< 0 on error) like samos_system.
+int   samos_process_load_start(const char* filename);
+
+// Processes and time.
+int           samos_getpid(void);
+// Waits for child `pid` (any child if pid <= 0); returns its pid and
+// stores its exit status (main's return value, 128 + vector for a
+// fault, 128 + 9 when killed). Negative when there is no such child.
+int           samos_waitpid(int pid, int* status);
+int           samos_wait(int* status);
+int           samos_kill(int pid);
+void          samos_sleep_ms(unsigned long ms);
+unsigned long samos_uptime(void);   // milliseconds since boot
 
 struct command_argument {
     char argument[512];
@@ -28,9 +42,10 @@ struct process_arguments {
 struct command_argument* samos_parse_command(const char* command, int max);
 void samos_free_command(struct command_argument* command);
 void samos_process_get_arguments(struct process_arguments* arguments);
+// Both return the child's pid, or a negative status.
 int  samos_system(struct command_argument* arguments);
 int  samos_system_run(const char* command);
-void samos_exit();
+void samos_exit(int status);
 void print(const char* msg);
 
 // Lecture 105 - userland fopen syscall trampoline.

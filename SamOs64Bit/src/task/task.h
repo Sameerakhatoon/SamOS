@@ -12,6 +12,23 @@ struct process;
 // fxsave/fxrstor image: x87, MXCSR and xmm0-15.
 #define TASK_FPU_STATE_SIZE 512
 
+// Scheduler states. A READY task is on the run queue,
+// the RUNNING one is current_task, BLOCKED and SLEEPING ones are on
+// neither until task_wake (or the tick, for sleepers) readies them.
+enum task_state {
+    TASK_READY,
+    TASK_RUNNING,
+    TASK_BLOCKED,
+    TASK_SLEEPING,
+};
+
+// What a BLOCKED task waits for.
+enum task_block_reason {
+    TASK_BLOCK_NONE,
+    TASK_BLOCK_KEY,     // getkey_block: a key for its process
+    TASK_BLOCK_WAIT,    // waitpid: a child to exit
+};
+
 struct task {
     // The saved user state is a full trap_frame (all
     // 15 general registers), not the book's 7-register struct.
@@ -19,14 +36,21 @@ struct task {
     struct trap_frame    registers;
     struct process*      process;
 
-    // Lecture 197 - sleep state. task_get_next_non_sleeping_task
-    // skips tasks whose deadline is still in the future.
+    // Lecture 197 - sleep state. The deadline of a SLEEPING
+    // task; the timer tick readies it once the deadline has passed.
     struct {
         TIME_MICROSECONDS sleep_until_microseconds;
     } sleeping;
 
+    int                  state;          // enum task_state
+    int                  block_reason;   // enum task_block_reason
+
+    // Every task, in creation order.
     struct task*         next;
     struct task*         prev;
+
+    // Run queue link (FIFO of READY tasks).
+    struct task*         run_next;
 
     // Saved on every trap from ring 3, restored before
     // the iretq into this task. The kernel itself is built with
@@ -44,13 +68,19 @@ int   task_page();
 void  task_run_first_ever_task();
 void  task_enter(struct task* task);
 void  task_current_save_state(struct trap_frame* frame);
-void* task_get_stack_item(struct task* task, int index);
 void  task_next();
+
+// Scheduler.
+void  task_ready(struct task* task);
+void  task_wake(struct task* task);
+void  task_block(struct task* task, int reason);
+void  task_wake_sleepers(void);
+bool  task_run_queue_empty(void);
+void  task_tick(struct trap_frame* frame);
 
 // Lecture 197 - sleep API.
 void  task_sleep(struct task* task, TIME_MICROSECONDS microseconds);
 bool  task_asleep(struct task* task);
-int   task_get_next_non_sleeping_task(struct task** task_out);
 
 // Lecture 40 - paging_desc accessors.
 struct paging_desc* task_paging_desc(struct task* task);

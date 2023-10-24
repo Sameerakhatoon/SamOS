@@ -31,14 +31,23 @@ enum SystemCommands {
 
     // SamOs e2e (Phase 2): userspace -> kernel marker write so
     // a user-side selftest ELF can report feature pass/fail back
-    // into the boot-marker region at 0x6000. Stack arg layout:
-    //   item 0 = value (uint32_t)
-    //   item 1 = slot  (uint32_t, must be >= 40, < BM_STAGE_MAX)
+    // into the boot-marker region at 0x6000. Arguments:
+    //   rdi = slot  (uint32_t, must be >= 40, < BM_STAGE_MAX)
+    //   rsi = value (uint32_t)
     // Returns 0 on success, -1 if slot is out of the user-write
     // window. The kernel deliberately restricts user writes to
     // slots 40..BM_STAGE_MAX-1 so a userspace bug cannot stomp
     // on kernel-side checkpoints (1..28).
     SYSTEM_COMMAND26_E2E_MARK,
+
+    // Processes and time. Every syscall takes its
+    // arguments in rdi, rsi, rdx, r10, r8, r9 (isr80h_arg).
+    SYSTEM_COMMAND27_GETPID,       // int getpid(void)
+    SYSTEM_COMMAND28_WAITPID,      // int waitpid(int pid, int* status)
+    SYSTEM_COMMAND29_KILL,         // int kill(int pid)
+    SYSTEM_COMMAND30_SLEEP_MS,     // void sleep_ms(unsigned long ms)
+    SYSTEM_COMMAND31_UPTIME,       // unsigned long uptime(void), ms
+    SYSTEM_COMMAND32_GETKEY_BLOCK, // int getkey_block(void)
 };
 
 void isr80h_register_commands();

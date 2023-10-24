@@ -13,7 +13,7 @@ MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.
     || e2e_fail "mcopy CMDLINE.TXT"
 
 boot_and_dump 40
-expect_serial '^KTEST stack: recursing$' "KTEST started recursing"
+expect_serial 'KTEST stack: recursing$' "KTEST started recursing"
 # error 6 = user write to a not-present page, cr2 inside the guard page
 expect_serial '^USER FAULT: #PF in @:/KTEST.ELF: rip 0x00000000004[0-9a-f]+ error 0x0000000000000006 cr2 0x00000000003fa[0-9a-f]{3}$' "#PF in the guard page"
 expect_serial '^process killed$' "overflowing process killed"

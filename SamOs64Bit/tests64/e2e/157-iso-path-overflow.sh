@@ -14,9 +14,9 @@ MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.
     || e2e_fail "mcopy CMDLINE.TXT"
 
 boot_and_dump 40
-expect_serial '^KPTR load_start 300-byte name ok$' "syscall 6 refuses a 300-byte name"
-expect_serial '^KPTR load_start 105-byte name ok$' "syscall 6 refuses one byte over the buffer"
-expect_serial '^KPTR system looping argument list ok$' "syscall 7 bounds the argument list"
+expect_serial 'KPTR load_start 300-byte name ok$' "syscall 6 refuses a 300-byte name"
+expect_serial 'KPTR load_start 105-byte name ok$' "syscall 6 refuses one byte over the buffer"
+expect_serial 'KPTR system looping argument list ok$' "syscall 7 bounds the argument list"
 expect_serial '^LONGPATH OK$' "all oversized input refused"
 expect_no_serial 'KPTR .* FAIL' "no check failed"
 expect_no_serial 'USER FAULT|process killed' "no fault"

@@ -1,18 +1,19 @@
 #include "samos.h"
 #include "string.h"
 
-// Sleep 1 ms between polls. The timer IRQ is masked, so a
-// task only gives up the CPU in udelay, exit or exec; a busy poll
-// here starved every other task (a child the shell started that
-// sleeps once never woke up again).
-#define SAMOS_GETKEY_POLL_US 1000
-
+// The kernel blocks the task until a key arrives (syscall 32).
+// Polled getkey with a 1 ms udelay, because with the timer
+// masked a busy poll starved every other task.
 int samos_getkeyblock(){
     int val = 0;
-    while((val = samos_getkey()) == 0){
-        samos_udelay(SAMOS_GETKEY_POLL_US);
+    while((val = samos_getkey_block()) == 0){
     }
     return val;
+}
+
+// Wait for any child.
+int samos_wait(int* status){
+    return samos_waitpid(-1, status);
 }
 
 int samos_system_run(const char* command){

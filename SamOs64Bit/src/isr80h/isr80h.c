@@ -37,4 +37,10 @@ void isr80h_register_commands(){
     isr80h_register_command(SYSTEM_COMMAND24_UPDATE_WINDOW,        isr80h_command24_update_window);
     isr80h_register_command(SYSTEM_COMMAND25_UDELAY,               isr80h_command25_udelay);
     isr80h_register_command(SYSTEM_COMMAND26_E2E_MARK,              isr80h_command26_e2e_mark);
+    isr80h_register_command(SYSTEM_COMMAND27_GETPID,               isr80h_command27_getpid);
+    isr80h_register_command(SYSTEM_COMMAND28_WAITPID,              isr80h_command28_waitpid);
+    isr80h_register_command(SYSTEM_COMMAND29_KILL,                 isr80h_command29_kill);
+    isr80h_register_command(SYSTEM_COMMAND30_SLEEP_MS,             isr80h_command30_sleep_ms);
+    isr80h_register_command(SYSTEM_COMMAND31_UPTIME,               isr80h_command31_uptime);
+    isr80h_register_command(SYSTEM_COMMAND32_GETKEY_BLOCK,         isr80h_command32_getkey_block);
 }

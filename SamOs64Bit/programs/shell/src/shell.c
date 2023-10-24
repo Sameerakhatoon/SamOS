@@ -21,19 +21,25 @@
 // ---------------------------------------------------------------
 // Waiting for the child.
 //
-// STUB(core): the kernel has no wait syscall yet, so
-// samos_system returns as soon as the child is scheduled and the
-// shell prints its next prompt while the child is still running.
-// When the core session lands wait (the design: "It waits for the
-// child it starts"), set SHELL_HAVE_WAIT_SYSCALL to 1 and make
-// shell_wait_for_child call it with the id samos_system returns.
+// samos_system returns the child's pid and samos_waitpid
+// blocks the shell until that child exits (the design: "It waits for
+// the child it starts"). The prompt comes back only after the child
+// is gone, with its exit status. Before the scheduler work there was no wait
+// syscall and the prompt came back while the child still ran.
 // ---------------------------------------------------------------
-#define SHELL_HAVE_WAIT_SYSCALL 0
+#define SHELL_HAVE_WAIT_SYSCALL 1
 
-static int shell_wait_for_child(int child){
+static int shell_wait_for_child(const char* name, int child){
 #if SHELL_HAVE_WAIT_SYSCALL
-    return samos_wait(child);
+    int status = 0;
+    if(samos_waitpid(child, &status) != child){
+        printf("%s: wait failed\n", name);
+        return 1;
+    }
+    printf("%s: exit status %d\n", name, status);
+    return status;
 #else
+    (void)name;
     (void)child;
     return 0;
 #endif
@@ -99,7 +105,7 @@ static int shell_clear(int argc, char** argv){
 
 static int shell_exit(int argc, char** argv){
     printf("bye\n");
-    samos_exit();
+    samos_exit(0);
     return 0;
 }
 
@@ -225,7 +231,7 @@ static int shell_run_program(struct command_argument* command){
         printf("%s: command not found\n", command->argument);
         return 127;
     }
-    return shell_wait_for_child(child);
+    return shell_wait_for_child(command->argument, child);
 }
 
 // Run one parsed line. Exposed for the selftest build.

@@ -44,7 +44,7 @@ void* isr80h_command20_graphics_pixels_get(struct trap_frame* frame){
     int res = 0;
     struct framebuffer_pixel* graphics_pixels_virt_out = NULL;
     struct userland_graphics* userland_graphics_ptr = NULL;
-    userland_graphics_ptr = task_get_stack_item(task_current(), 0);
+    userland_graphics_ptr = isr80h_arg(frame, 0);
     if(!userland_graphics_ptr){
         return NULL;
     }
@@ -84,13 +84,13 @@ void* isr80h_command20_graphics_pixels_get(struct trap_frame* frame){
 // userland a fresh userland_graphics mirror for it.
 void* isr80h_command22_graphics_create(struct trap_frame* frame){
     size_t x = 0, y = 0, width = 0, height = 0;
-    x      = (size_t)task_get_stack_item(task_current(), 4);
-    y      = (size_t)task_get_stack_item(task_current(), 3);
-    width  = (size_t)task_get_stack_item(task_current(), 2);
-    height = (size_t)task_get_stack_item(task_current(), 1);
+    x      = (size_t)isr80h_arg(frame, 4);
+    y      = (size_t)isr80h_arg(frame, 3);
+    width  = (size_t)isr80h_arg(frame, 2);
+    height = (size_t)isr80h_arg(frame, 1);
 
     struct userland_graphics* userland_graphics_ptr =
-        task_get_stack_item(task_current(), 0);
+        isr80h_arg(frame, 0);
     if(!userland_graphics_ptr){
         return NULL;
     }

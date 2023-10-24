@@ -373,6 +373,25 @@ void window_free(struct window* window){
     terminal_free(window->title_bar_terminal);
     graphics_info_free(window->root_graphics);
     kfree(window);
+
+    // The book left focused_window pointing at the freed
+    // window, and the keyboard listener pushed key events into it.
+    // The topmost remaining window (highest root z_index, the one
+    // focused most recently) takes the focus. window->zindex is never
+    // set, so the vector order does not tell.
+    if(focused_window == window){
+        struct window* top = NULL;
+        focused_window = NULL;
+        size_t total = vector_count(windows_vector);
+        for(size_t i = 0; i < total; i++){
+            struct window* w = NULL;
+            vector_at(windows_vector, i, &w, sizeof(w));
+            if(w && (!top || w->root_graphics->z_index > top->root_graphics->z_index)){
+                top = w;
+            }
+        }
+        window_focus(top);
+    }
 }
 
 // Lecture 123 - dispatch an event to every registered handler.

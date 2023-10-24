@@ -37,7 +37,7 @@ struct window* isr80h_window_from_process_window_virt(void* proc_win_virt_addr){
 void* isr80h_command16_window_create(struct trap_frame* frame){
     int res = 0;
     struct process_window* win = NULL;
-    void* window_title_user_ptr = task_get_stack_item(task_current(), 0);
+    void* window_title_user_ptr = isr80h_arg(frame, 0);
     char win_title[WINDOW_MAX_TITLE];
     // A title longer than the buffer is cut short.
     if(strncpy_from_user(task_current()->process, win_title, window_title_user_ptr,
@@ -46,10 +46,10 @@ void* isr80h_command16_window_create(struct trap_frame* frame){
         goto out;
     }
 
-    int win_width  = (int)(uintptr_t)task_get_stack_item(task_current(), 1);
-    int win_height = (int)(uintptr_t)task_get_stack_item(task_current(), 2);
-    int flags      = (int)(uintptr_t)task_get_stack_item(task_current(), 3);
-    int id         = (int)(uintptr_t)task_get_stack_item(task_current(), 4);
+    int win_width  = (int)(uintptr_t)isr80h_arg(frame, 1);
+    int win_height = (int)(uintptr_t)isr80h_arg(frame, 2);
+    int flags      = (int)(uintptr_t)isr80h_arg(frame, 3);
+    int id         = (int)(uintptr_t)isr80h_arg(frame, 4);
 
     win = process_window_create(task_current()->process, win_title,
                                 win_width, win_height, flags, id);
@@ -74,7 +74,7 @@ out:
 // with a userland window handle. Resolve it and stash on the
 // process so process_print / process_print_char land there.
 void* isr80h_command17_sysout_to_window(struct trap_frame* frame){
-    void* user_win_ptr = task_get_stack_item(task_current(), 0);
+    void* user_win_ptr = isr80h_arg(frame, 0);
     if(user_win_ptr){
         struct process_window* proc_win =
             process_window_get_from_user_window(task_current()->process, user_win_ptr);
@@ -93,7 +93,7 @@ void* isr80h_command18_get_window_event(struct trap_frame* frame){
     int res = 0;
     struct window_event_userland* win_event_out = NULL;
 
-    void* win_event_out_virtual_address = task_get_stack_item(task_current(), 0);
+    void* win_event_out_virtual_address = isr80h_arg(frame, 0);
     if(!win_event_out_virtual_address){
         res = -EINVARG;
         goto out;
@@ -128,7 +128,7 @@ out:
 // a userland_graphics it owns. The kernel graphics_info pointer
 // stays hidden behind a userland_ptr sentinel.
 void* isr80h_command19_window_graphics_get(struct trap_frame* frame){
-    void* user_win_ptr = task_get_stack_item(task_current(), 0);
+    void* user_win_ptr = isr80h_arg(frame, 0);
     if(!user_win_ptr){
         return NULL;
     }
@@ -153,7 +153,7 @@ void* isr80h_command19_window_graphics_get(struct trap_frame* frame){
 // compositor to redraw it. Registration of this syscall lands
 // at L170.
 void* isr80h_command21_window_redraw(struct trap_frame* frame){
-    void* user_win_ptr = task_get_stack_item(task_current(), 0);
+    void* user_win_ptr = isr80h_arg(frame, 0);
     if(!user_win_ptr){
         return NULL;
     }
@@ -169,11 +169,11 @@ void* isr80h_command21_window_redraw(struct trap_frame* frame){
 // region (clip rect). Translates the userland window handle and
 // forwards the rect to window_redraw_body_region.
 void* isr80h_command23_window_redraw_region(struct trap_frame* frame){
-    long rect_x      = (long)task_get_stack_item(task_current(), 0);
-    long rect_y      = (long)task_get_stack_item(task_current(), 1);
-    long rect_width  = (long)task_get_stack_item(task_current(), 2);
-    long rect_height = (long)task_get_stack_item(task_current(), 3);
-    void* user_window_ptr = task_get_stack_item(task_current(), 4);
+    long rect_x      = (long)isr80h_arg(frame, 0);
+    long rect_y      = (long)isr80h_arg(frame, 1);
+    long rect_width  = (long)isr80h_arg(frame, 2);
+    long rect_height = (long)isr80h_arg(frame, 3);
+    void* user_window_ptr = isr80h_arg(frame, 4);
     if(!user_window_ptr){
         return ERROR(-EINVARG);
     }
@@ -195,7 +195,7 @@ void* isr80h_command24_update_window_title(struct window* window,
     // Copied in; the book used the translated first byte.
     char title[WINDOW_MAX_TITLE];
     if(strncpy_from_user(task_current()->process, title,
-                         task_get_stack_item(task_current(), 2), sizeof(title)) == -EFAULT){
+                         isr80h_arg(frame, 2), sizeof(title)) == -EFAULT){
         res = -EFAULT;
         goto out;
     }
@@ -210,8 +210,8 @@ out:
 void* isr80h_command24_update_window(struct trap_frame* frame){
     int res = 0;
     struct window* kern_window = NULL;
-    uint64_t update_type = (uint64_t)task_get_stack_item(task_current(), 0);
-    void* user_win_ptr   = task_get_stack_item(task_current(), 1);
+    uint64_t update_type = (uint64_t)isr80h_arg(frame, 0);
+    void* user_win_ptr   = isr80h_arg(frame, 1);
     if(!user_win_ptr){
         res = -EINVARG;
         goto out;

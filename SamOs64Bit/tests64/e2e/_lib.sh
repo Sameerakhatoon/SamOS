@@ -131,6 +131,10 @@ e2e_wait_serial() {
 # parallel under TCG - waits longer instead of failing, and a fast
 # one does not sleep needlessly. A sentinel of "" restores the
 # fixed sleep.
+#
+# E2E_ALSO_WAIT (ERE, optional): wait for this line as well. Since
+# User processes run concurrently, so a test that starts its own
+# program next to BLANK.ELF waits for both to finish.
 E2E_SENTINEL="${E2E_SENTINEL:-^e2e: user selftest done}"
 boot_and_dump() {
     local seconds=${1:-6}
@@ -140,6 +144,9 @@ boot_and_dump() {
     _e2e_dump_script() {
         if [ -n "$sentinel" ]; then
             e2e_wait_serial "$sentinel" "$limit" || true
+            if [ -n "${E2E_ALSO_WAIT:-}" ]; then
+                e2e_wait_serial "$E2E_ALSO_WAIT" "$limit" || true
+            fi
             sleep 1
         else
             sleep "$seconds"

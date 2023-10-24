@@ -24,5 +24,7 @@
 #define EFAULT         20  // Bad user pointer (unmapped, kernel, no access)
 #define ENAMETOOLONG   21  // User string longer than the kernel buffer
 #define EBADEXEC       22  // Malformed ELF (not EINFORMAT: no flat-binary fallback)
+#define ECHILD         23  // Waitpid: no such child
+#define ESRCH          24  // Kill: no such process
 
 #endif

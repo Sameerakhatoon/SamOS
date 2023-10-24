@@ -27,6 +27,9 @@ int sam_samos_system(void* args){ return 0; }
 
 static const char* keys;
 int sam_samos_getkey(void){ return *keys ? *keys++ : '\r'; }
+// samos_getkeyblock uses the blocking syscall now.
+int sam_samos_getkey_block(void){ return sam_samos_getkey(); }
+int sam_samos_waitpid(int pid, int* status){ return -1; }
 void sam_samos_udelay(unsigned long us){ }
 
 // Unused trampolines referenced by the objects.

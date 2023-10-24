@@ -14,7 +14,7 @@
 // the user named, kernel included. A bad pointer prints nothing and
 // returns -EFAULT; a string longer than the buffer is cut short.
 void* isr80h_command1_print(struct trap_frame* frame){
-    void* user_space_msg_buffer = task_get_stack_item(task_current(), 0);
+    void* user_space_msg_buffer = isr80h_arg(frame, 0);
 
     char buf[1024];
     long res = strncpy_from_user(task_current()->process, buf, user_space_msg_buffer, sizeof(buf));
@@ -36,12 +36,24 @@ void* isr80h_command2_getkey(struct trap_frame* frame){
     return (void*)((intptr_t)c);
 }
 
+// Int getkey_block(void): like getkey, but a task with no key
+// waiting blocks until keyboard_push hands its process one.
+// The user library polled getkey with a 1 ms udelay instead.
+void* isr80h_command32_getkey_block(struct trap_frame* frame){
+    char c = keyboard_pop();
+    if(c == 0){
+        task_block(task_current(), TASK_BLOCK_KEY);
+        task_next();
+    }
+    return (void*)((intptr_t)c);
+}
+
 void* isr80h_command3_putchar(struct trap_frame* frame){
     // L54 - widen the intermediate cast to intptr_t too. The
     // stack item is a void*; truncating through int and then
     // back to a pointer was fine on 32-bit but loses the high
     // half on 64-bit.
-    char c = (char)(intptr_t)task_get_stack_item(task_current(), 0);
+    char c = (char)(intptr_t)isr80h_arg(frame, 0);
     // Lecture 158 - putchar lands in the sysout window too.
     process_print_char(task_current()->process, c);
     return 0;

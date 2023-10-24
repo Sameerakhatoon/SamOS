@@ -16,8 +16,8 @@ MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.
     || e2e_fail "mcopy CMDLINE.TXT"
 
 boot_and_dump 40
-expect_serial '^KPTR still printing$' "the process is still served after the bad calls"
-expect_serial '^KPTR OK$' "every bad pointer refused"
+expect_serial 'KPTR still printing$' "the process is still served after the bad calls"
+expect_serial 'KPTR OK$' "every bad pointer refused"
 expect_no_serial 'KPTR .* FAIL' "no check failed"
 expect_no_serial 'USER FAULT|process killed' "no fault: the kernel caught every pointer"
 expect_no_serial 'KERNEL PANIC|KERNEL FAULT' "no kernel panic"

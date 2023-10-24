@@ -4,6 +4,8 @@
 #include "kernel.h"
 #include "task/process.h"
 #include "task/task.h"
+#include "graphics/window.h"         // window_focused
+#include "io/pit.h"                  // pit_ticks
 #include "memory/memory.h"           // L174 - memcpy for listener clone
 #include "memory/heap/kheap.h"       // L174 - kzalloc / kfree for listeners
 
@@ -75,16 +77,38 @@ void keyboard_backspace(struct process* process){
     process->keyboard.buffer[real_index] = 0x00;
 }
 
-void keyboard_push(char c){
-    struct process* process = process_current();
-    if(!process){
-        return;
-    }
+// Who gets a key: the process that owns the focused
+// window, else the foreground process (the one started last in the
+// foreground, typically the shell or the child it waits for). The
+// book pushed to process_current(), whichever process the IRQ
+// happened to interrupt.
+static struct process* keyboard_target(void){
+    struct window* focused = window_focused();
+    struct process* owner = focused ? process_get_from_kernel_window(focused) : NULL;
+    return owner ? owner : process_foreground();
+}
 
+void keyboard_push(char c){
     // Reject 0 here: keyboard_pop returns 0 to signal "buffer empty", so
     // legitimately storing a 0 in the buffer would be indistinguishable
     // from emptiness and cause getkey to loop on a real-but-invisible key.
     if(c == 0){
+        return;
+    }
+
+    struct process* process = keyboard_target();
+    if(!process){
+        // Nobody to read it (for one, after the last process
+        // has exited); say so, so the idle system visibly answers.
+        // Quiet before the timer has ticked: the boot self-test
+        // pushes a key with no process around.
+        if(!pit_ticks()){
+            return;
+        }
+        print("keyboard: no process for key '");
+        char s[2] = { c, 0 };
+        print(c >= 0x20 && c < 0x7F ? s : "?");
+        print("'\n");
         return;
     }
 
@@ -100,6 +124,12 @@ void keyboard_push(char c){
     int real_index = keyboard_get_tail_index(process);
     process->keyboard.buffer[real_index] = c;
     process->keyboard.tail++;
+
+    // A blocking getkey waits for exactly this.
+    struct task* task = process->task;
+    if(task && task->state == TASK_BLOCKED && task->block_reason == TASK_BLOCK_KEY){
+        task_wake(task);
+    }
 
     // Lecture 174 - fan the keypress out to anyone registered on
     // the default keyboard.

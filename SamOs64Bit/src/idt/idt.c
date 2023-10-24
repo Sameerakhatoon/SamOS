@@ -6,6 +6,7 @@
 #include "task/task.h"
 #include "task/process.h"
 #include "status.h"
+#include "io/pit.h"
 
 // 256 gates; x86 has no more vectors (the book sized it 512).
 struct idt_desc  idt_descriptors[SAMOS_TOTAL_INTERRUPTS];
@@ -97,19 +98,21 @@ static void idt_exception(struct trap_frame* frame, int from_user){
     print_reg(" cr2 ", read_cr2());
     print("\nprocess killed\n");
 
-    process_terminate(process);
+    // The parent's wait sees 128 + the vector, the shell
+    // convention for a process killed by a signal.
+    process_exit(process, PROCESS_EXIT_FAULT_BASE + (int)vector);
     task_next();
 }
 
 // Lecture 52 - timer IRQ: round-robin to the next task. The EOI is
 // sent by interrupt_handler before the callback runs, since
 // task_next does not return.
+// IRQ0 is unmasked now (PIT at 100 Hz). Count the tick,
+// wake sleepers, preempt a ring-3 task if another one is ready; a
+// tick in ring 0 (the idle loop) never switches here.
 void idt_clock(struct trap_frame* frame){
-    // Lecture 157 - no task yet (windowless boot path): nothing to switch.
-    if(!task_current()){
-        return;
-    }
-    task_next();
+    pit_tick();
+    task_tick(frame);
 }
 
 // An IRQ7/IRQ15 with its in-service bit clear is a spurious
@@ -247,7 +250,8 @@ void idt_init(){
     idt_set(18,   interrupt_pointer_table[18], 0x8E, IDT_IST_MACHINE_CHECK);
     idt_set(0x80, isr80h_wrapper, 0xEE, 0);
 
-    // Lecture 52 - timer (IRQ0). Stays masked until the scheduler work.
+    // Lecture 52 - timer (IRQ0). kernel_main programs the PIT
+    // and unmasks it.
     idt_register_interrupt_callback(IDT_IRQ_BASE, idt_clock);
 
     idt_load(&idtr_descriptor);
