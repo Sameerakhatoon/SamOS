@@ -21,8 +21,12 @@ _script() {
     sleep 2
     printf 'info registers\n'
     sleep 1
+    printf 'info registers\n'
+    sleep 1
     printf 'sendkey a\n'
     e2e_wait_serial "^keyboard: no process for key 'a'\$" 30
+    sleep 1
+    printf 'info registers\n'
     sleep 1
     printf 'info registers\n'
     sleep 1
@@ -37,9 +41,11 @@ expect_no_serial 'KERNEL PANIC|KERNEL FAULT|No processes|No more tasks' "no pani
 expect_serial "^keyboard: no process for key 'a'\$" "the idle kernel took the keyboard IRQ"
 
 regs=$(tr -d '\r' < "$E2E_QEMU_LOG")
+# A snapshot can land while the idle CPU handles a tick, more often on
+# a loaded host. A busy-waiting idle loop would never show HLT=1.
 halted=$(printf '%s' "$regs" | grep -ao 'HLT=1' | wc -l)
-[ "$halted" -ge 2 ] || e2e_fail "CPU not halted in both register dumps (HLT=1 seen $halted times)"
-e2e_log "HLT=1 in both register dumps: ok"
+[ "$halted" -ge 1 ] || e2e_fail "CPU never halted in 4 register dumps"
+e2e_log "HLT=1 in $halted of 4 register dumps: ok"
 printf '%s' "$regs" | grep -aoE 'RIP=ffffffff8[0-9a-f]+' | head -n 1 | grep -q . \
     || e2e_fail "rip is not in the kernel"
 e2e_log "rip in the kernel: ok"
