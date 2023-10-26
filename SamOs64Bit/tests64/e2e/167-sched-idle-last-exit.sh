@@ -49,8 +49,11 @@ e2e_log "HLT=1 in $halted of 4 register dumps: ok"
 printf '%s' "$regs" | grep -aoE 'RIP=ffffffff8[0-9a-f]+' | head -n 1 | grep -q . \
     || e2e_fail "rip is not in the kernel"
 e2e_log "rip in the kernel: ok"
-# RFLAGS bit 9 (IF): interrupts on while halted.
-rfl=$(printf '%s' "$regs" | grep -aoE 'RFL=[0-9a-f]+' | tail -n 1 | cut -d= -f2)
-[ -n "$rfl" ] && [ $(( 0x$rfl & 0x200 )) -ne 0 ] || e2e_fail "IF clear while idle (RFL=$rfl)"
-e2e_log "IF set while idle (RFL=$rfl): ok"
+# RFLAGS bit 9 (IF): interrupts on while halted. Only the halted dumps
+# count: a dump taken inside the tick handler has IF clear legitimately.
+# QEMU prints RFL and HLT on the same line.
+for rfl in $(printf '%s' "$regs" | grep -a 'HLT=1' | grep -aoE 'RFL=[0-9a-f]+' | cut -d= -f2); do
+    [ $(( 0x$rfl & 0x200 )) -ne 0 ] || e2e_fail "IF clear while halted (RFL=$rfl)"
+done
+e2e_log "IF set in every halted dump: ok"
 echo "PASS: e2e/167 idle after the last process exits"

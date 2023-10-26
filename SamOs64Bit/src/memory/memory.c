@@ -83,7 +83,7 @@ struct e820_entry* e820_largest_free_entry(void){
     return chosen;
 }
 
-// rep stosb / rep movsb instead of a byte loop. The kernel is
+// rep stosq / rep movsq (plus a byte tail) instead of a byte loop. The kernel is
 // built -O0, so the loop cost several instructions per byte; under
 // TCG zeroing the pages of one process (ELF buffer, segments, stack,
 // event ring, about 150 KiB) took most of the 5 ms a process
