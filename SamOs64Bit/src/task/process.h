@@ -82,6 +82,10 @@ struct process {
     // freed slots are nulled in place and reused.
     struct vector*     allocations;
 
+    // Lecture 153 - vector<struct userland_ptr*>. Sentinel
+    // values the kernel hands to userland.
+    struct vector*     kernel_userland_ptrs_vector;
+
     // L105 - vector<struct process_file_handle*>. Populated by
     // process_fopen, drained at process_free_process time so a
     // process exit closes its open fds.
