@@ -18,6 +18,7 @@ enum SystemCommands {
     SYSTEM_COMMAND13_FSEEK,  // L111 - userland fseek
     SYSTEM_COMMAND14_FSTAT,  // L112 - userland fstat
     SYSTEM_COMMAND15_REALLOC, // L115 - userland realloc
+    SYSTEM_COMMAND16_WINDOW_CREATE, // L154 - userland window create
 };
 
 void isr80h_register_commands();

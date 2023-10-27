@@ -20,6 +20,10 @@ struct paging_desc;
 typedef unsigned char PROCESS_FILETYPE;
 
 struct elf_file;
+// Lecture 154 - forward decls so embedders that only take a
+// struct process* do not need to drag the graphics headers in.
+struct window;
+struct graphics_info;
 
 struct process_allocation {
     void*  ptr;
@@ -66,6 +70,23 @@ struct process_file_handle {
     char  mode[2];   // "r", "w", "w+" - max 2 chars per upstream
 };
 
+// Lecture 154 - userspace-visible window descriptor.
+// Mirrors the kernel window's title and dimensions so userland
+// can read them without resolving a kernel pointer.
+struct process_userspace_window {
+    char title[WINDOW_MAX_TITLE];
+    int  width;
+    int  height;
+};
+
+// Lecture 154 - kernel-side per-window record. Pairs the
+// userspace handle with the real kernel window so the syscall
+// layer can translate one to the other.
+struct process_window {
+    struct process_userspace_window* user_win;
+    struct window*                   kernel_win;
+};
+
 struct process {
     uint16_t           id;
     char               filename[SAMOS_MAX_PATH];
@@ -108,6 +129,10 @@ struct process {
 
     // Arguments passed in by the spawner (kernel or another process).
     struct process_arguments arguments;
+
+    // Lecture 154 - vector<struct process_window*>. One entry per
+    // window this process owns.
+    struct vector*     windows;
 };
 
 int              process_load(const char* filename, struct process** process);
@@ -163,5 +188,17 @@ int                            process_validate_memory_or_terminate(struct proce
 // Lecture 114 - allocate the process slot vector. Must be
 // called before any process_load.
 void                           process_system_init(void);
+
+// Lecture 154 - userspace window create + lookup helpers.
+struct process_window*  process_window_create(struct process* process,
+                                              char* title,
+                                              int width, int height,
+                                              int flags, int id);
+bool                    process_owns_kernel_window(struct process* process,
+                                                   struct window* kernel_window);
+struct process*         process_get_from_kernel_window(struct window* window);
+struct process_window*  process_window_get_from_user_window(struct process* process,
+                                                            struct process_userspace_window* user_win);
+void                    process_close_windows(struct process* process);
 
 #endif
