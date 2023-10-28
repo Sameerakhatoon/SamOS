@@ -47,7 +47,14 @@ void idt_handle_exception(){
 // IRQ wiring really fired once interrupts come up.
 void idt_clock(){
     outb(0x20, 0x20);
-    print("test\n");
+
+    // Lecture 157 - the L140 window-test boot path runs without
+    // any user task, so calling task_next would dereference NULL.
+    // Bail when there is no current task to switch from.
+    if(!task_current()){
+        return;
+    }
+
     task_next();
 }
 
@@ -79,16 +86,18 @@ void no_interrupt_handler(){
 void interrupt_handler(int interrupt, struct interrupt_frame* frame){
     kernel_page();
     if(interrupt_callbacks[interrupt] != 0){
-        // Lecture 140 - the L52 task_current_save_state +
-        // task_page pair is commented out because the L140
-        // window-test boot path runs the kernel without ever
-        // entering a user task; restoring the user PML4 then
-        // pagefaults. Restore once we are back on the user
-        // program path.
-        // task_current_save_state(frame);
+        // Lecture 157 - L140 commented the save/restore out so
+        // the windowless boot would not crash. Now that user
+        // tasks are coming back, gate the calls on
+        // task_current() instead of skipping them outright.
+        if(task_current()){
+            task_current_save_state(frame);
+        }
         interrupt_callbacks[interrupt](frame);
     }
-    // task_page();
+    if(task_current()){
+        task_page();
+    }
     outb(0x20, 0x20);
     outb(0xA0, 0x20);
 }
