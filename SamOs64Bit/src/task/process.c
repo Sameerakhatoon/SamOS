@@ -16,6 +16,7 @@
 // screen dimensions.
 #include "graphics/graphics.h"
 #include "graphics/window.h"
+#include "graphics/terminal.h"   // L158 - process_print routes here
 #include "kernel.h"
 #include <stdbool.h>
 
@@ -157,6 +158,31 @@ out:
         }
     }
     return proc_win;
+}
+
+// Lecture 158 - process_print_char / process_print write into
+// the sysout window's terminal. Upstream does not null-check
+// process->sysout_win; we keep that behaviour so the first
+// caller (peachos_divert_stdout_to_window in blank.c) wires
+// it up before any printf fires.
+void process_print_char(struct process* process, char c){
+    struct process_window* printing_process_win = process->sysout_win;
+    struct terminal* win_term = window_terminal(printing_process_win->kernel_win);
+    if(win_term){
+        terminal_write(win_term, c);
+    }
+}
+
+void process_print(struct process* process, const char* message){
+    struct process_window* printing_process_win = process->sysout_win;
+    struct terminal* win_term = window_terminal(printing_process_win->kernel_win);
+    if(win_term){
+        terminal_print(win_term, message);
+    }
+}
+
+void process_set_sysout_window(struct process* process, struct process_window* win){
+    process->sysout_win = win;
 }
 
 struct process* process_current(){

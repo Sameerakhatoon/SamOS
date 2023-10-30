@@ -133,6 +133,12 @@ struct process {
     // Lecture 154 - vector<struct process_window*>. One entry per
     // window this process owns.
     struct vector*     windows;
+
+    // Lecture 158 - if set, isr80h_command1_print and
+    // isr80h_command3_putchar route into this window's terminal
+    // instead of the kernel console. Userland selects it via
+    // peachos_divert_stdout_to_window.
+    struct process_window* sysout_win;
 };
 
 int              process_load(const char* filename, struct process** process);
@@ -200,5 +206,11 @@ struct process*         process_get_from_kernel_window(struct window* window);
 struct process_window*  process_window_get_from_user_window(struct process* process,
                                                             struct process_userspace_window* user_win);
 void                    process_close_windows(struct process* process);
+
+// Lecture 158 - sysout-window helpers.
+void                    process_print_char(struct process* process, char c);
+void                    process_print(struct process* process, const char* message);
+void                    process_set_sysout_window(struct process* process,
+                                                  struct process_window* win);
 
 #endif
