@@ -240,8 +240,9 @@ typedef enum {
     BM_FEATURE_MEM_RAM_MIB    = 181, // value = MiB of RAM the frame allocator manages
     BM_FEATURE_MEM_PROCESS    = 182, // process create/exit cycles: frames steady, leak constant
     BM_FEATURE_MEM_PROCESS_LEAK = 183, // value = slab objects leaked per process cycle
+    BM_FEATURE_MEM_ARENA      = 184, // Virtual-arena alloc/free gives frames and mappings back
 
-    BM_STAGE_MAX              = 184,
+    BM_STAGE_MAX              = 185,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.

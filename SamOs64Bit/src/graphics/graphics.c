@@ -835,10 +835,30 @@ void graphics_setup(struct graphics_info* main_graphics_info){
     real_framebuffer_height              = main_graphics_info->vertical_resolution;
     real_framebuffer_pixels_per_scanline = main_graphics_info->pixels_per_scanline;
 
-    size_t framebuffer_size = real_framebuffer_width
+    // Height rows of pitch pixels. The book used the width,
+    // which maps past the end of the framebuffer on any screen wider
+    // than it is tall (4 MiB instead of 3 at 1024x768). The mapping
+    // is whole pages, and never more than the loader's fb_size.
+    size_t framebuffer_size = real_framebuffer_height
                             * real_framebuffer_pixels_per_scanline
                             * sizeof(struct framebuffer_pixel);
-    real_framebuffer_end = (void*)((uintptr_t)real_framebuffer + framebuffer_size);
+    size_t map_size = paging_align_value_to_upper_page(framebuffer_size);
+    size_t fb_size  = samos_boot_info_ptr->fb_size;
+    if(fb_size && map_size > fb_size){
+        map_size = (size_t)paging_align_to_lower_page((void*)fb_size);
+    }
+    real_framebuffer_end = (void*)((uintptr_t)real_framebuffer + map_size);
+    serial_write("graphics: framebuffer ");
+    serial_write(itoa((int)real_framebuffer_width));
+    serial_write("x");
+    serial_write(itoa((int)real_framebuffer_height));
+    serial_write(" pitch ");
+    serial_write(itoa((int)real_framebuffer_pixels_per_scanline));
+    serial_write(", mapped ");
+    serial_write(itoa((int)(map_size / 1024)));
+    serial_write(" KiB of ");
+    serial_write(itoa((int)(fb_size / 1024)));
+    serial_write(" KiB\n");
 
     // Back buffer the kernel will write into. Aliased onto the
     // physical framebuffer via paging_map_to so reads/writes

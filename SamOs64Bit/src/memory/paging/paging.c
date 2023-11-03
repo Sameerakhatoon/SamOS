@@ -409,7 +409,13 @@ struct paging_desc* paging_kernel_desc_new(void)
 
     // W^X for the kernel itself: text RX, rodata R, data/.bss and the
     // boot stack (top of the window) RW.
+    // The direct map covers the kernel window RW, so text and
+    // rodata had a writable alias there. That alias is read-only now.
+    uintptr_t ro_start = (uintptr_t)paging_align_to_lower_page(_kernel_text_start) - SAMOS_KERNEL_VMA;
+    uintptr_t ro_end   = (uintptr_t)paging_align_address(_kernel_rodata_end) - SAMOS_KERNEL_VMA;
     if (paging_map_e820_memory_regions(desc) < 0 ||
+        paging_map_to(desc, PAGING_PHYS_TO_VIRT(ro_start), (void*)ro_start, (void*)ro_end,
+                      PAGING_IS_PRESENT | PAGING_NO_EXECUTE) < 0 ||
         paging_map_kernel_image(desc, _kernel_text_start, _kernel_text_end,
                                 PAGING_IS_PRESENT) < 0 ||
         paging_map_kernel_image(desc, _kernel_rodata_start, _kernel_rodata_end,

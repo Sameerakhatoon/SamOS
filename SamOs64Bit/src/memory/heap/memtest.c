@@ -8,8 +8,10 @@
 #include "kheap.h"
 #include "heap.h"
 #include "slab.h"
+#include "multiheap.h"
 #include "config.h"
 #include "kernel.h"
+#include "status.h"
 #include "bootmarker.h"
 #include "memory/memory.h"
 #include "memory/pfa.h"
@@ -21,6 +23,7 @@
 #define CHECK(cond) do { if(!(cond)) { return __LINE__; } } while(0)
 
 extern char samos_kernel_end[];
+static int memtest_data_probe = 1;   // in .data, for the alias check
 
 static bool memtest_stats_equal(struct kheap_stats* a, struct kheap_stats* b){
     return a->frames_free         == b->frames_free &&
@@ -66,6 +69,16 @@ static int memtest_pfa(void){
     CHECK(pfa_free_frame_count() == before);
     CHECK(pfa_alloc_frames(0) == NULL);
     CHECK(pfa_alloc_frames(h->total_blocks + 1) == NULL);
+
+    // The direct-map alias of kernel text and rodata is
+    // read-only; data and the frames above stay writable.
+    struct paging_desc_entry* e;
+    e = paging_get(kernel_desc(), PAGING_PHYS_TO_VIRT((uintptr_t)memtest_pfa - SAMOS_KERNEL_VMA));
+    CHECK(e && e->present && !e->read_write && e->execute_disable);
+    e = paging_get(kernel_desc(), PAGING_PHYS_TO_VIRT((uintptr_t)"rodata" - SAMOS_KERNEL_VMA));
+    CHECK(e && e->present && !e->read_write);
+    e = paging_get(kernel_desc(), PAGING_PHYS_TO_VIRT((uintptr_t)&memtest_data_probe - SAMOS_KERNEL_VMA));
+    CHECK(e && e->present && e->read_write);
     return 1;
 }
 
@@ -417,6 +430,49 @@ static int memtest_stress(void){
 }
 
 // ---------------------------------------------------------------
+// The virtual arena (kpalloc's second pass). A 3-block range
+// is mapped onto single frames, written through, and freed; the free
+// must unmap it and give the frames back. Before the fix the arena
+// check was always false, so kfree refused the pointer as a bad free
+// and the frames leaked. The warm-up cycle builds the page tables
+// for the arena range, which stay.
+// ---------------------------------------------------------------
+static int memtest_arena_cycle(void){
+    struct multiheap* mh = kernel_multiheap;
+    uint8_t* p = multiheap_alloc_second_pass(mh, 3 * BS - 100);
+    CHECK(p && multiheap_is_address_virtual(mh, p));
+    CHECK(!multiheap_is_address_virtual(mh, PAGING_PHYS_TO_VIRT(0x6000)));
+    CHECK(multiheap_allocation_block_count(mh, p) == 3);
+    CHECK(paging_get_physical_address(paging_current_descriptor(), p + 2 * BS));
+    p[0] = 0xA5;
+    p[3 * BS - 1] = 0x5A;
+    CHECK(p[0] == 0xA5 && p[3 * BS - 1] == 0x5A);
+    kfree(p);
+    CHECK(!paging_get_physical_address(paging_current_descriptor(), p));
+    CHECK(!paging_get_physical_address(paging_current_descriptor(), p + 2 * BS));
+    CHECK(multiheap_allocation_block_count(mh, p) == 0);
+    return 1;
+}
+
+static int memtest_arena(void){
+    struct kheap_stats base, now;
+    int res = memtest_arena_cycle();
+    if(res != 1){
+        return res;
+    }
+    kheap_get_stats(&base);
+    for(int c = 0; c < 8; c++){
+        res = memtest_arena_cycle();
+        if(res != 1){
+            return res;
+        }
+    }
+    kheap_get_stats(&now);
+    CHECK(memtest_stats_equal(&base, &now));
+    return 1;
+}
+
+// ---------------------------------------------------------------
 // Process create/exit cycles (the design: "a leak test that runs 1000
 // process create/exit cycles with a steady heap"): load BLANK.ELF
 // off disk, build its task and page tables, terminate it, and try a
@@ -448,6 +504,17 @@ static int memtest_process_cycle(void){
     proc = 0;
     CHECK(process_load("@:/NOSUCH.ELF", &proc) < 0);
     CHECK(!proc);
+    // Loads that fail after elf_load accepted BLANK.ELF, first
+    // at the user stack (the first page allocation after it), then at
+    // the PML4 in paging_desc_new. Cleanup must close the elf_file
+    // (process->ptr and elf_file are one union) and free the rest.
+    for(int skip = 0; skip < 2; skip++){
+        kheap_fail_page_alloc_after(skip);
+        int res = process_load("@:/BLANK.ELF", &proc);
+        kheap_fail_page_alloc_after(-1);
+        CHECK(res == -ENOMEM);
+        CHECK(!proc);
+    }
     return 1;
 }
 
@@ -507,6 +574,7 @@ void memtest_run(bool full){
     memtest_report(BM_FEATURE_MEM_SLAB,      "slab",      memtest_slab());
     memtest_report(BM_FEATURE_MEM_STEADY,    "steady",    memtest_steady());
     memtest_report(BM_FEATURE_MEM_STRESS,    "stress",    memtest_stress());
+    memtest_report(BM_FEATURE_MEM_ARENA,     "arena",     memtest_arena());
     memtest_report(BM_FEATURE_MEM_PROCESS,   "process",
                    memtest_process(full ? PROCESS_CYCLES_FULL : PROCESS_CYCLES_QUICK));
 }

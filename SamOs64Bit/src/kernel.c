@@ -320,11 +320,11 @@ void kernel_main(void)
     boot_marker_set(BM_STAGE_KERNEL_MAIN, 0);
     print("Hello 64-bit!\n");
 
-    // Lecture 18 - read the E820 memory map BEFORE kheap_init.
-    // The E820 entries live at SAMOS_MEMORY_MAP_LOCATION which is
-    // the same physical address as SAMOS_HEAP_TABLE_ADDRESS - the
-    // heap init writes its block bitmap on top, so any E820 read
-    // after kheap_init returns garbage.
+    // Lecture 18 - the book read the E820 map here, before kheap_init,
+    // because its heap bitmap overwrote the map. Since the UEFI loader and the memory manager rework the
+    // map sits in the loader's boot data area (SAMOS_E820_TYPE_KERNEL),
+    // which pfa_init reserves (memtest pfa checks it), so the map is
+    // still readable afterwards; this is only the boot log line.
     print("e820 total: ");
     print(itoa((int)e820_total_accessible_memory()));
     print("\n");

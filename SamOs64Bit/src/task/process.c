@@ -897,6 +897,8 @@ static void process_load_cleanup(struct process* process){
         process_terminate_allocations(process);
         paging_desc_free(process->paging_desc);
     }
+    // ptr and elf_file are one union (process.h), so an ELF that a
+    // later step refused is closed here too.
     if(process->ptr){
         process_free_program_data(process);
     }

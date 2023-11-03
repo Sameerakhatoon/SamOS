@@ -147,7 +147,13 @@ static int regs_test(unsigned long seed)
 #define S_ECHILD        (-23)
 #define S_ESRCH         (-24)
 
-#define KERNEL_TEXT     0xFFFFFFFF80100000ul   // first kernel page (.boot)
+// SAMOS_KERNEL_VMA + 1 MiB: the higher-half alias of the physical page
+// the kernel image starts at. That page holds .boot, which is linked
+// and run at its low load address, so the kernel's high mapping starts
+// at .text a few pages later and this address is not mapped at all.
+// The kptr checks still hold: syscalls refuse any pointer at or above
+// SAMOS_USER_SPACE_END before looking at the page tables.
+#define KERNEL_TEXT     0xFFFFFFFF80100000ul
 #define KERNEL_MARKERS  0xFFFF800000006000ul   // boot markers via the direct map
 
 // regs.asm

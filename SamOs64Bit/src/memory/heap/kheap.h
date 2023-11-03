@@ -18,6 +18,9 @@ void*         kpzalloc(size_t size);  // L22 - kpalloc + memset 0
 // a slab object. For memory that gets mapped into a process: the
 // mapping is per page, and a slab page is shared with other objects.
 void*         kpage_zalloc(size_t size);
+// Test hook: kpage_zalloc fails once after `skip` more
+// successful calls; -1 turns it off.
+void          kheap_fail_page_alloc_after(int skip);
 // Real. kfree(NULL) is a no-op; a pointer that is not a live
 // allocation is ignored and counted in kheap_stats.bad_frees.
 void          kfree(void* ptr);
@@ -43,5 +46,9 @@ struct kheap_stats {
     size_t bad_frees;
 };
 void          kheap_get_stats(struct kheap_stats* out);
+
+// The kernel's multiheap, for memtest's arena check.
+struct multiheap;
+extern struct multiheap* kernel_multiheap;
 
 #endif

@@ -25,6 +25,8 @@ mem_boot_and_check() {
     expect_stage_value 178 -eq 1 "kmalloc slabs + bad kfree rejected ($ram)"
     expect_stage_value 179 -eq 1 "1000 alloc/free cycles leave the heap steady ($ram)"
     expect_stage_value 180 -eq 1 "heap stress ($ram)"
+    expect_stage_value 184 -eq 1 "virtual-arena alloc/free returns frames and unmaps ($ram)"
+    expect_serial '^memtest arena: ok$' "memtest arena line ($ram)"
     expect_stage_value 182 -eq 1 "process create/exit cycles: frames steady, constant leak ($ram)"
     # Both leaks are fixed (fopen, struct process).
     expect_serial '^memtest process: 1000 create/exit cycles in [0-9]+ ms, frames 0, slab objects 0$' \

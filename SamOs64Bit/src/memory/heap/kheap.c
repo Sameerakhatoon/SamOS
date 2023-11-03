@@ -107,8 +107,19 @@ void* kpzalloc(size_t size){
     return ptr;
 }
 
+// Fault injection for memtest: after `skip` more successful
+// calls, kpage_zalloc fails once. -1 (the default) is off.
+static int kheap_page_fail_countdown = -1;
+
+void kheap_fail_page_alloc_after(int skip){
+    kheap_page_fail_countdown = skip;
+}
+
 void* kpage_zalloc(size_t size){
     if(size == 0 || !kernel_multiheap){
+        return NULL;
+    }
+    if(kheap_page_fail_countdown >= 0 && kheap_page_fail_countdown-- == 0){
         return NULL;
     }
     void* ptr = multiheap_alloc(kernel_multiheap, size);

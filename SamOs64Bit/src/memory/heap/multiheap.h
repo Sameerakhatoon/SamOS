@@ -94,4 +94,9 @@ bool multiheap_can_add_heap(struct multiheap* mh);
 bool multiheap_is_address_virtual(struct multiheap* mh, void* ptr);
 struct multiheap_single_heap* multiheap_get_heap_for_address(struct multiheap* mh, void* address);
 
+// The paging second pass on its own: a block-rounded range
+// in the virtual arena backed by single frames. multiheap_palloc
+// only gets here when the first pass fails; memtest calls it directly.
+void* multiheap_alloc_second_pass(struct multiheap* mh, size_t size);
+
 #endif

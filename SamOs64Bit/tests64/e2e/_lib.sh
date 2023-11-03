@@ -46,7 +46,7 @@ E2E_DUMP="$E2E_TMP/markers.bin"
 E2E_SERIAL="$E2E_TMP/serial.log"
 E2E_QEMU_LOG="$E2E_TMP/qemu.log"
 
-# Marker region is BM_STAGE_MAX (184) * 8 = 1472 bytes; round to 1536.
+# Marker region is BM_STAGE_MAX (185) * 8 = 1480 bytes; round to 1536.
 E2E_MARKER_REGION_SIZE=1536
 
 e2e_log() { echo "[e2e] $*" >&2; }
@@ -219,7 +219,7 @@ expected_stage_byte() { printf '%02x' "$1"; }
 # "yes/no" but a trace of how far boot got.
 dump_marker_summary() {
     local s hi
-    for ((s=1; s<184; s++)); do
+    for ((s=1; s<185; s++)); do
         hi=$(marker_high "$s")
         if [ "$hi" = "$(expected_high)" ]; then
             local v

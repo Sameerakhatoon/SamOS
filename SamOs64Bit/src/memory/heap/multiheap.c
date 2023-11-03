@@ -77,10 +77,13 @@ struct multiheap_single_heap* multiheap_get_heap_for_address(struct multiheap* m
 // NULL) shadow heap. Harmless while kfree was a no-op; fatal once it
 // is real. No pointer is virtual until the arena exists.
 // The arena is a fixed kernel range (SAMOS_KERNEL_HEAP_ARENA_BASE), the same size as the direct map, not "above the last heap".
+// Base + size is 2^64, which wraps to 0, so the end test was
+// always false and every arena pointer was refused as a bad free.
+// The offset from the base cannot wrap.
 bool multiheap_is_address_virtual(struct multiheap* mh, void* ptr){
     return multiheap_is_ready(mh)
         && (uintptr_t)ptr >= SAMOS_KERNEL_HEAP_ARENA_BASE
-        && (uintptr_t)ptr <  SAMOS_KERNEL_HEAP_ARENA_BASE + SAMOS_DIRECT_MAP_SIZE;
+        && (uintptr_t)ptr - SAMOS_KERNEL_HEAP_ARENA_BASE < SAMOS_DIRECT_MAP_SIZE;
 }
 
 // Lecture 30 - ready / can_add_heap predicates. Once
@@ -198,11 +201,15 @@ size_t multiheap_allocation_block_count(struct multiheap* mh, void* ptr){
 
     // Prefer the shadow heap when present: the bitmap walk has
     // to use the SAME ptr we passed in, and that ptr is virtual.
-    struct multiheap_single_heap* heap_to_check = paging_heap ? paging_heap : phys_heap;
-    if(!heap_to_check){
+    // That is the node's paging_heap, not its ->heap (the
+    // physical one), which an arena pointer is never inside.
+    if(paging_heap){
+        return heap_allocation_block_count(paging_heap->paging_heap, ptr);
+    }
+    if(!phys_heap){
         return 0;
     }
-    return heap_allocation_block_count(heap_to_check->heap, ptr);
+    return heap_allocation_block_count(phys_heap->heap, ptr);
 }
 
 // Lecture 28 - byte count of the same allocation.
@@ -416,7 +423,10 @@ static void* multiheap_alloc_paging(struct multiheap* mh, size_t size,
 // Net effect: an allocation that asked for N contiguous blocks
 // gets N possibly-scattered physical pages exposed as one
 // contiguous virtual range.
-static void* multiheap_alloc_second_pass(struct multiheap* mh, size_t size){
+//
+// Not static, so memtest can reach the arena without having
+// to fragment RAM first.
+void* multiheap_alloc_second_pass(struct multiheap* mh, size_t size){
     struct paging_desc* desc = paging_current_descriptor();
     if(!desc){
         panic("multiheap second pass: paging not set up\n");
