@@ -47,6 +47,14 @@ static void process_init(struct process* process){
     // Lecture 154 - per-process window list.
     process->windows =
         vector_new(sizeof(struct process_window*), 4, 0);
+
+    // Lecture 160 - pre-allocate the window-events ring at the
+    // upstream ceiling. vector_grow advances index without
+    // initialising data; producers vector_overwrite later.
+    process->window_events.vector =
+        vector_new(sizeof(struct window_event), 100, 0);
+    vector_grow(process->window_events.vector,
+                PROCESS_MAX_WINDOW_EVENTS_RECORDED);
 }
 
 // Lecture 154 - does this process own the given kernel window?

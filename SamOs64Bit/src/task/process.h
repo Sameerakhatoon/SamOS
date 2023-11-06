@@ -17,6 +17,10 @@ struct paging_desc;
 #define PROCESS_FILETYPE_ELF      0
 #define PROCESS_FILETYPE_BINARY   1
 
+// Lecture 160 - per-process window-event ring. 1000 is the
+// upstream ceiling.
+#define PROCESS_MAX_WINDOW_EVENTS_RECORDED 1000
+
 typedef unsigned char PROCESS_FILETYPE;
 
 struct elf_file;
@@ -139,6 +143,17 @@ struct process {
     // instead of the kernel console. Userland selects it via
     // peachos_divert_stdout_to_window.
     struct process_window* sysout_win;
+
+    // Lecture 160 - bounded ring of window_events delivered to
+    // this process. `vector` is pre-grown to
+    // PROCESS_MAX_WINDOW_EVENTS_RECORDED; producers
+    // vector_overwrite at `index`, consumers drain
+    // total_unpopped down.
+    struct {
+        struct vector* vector;
+        size_t         index;
+        size_t         total_unpopped;
+    } window_events;
 };
 
 int              process_load(const char* filename, struct process** process);

@@ -37,4 +37,15 @@ int            vector_at(struct vector* vec, size_t index, void* data_out, size_
 size_t         vector_count(struct vector* vec);
 int            vector_pop_element(struct vector* vec, void* mem_val, size_t size);
 
+// Lecture 160 - grow the vector by total_elements live slots
+// (zero-initialised). Unlike vector_push the values aren't
+// written; index advances. Caller follows up with
+// vector_overwrite.
+int            vector_grow(struct vector* vec, size_t total_elements);
+
+// Lecture 160 - linear scan for elem_val_ptr. Returns 0 on
+// match (with *index_out set), -EOUTOFRANGE otherwise.
+int            vector_has(struct vector* vec, void* elem_val_ptr,
+                          size_t elem_size, size_t* index_out);
+
 #endif
