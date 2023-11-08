@@ -98,6 +98,8 @@ struct file_descriptor {
 void                fs_init();
 // Returns a descriptor > 0, or 0 on any failure (unchanged API).
 int                 fopen(const char* filename, const char* mode_str);
+// The same, with a negative status on failure.
+int                 fopen_status(const char* filename, const char* mode_str);
 int                 fread(void* ptr, uint32_t size, uint32_t nmemb, int fd);
 int                 fseek(int fd, int offset, FILE_SEEK_MODE whence);
 int                 fstat(int fd, struct file_stat* stat);

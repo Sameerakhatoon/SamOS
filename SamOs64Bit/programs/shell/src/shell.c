@@ -1,7 +1,8 @@
 // The SamOS shell: a line editor, builtins, quoting, and
 // program launch.
 //
-// Builtins: help, echo, clear, exit, ls, cat. Anything else is
+// Builtins: help, echo (with > and >>), clear, exit, ls, cat, and
+// mkdir, write, rm, rmdir. Anything else is
 // looked up on the boot filesystem and started as a program.
 
 #include "shell.h"
@@ -57,14 +58,22 @@ static int shell_clear(int argc, char** argv);
 static int shell_exit(int argc, char** argv);
 static int shell_ls(int argc, char** argv);
 static int shell_cat(int argc, char** argv);
+static int shell_mkdir(int argc, char** argv);
+static int shell_write(int argc, char** argv);
+static int shell_rm(int argc, char** argv);
+static int shell_rmdir(int argc, char** argv);
 
 static const struct shell_builtin shell_builtins[] = {
     {"help",  "help              list the builtins",           shell_help},
-    {"echo",  "echo [words...]   print the words",             shell_echo},
+    {"echo",  "echo [words...] [> file | >> file]  print or write the words", shell_echo},
     {"clear", "clear             clear the screen",            shell_clear},
     {"exit",  "exit              leave the shell",             shell_exit},
-    {"ls",    "ls [files...]     list files with their sizes", shell_ls},
+    {"ls",    "ls [dirs/files...] list a directory (default @:/)", shell_ls},
     {"cat",   "cat files...      print files",                 shell_cat},
+    {"mkdir", "mkdir dirs...     make directories",            shell_mkdir},
+    {"write", "write file words... write the words to a file", shell_write},
+    {"rm",    "rm files...       remove files",                shell_rm},
+    {"rmdir", "rmdir dirs...     remove empty directories",    shell_rmdir},
 };
 #define SHELL_BUILTIN_COUNT (sizeof(shell_builtins) / sizeof(shell_builtins[0]))
 
@@ -90,12 +99,73 @@ static int shell_help(int argc, char** argv){
     return 0;
 }
 
-static int shell_echo(int argc, char** argv){
-    for(int i = 1; i < argc; i++){
-        printf(i > 1 ? " %s" : "%s", argv[i]);
+// Join argv[from..to) with single spaces and a final newline.
+static void shell_join(char* out, int size, int from, int to, char** argv){
+    int n = 0;
+    out[0] = 0;
+    for(int i = from; i < to && n < size; i++){
+        n += snprintf(out + n, size - n, i > from ? " %s" : "%s", argv[i]);
     }
-    printf("\n");
+    if(n < size - 1){
+        out[n++] = '\n';
+        out[n] = 0;
+    }
+}
+
+// Write text to a file opened with mode "w" (replace) or "a".
+static int shell_write_text(const char* cmd, const char* name, const char* text,
+                            const char* mode){
+    char path[128];
+    shell_path(name, path, sizeof(path));
+    int fd = fopen(path, mode);
+    if(fd < 0){
+        printf("%s: %s: %s\n", cmd, name, samos_strerror(fd));
+        return 1;
+    }
+    int len = strlen(text);
+    int res = len ? fwrite(text, len, 1, fd) : 1;
+    fclose(fd);
+    if(res != 1){
+        printf("%s: %s: %s\n", cmd, name, samos_strerror(res < 0 ? res : -SAMOS_ENOSPC));
+        return 1;
+    }
     return 0;
+}
+
+// "echo words > file" replaces the file, ">>"
+// appends. The redirection is its own word or glued to the name
+// (">file").
+static int shell_echo(int argc, char** argv){
+    char text[SHELL_LINE_MAX];
+    for(int i = 1; i < argc; i++){
+        if(argv[i][0] != '>'){
+            continue;
+        }
+        int append = argv[i][1] == '>';
+        const char* name = argv[i] + 1 + append;
+        if(!*name){
+            name = i + 1 < argc ? argv[i + 1] : NULL;
+        }
+        if(!name){
+            printf("echo: missing file after >\n");
+            return 1;
+        }
+        shell_join(text, sizeof(text), 1, i, argv);
+        return shell_write_text("echo", name, text, append ? "a" : "w");
+    }
+    shell_join(text, sizeof(text), 1, argc, argv);
+    print(text);
+    return 0;
+}
+
+static int shell_write(int argc, char** argv){
+    if(argc < 2){
+        printf("usage: write file words...\n");
+        return 1;
+    }
+    char text[SHELL_LINE_MAX];
+    shell_join(text, sizeof(text), 2, argc, argv);
+    return shell_write_text("write", argv[1], text, "w");
 }
 
 static int shell_clear(int argc, char** argv){
@@ -109,58 +179,65 @@ static int shell_exit(int argc, char** argv){
     return 0;
 }
 
-// Prints "<name>  <size>" or an error. Returns 0 if the file exists.
-static int shell_ls_one(const char* name){
+// ls walks the directory with opendir/readdir. The
+// first version probed a fixed list of file names (no readdir yet).
+static void shell_ls_line(const char* name, uint32_t size, int is_dir){
+    if(is_dir){
+        printf("%-14s    <DIR>\n", name);
+    } else {
+        printf("%-14s %8u\n", name, size);
+    }
+}
+
+// One argument: a directory is listed (with a "name:" header when
+// there are several arguments), a file gets its own line.
+static int shell_ls_one(const char* name, int header){
     char path[128];
     shell_path(name, path, sizeof(path));
-    int fd = fopen(path, "r");
-    if(fd <= 0){
-        printf("ls: %s: not found\n", name);
-        return -1;
+    int fd = opendir(path);
+    if(fd > 0){
+        struct file_dirent entry;
+        int res;
+        if(header){
+            printf("%s:\n", name);
+        }
+        while((res = readdir(fd, &entry)) == 1){
+            shell_ls_line(entry.name, entry.size, entry.flags & FILE_DIRENT_DIRECTORY);
+        }
+        closedir(fd);
+        if(res < 0){
+            printf("ls: %s: %s\n", name, samos_strerror(res));
+            return -1;
+        }
+        return 0;
+    }
+    if(fd == -SAMOS_ENOTDIR){
+        fd = fopen(path, "r");
     }
     struct file_stat st = {0};
-    if(fstat(fd, &st) < 0){
-        printf("%-14s  (directory)\n", name);
-    } else {
-        printf("%-14s %8u\n", name, st.filesize);
+    if(fd < 0 || fstat(fd, &st) < 0){
+        printf("ls: %s: %s\n", name, samos_strerror(fd < 0 ? fd : -SAMOS_EIO));
+        if(fd > 0){
+            fclose(fd);
+        }
+        return -1;
     }
+    shell_ls_line(name, st.filesize, 0);
     fclose(fd);
     return 0;
 }
 
 static int shell_ls(int argc, char** argv){
-    if(argc > 1){
-        int res = 0;
-        for(int i = 1; i < argc; i++){
-            if(shell_ls_one(argv[i]) < 0){
-                res = 1;
-            }
-        }
-        return res;
+    if(argc < 2){
+        return shell_ls_one("@:/", 0) < 0;
     }
-
-    // STUB(storage/core): there is no readdir syscall, so a
-    // bare `ls` probes the files the build stages on the boot disk
-    // (see the Makefile mcopy lines and build.sh) and lists the
-    // ones that exist. Replace with a real directory walk when a
-    // readdir syscall lands.
-    static const char* known_files[] = {
-        "SHELL.ELF", "BLANK.ELF", "HELLO.ELF", "SIMPLE.BIN", "HELLO.TXT",
-        "SYSFONT.BMP", "CLSICON.BMP",
-    };
-    for(size_t i = 0; i < sizeof(known_files) / sizeof(known_files[0]); i++){
-        char path[64];
-        shell_path(known_files[i], path, sizeof(path));
-        int fd = fopen(path, "r");
-        if(fd <= 0){
-            continue;
+    int res = 0;
+    for(int i = 1; i < argc; i++){
+        if(shell_ls_one(argv[i], argc > 2) < 0){
+            res = 1;
         }
-        struct file_stat st = {0};
-        fstat(fd, &st);
-        printf("%-14s %8u\n", known_files[i], st.filesize);
-        fclose(fd);
     }
-    return 0;
+    return res;
 }
 
 static int shell_cat_one(const char* name){
@@ -168,12 +245,12 @@ static int shell_cat_one(const char* name){
     shell_path(name, path, sizeof(path));
     int fd = fopen(path, "r");
     if(fd <= 0){
-        printf("cat: %s: not found\n", name);
+        printf("cat: %s: %s\n", name, samos_strerror(fd));
         return -1;
     }
     struct file_stat st = {0};
-    if(fstat(fd, &st) < 0){
-        printf("cat: %s: not a file\n", name);
+    if(fstat(fd, &st) < 0 || (st.flags & FILE_STAT_DIRECTORY)){
+        printf("cat: %s: is a directory\n", name);
         fclose(fd);
         return -1;
     }
@@ -223,6 +300,38 @@ static int shell_cat(int argc, char** argv){
         }
     }
     return res;
+}
+
+// Mkdir, rm, rmdir: one syscall per argument,
+// "cmd: name: reason" on failure.
+static int shell_each_path(int argc, char** argv, int (*op)(const char* path)){
+    if(argc < 2){
+        printf("usage: %s names...\n", argv[0]);
+        return 1;
+    }
+    int res = 0;
+    for(int i = 1; i < argc; i++){
+        char path[128];
+        shell_path(argv[i], path, sizeof(path));
+        int r = op(path);
+        if(r < 0){
+            printf("%s: %s: %s\n", argv[0], argv[i], samos_strerror(r));
+            res = 1;
+        }
+    }
+    return res;
+}
+
+static int shell_mkdir(int argc, char** argv){
+    return shell_each_path(argc, argv, mkdir);
+}
+
+static int shell_rm(int argc, char** argv){
+    return shell_each_path(argc, argv, unlink);
+}
+
+static int shell_rmdir(int argc, char** argv){
+    return shell_each_path(argc, argv, rmdir);
 }
 
 static int shell_run_program(struct command_argument* command){

@@ -50,8 +50,9 @@ void print(const char* msg);
 
 // Lecture 105 - userland fopen syscall trampoline.
 int  samos_fopen(const char* filename, const char* mode);
-// Lecture 106 - userland fclose trampoline.
-void samos_fclose(size_t fd);
+// Lecture 106 - userland fclose trampoline. It now
+// really makes the syscall; 0 or a negative status.
+long samos_fclose(size_t fd);
 // Lecture 107 - userland fread trampoline.
 long samos_fread(void* buffer, size_t size, size_t count, long fd);
 // Lecture 111 - userland fseek trampoline.
@@ -61,6 +62,17 @@ struct file_stat;
 long samos_fstat(long fd, struct file_stat* file_stat_out);
 // Lecture 115 - userland realloc trampoline.
 void* samos_realloc(void* old_ptr, size_t new_size);
+
+// Syscalls 40-46. Each returns a negative kernel
+// status (src/status.h) on failure; file.h has the friendlier names.
+struct file_dirent;
+long samos_fwrite(const void* buffer, size_t size, size_t count, long fd);
+int  samos_ftruncate(long fd, unsigned long size);
+int  samos_unlink(const char* path);
+int  samos_mkdir(const char* path);
+int  samos_rmdir(const char* path);
+int  samos_opendir(const char* path);
+int  samos_readdir(long fd, struct file_dirent* out);
 
 // SamOs e2e: write `value` into the kernel's bootmarker slot
 // `slot`. Slot must be >= 40 (BM_USER_FEATURE_BASE) and below

@@ -29,12 +29,18 @@
 //   ktest exit CODE   print its pid, return CODE
 //   ktest parent      waitpid/kill/getpid checks on children ("PARENT OK")
 //   ktest keys        window + child window, keys go to the focused one
+//
+// Syscalls 40-46:
+//   ktest files       errors, bad pointers, page-crossing buffers,
+//                     fclose, descriptors closed on exit ("FILES OK")
+//   ktest opendirs N  open the root N times and exit without closing
 
 #include "samos.h"
 #include "string.h"
 #include "memory.h"
 #include "stdlib.h"
 #include "stdio.h"
+#include "file.h"
 
 #define REGS_SLOTS   (15 + 32)   // rax..r15, then xmm0-15 as 2 qwords each
 #define REGS_ROUNDS  20
@@ -536,6 +542,180 @@ static int bss_test(void)
     return 0;
 }
 
+// ---------------------------------------------------------------
+// Syscalls 40-46 and the fopen/fclose changes.
+// ---------------------------------------------------------------
+
+#define CMD_FCLOSE    11
+#define CMD_FWRITE    40
+#define CMD_UNLINK    42
+#define CMD_MKDIR     43
+#define CMD_OPENDIR   45
+#define CMD_READDIR   46
+
+#define S_ERDONLY     (-6)
+#define S_ENOENT      (-14)
+#define S_EEXIST      (-16)
+#define S_ENOTDIR     (-17)
+#define S_EISDIR      (-18)
+#define S_ENOTEMPTY   (-19)
+
+static int files_failures;
+
+static void files_expect(const char* what, long got, long want)
+{
+    if (got == want) {
+        say("FILES %s ok\n", what);
+        return;
+    }
+    say("FILES %s FAIL got %ld want %ld\n", what, got, want);
+    files_failures++;
+}
+
+static long file_size(const char* path)
+{
+    struct file_stat st = {0};
+    int fd = fopen(path, "r");
+    if (fd < 0) {
+        return fd;
+    }
+    int res = fstat(fd, &st);
+    fclose(fd);
+    return res < 0 ? res : (long)st.filesize;
+}
+
+// Open the root directory n times and exit with them all open: the
+// kernel must close them on exit (two runs of 300 need 600 of the
+// 512 kernel descriptors otherwise).
+static int opendirs_test(unsigned long n)
+{
+    for (unsigned long i = 0; i < n; i++) {
+        int fd = opendir("@:/");
+        if (fd <= 0) {
+            say("OPENDIRS FAIL at %lu: %d\n", i, fd);
+            return 1;
+        }
+    }
+    say("OPENDIRS %lu open\n", n);
+    return 0;
+}
+
+static int files_test(void)
+{
+    long k = (long)KERNEL_TEXT;
+    struct file_dirent ent;
+
+    // fopen says why it failed (it returned -EIO or 0 for everything).
+    files_expect("fopen missing file", fopen("@:/NOSUCH.TXT", "r"), S_ENOENT);
+    files_expect("mkdir", mkdir("@:/KTDIR"), 0);
+    files_expect("mkdir existing", mkdir("@:/KTDIR"), S_EEXIST);
+    files_expect("mkdir missing parent", mkdir("@:/NODIR/SUB") < 0, 1);
+    files_expect("mkdir under a file", mkdir("@:/HELLO.TXT/SUB"), S_ENOTDIR);
+    files_expect("fopen directory for writing", fopen("@:/KTDIR", "w"), S_EISDIR);
+    files_expect("mkdir kernel path", ktest_syscall(CMD_MKDIR, k, 0, 0, 0), S_EFAULT);
+    files_expect("unlink kernel path", ktest_syscall(CMD_UNLINK, k, 0, 0, 0), S_EFAULT);
+    files_expect("opendir kernel path", ktest_syscall(CMD_OPENDIR, k, 0, 0, 0), S_EFAULT);
+
+    // A write buffer that crosses a page boundary: 300 bytes from 96
+    // bytes before the end of the first page of a two-page block.
+    char* block = malloc(8192);
+    files_expect("malloc two pages", block != 0, 1);
+    if (!block) {
+        return 1;
+    }
+    for (int i = 0; i < 8192; i++) {
+        block[i] = (char)('A' + i % 26);
+    }
+    char* cross = block + 4096 - 96;
+    int fd = fopen("@:/KTDIR/CROSS.TXT", "w");
+    files_expect("fopen new file", fd > 0, 1);
+    files_expect("fwrite across pages", fwrite(cross, 300, 1, fd), 1);
+    files_expect("fwrite kernel buffer", ktest_syscall(CMD_FWRITE, k, 1, 16, fd), S_EFAULT);
+    files_expect("fwrite past the block", ktest_syscall(CMD_FWRITE, (long)(block + 8192 - 50), 1, 100, fd),
+                 S_EFAULT);
+    files_expect("fwrite fd not owned", ktest_syscall(CMD_FWRITE, (long)block, 1, 1, 12345), S_EINVARG);
+    files_expect("fclose", fclose(fd), 0);
+    files_expect("fclose again", fclose(fd), S_EINVARG);
+    files_expect("size after the refused writes", file_size("@:/KTDIR/CROSS.TXT"), 300);
+
+    // Read it back into a buffer that crosses the page the other way.
+    fd = fopen("@:/KTDIR/CROSS.TXT", "r");
+    memset(block, 0, 8192);
+    files_expect("fread back across pages", fread(block + 4096 - 150, 300, 1, fd), 1);
+    int same = 1;
+    for (int i = 0; i < 300; i++) {
+        if (block[4096 - 150 + i] != (char)('A' + (4096 - 96 + i) % 26)) {
+            same = 0;
+        }
+    }
+    files_expect("read back equals written", same, 1);
+    files_expect("fwrite to a read-only fd", fwrite(block, 1, 1, fd), S_ERDONLY);
+    fclose(fd);
+
+    fd = fopen("@:/KTDIR/CROSS.TXT", "a");
+    files_expect("ftruncate", ftruncate(fd, 100), 0);
+    files_expect("append", fwrite("xyz", 3, 1, fd), 1);
+    fclose(fd);
+    files_expect("size after truncate and append", file_size("@:/KTDIR/CROSS.TXT"), 103);
+
+    files_expect("opendir a file", opendir("@:/HELLO.TXT"), S_ENOTDIR);
+    files_expect("opendir missing", opendir("@:/NODIR"), S_ENOENT);
+    int dir = opendir("@:/KTDIR");
+    files_expect("opendir", dir > 0, 1);
+    files_expect("readdir into kernel", ktest_syscall(CMD_READDIR, dir, k, 0, 0), S_EFAULT);
+    // The 264-byte entry crosses into the second page.
+    struct file_dirent* e = (struct file_dirent*)(block + 4096 - 100);
+    files_expect("readdir across pages", readdir(dir, e), 1);
+    files_expect("readdir name", strcmp(e->name, "CROSS.TXT") == 0, 1);
+    files_expect("readdir size", e->size, 103);
+    files_expect("readdir end", readdir(dir, &ent), 0);
+    fd = fopen("@:/HELLO.TXT", "r");
+    files_expect("readdir on a file fd", readdir(fd, &ent), S_EINVARG);
+    files_expect("fread on a directory fd", fread(block, 1, 1, dir), S_EINVARG);
+    fclose(fd);
+    files_expect("closedir", closedir(dir), 0);
+
+    files_expect("rmdir non-empty", rmdir("@:/KTDIR"), S_ENOTEMPTY);
+    files_expect("unlink a directory", unlink("@:/KTDIR"), S_EISDIR);
+    files_expect("rmdir a file", rmdir("@:/KTDIR/CROSS.TXT"), S_ENOTDIR);
+    files_expect("unlink", unlink("@:/KTDIR/CROSS.TXT"), 0);
+    files_expect("unlink again", unlink("@:/KTDIR/CROSS.TXT"), S_ENOENT);
+    files_expect("rmdir", rmdir("@:/KTDIR"), 0);
+    files_expect("directory gone", opendir("@:/KTDIR"), S_ENOENT);
+
+    // fclose really closes: 600 opens through 512 kernel descriptors.
+    int opened = 0;
+    for (int i = 0; i < 600; i++) {
+        fd = fopen("@:/HELLO.TXT", "r");
+        if (fd <= 0) {
+            break;
+        }
+        opened++;
+        fclose(fd);
+    }
+    files_expect("600 open and close", opened, 600);
+
+    // Directory descriptors left open are closed on exit.
+    int pid = 0;
+    for (int run = 0; run < 2; run++) {
+        int status = -1;
+        pid = samos_system_run("ktest.elf opendirs 300");
+        files_expect("child started", pid > 0, 1);
+        if (pid > 0) {
+            samos_waitpid(pid, &status);
+        }
+        files_expect("child opened 300 directories", status, 0);
+    }
+
+    free(block);
+    if (files_failures) {
+        say("FILES FAIL %d\n", files_failures);
+        return 1;
+    }
+    print("FILES OK\n");
+    return 0;
+}
+
 static unsigned char data_code[16] = { 0xC3 };   // ret, in .data
 
 // Returns 1 if the mode was one of these, after the fault (which
@@ -604,6 +784,10 @@ int main(int argc, char** argv)
         return badelf_test(argc, argv);
     } else if (strncmp(mode, "bss", 4) == 0) {
         return bss_test();
+    } else if (strncmp(mode, "files", 6) == 0) {
+        return files_test();
+    } else if (strncmp(mode, "opendirs", 9) == 0) {
+        return opendirs_test(argc > 2 ? parse_dec(argv[2]) : 1);
     } else if (isolation_mode(mode, argc, argv)) {
         return 1;
     } else if (strncmp(mode, "spin", 5) == 0) {

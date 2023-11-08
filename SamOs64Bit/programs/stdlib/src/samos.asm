@@ -37,6 +37,13 @@ global samos_udelay:function   ; L198 - userspace udelay / task sleep
 global samos_window_create:function  ; L154
 global samos_sysout_to_window:function ; L158
 global samos_get_window_event:function ; L163
+global samos_fwrite:function
+global samos_ftruncate:function
+global samos_unlink:function
+global samos_mkdir:function
+global samos_rmdir:function
+global samos_opendir:function
+global samos_readdir:function
 global samos_getpid:function
 global samos_waitpid:function
 global samos_kill:function
@@ -71,15 +78,13 @@ SYSCALL_WRAPPER  samos_process_get_arguments, 8   ; void (struct process_argumen
 SYSCALL_WRAPPER  samos_exit,                  9   ; void samos_exit(int status)
 SYSCALL_WRAPPER  samos_fopen,                 10  ; int (const char* filename, const char* mode)
 
-; Lecture 106 - void samos_fclose(size_t fd)
+; Lecture 106 - long samos_fclose(size_t fd)
 ;
-; Upstream bug preserved verbatim: the upstream peachos_fclose
-; never issues the int 0x80, so the syscall is never actually
-; invoked. The kernel-side handler never runs and the per-process
-; file record stays around until the process exits.
-samos_fclose:
-    mov  rax, 11           ; SYSTEM_COMMAND11_FCLOSE
-    ret
+; (files): the upstream peachos_fclose loaded
+; rax and returned without the int 0x80, so nothing was ever closed
+; until the process exited. A shell that opens a file per command
+; ran out of the 512 kernel descriptors. It is a real syscall now.
+SYSCALL_WRAPPER  samos_fclose,                11  ; long (size_t fd)
 
 SYSCALL_WRAPPER4 samos_fread,                 12  ; long (void* buf, size_t size, size_t count, long fd)
 SYSCALL_WRAPPER  samos_fseek,                 13  ; long (long fd, long offset, long whence)
@@ -96,3 +101,10 @@ SYSCALL_WRAPPER  samos_kill,                  29  ; int samos_kill(int pid)
 SYSCALL_WRAPPER  samos_sleep_ms,              30  ; void samos_sleep_ms(unsigned long ms)
 SYSCALL_WRAPPER  samos_uptime,                31  ; unsigned long samos_uptime(void)
 SYSCALL_WRAPPER  samos_getkey_block,          32  ; int samos_getkey_block(void)
+SYSCALL_WRAPPER4 samos_fwrite,                40  ; long (const void* buf, size_t size, size_t count, long fd)
+SYSCALL_WRAPPER  samos_ftruncate,             41  ; int (long fd, unsigned long size)
+SYSCALL_WRAPPER  samos_unlink,                42  ; int (const char* path)
+SYSCALL_WRAPPER  samos_mkdir,                 43  ; int (const char* path)
+SYSCALL_WRAPPER  samos_rmdir,                 44  ; int (const char* path)
+SYSCALL_WRAPPER  samos_opendir,               45  ; int (const char* path)
+SYSCALL_WRAPPER  samos_readdir,               46  ; int (long fd, struct file_dirent* out)

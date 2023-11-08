@@ -1182,30 +1182,34 @@ int process_terminate(struct process* process){
 // The book allocated sizeof(struct process_file_handler*),
 // a pointer's worth (and with the typo `_handler`), so the path and
 // mode were written past the end of the block. Now the full struct.
-int process_fopen(struct process* process, const char* path, const char* mode){
-    int res = 0;
-    int fd  = fopen(path, mode);
+//
+// A failed open returns the kernel's status (-ENOENT,
+// -EISDIR, ...) instead of -EIO for everything. Directory
+// descriptors from process_fopendir are recorded the same way (mode
+// "d"), so process exit closes them too.
+static int process_file_handle_add(struct process* process, int fd,
+                                   const char* path, const char* mode){
     if(fd <= 0){
-        res = -EIO;
-        goto out;
+        return fd < 0 ? fd : -EIO;
     }
-    res = fd;
-
     struct process_file_handle* handle = kzalloc(sizeof(struct process_file_handle));
-    if(!handle){
-        res = -ENOMEM;
-        goto out;
+    if(!handle || vector_push(process->file_handles, &handle) < 0){
+        kfree(handle);
+        fclose(fd);
+        return -ENOMEM;
     }
     handle->fd = fd;
     strncpy(handle->file_path, path, sizeof(handle->file_path) - 1);
     strncpy(handle->mode,      mode, sizeof(handle->mode) - 1);
+    return fd;
+}
 
-    vector_push(process->file_handles, &handle);
-out:
-    if(res < 0 && fd > 0){
-        fclose(fd);
-    }
-    return res;
+int process_fopen(struct process* process, const char* path, const char* mode){
+    return process_file_handle_add(process, fopen_status(path, mode), path, mode);
+}
+
+int process_fopendir(struct process* process, const char* path){
+    return process_file_handle_add(process, fopendir(path), path, "d");
 }
 
 // Every file syscall goes through this, so a process can only
@@ -1275,6 +1279,84 @@ int process_fread(struct process* process, void* virt_ptr,
     return res < 0 ? res : (int)(done / size);
 }
 
+// Userland fwrite, the mirror of process_fread: the
+// whole user range must be readable, and each chunk is copied into a
+// kernel bounce page with copy_from_user, which translates every
+// page on its own (a buffer may cross pages that are not
+// contiguous physically, or not mapped at all).
+int process_fwrite(struct process* process, const void* virt_ptr,
+                   uint64_t size, uint64_t nmemb, int fd){
+    struct process_file_handle* handle = process_file_handle_get(process, fd);
+    if(!handle){
+        return -EINVARG;
+    }
+    if(size == 0 || nmemb == 0){
+        return 0;
+    }
+    if(nmemb > SAMOS_USER_SPACE_END / size){
+        return -EINVARG;
+    }
+    uint64_t total = size * nmemb;
+    if(!user_range_ok(process, virt_ptr, total, false)){
+        return -EFAULT;
+    }
+
+    char* bounce = kmalloc(PROCESS_FREAD_CHUNK);
+    if(!bounce){
+        return -ENOMEM;
+    }
+    int res = 0;
+    uint64_t done = 0;
+    while(done < total){
+        uint32_t chunk = (uint32_t)((total - done) < PROCESS_FREAD_CHUNK ? (total - done) : PROCESS_FREAD_CHUNK);
+        if(copy_from_user(process, bounce, (const char*)virt_ptr + done, chunk) < 0){
+            res = -EFAULT;
+            break;
+        }
+        int put = fwrite(bounce, 1, chunk, handle->fd);
+        if(put < 0){
+            res = put;
+            break;
+        }
+        done += (uint64_t)put;
+        if((uint32_t)put < chunk){
+            break;
+        }
+    }
+    kfree(bounce);
+    return res < 0 ? res : (int)(done / size);
+}
+
+int process_ftruncate(struct process* process, int fd, uint32_t size){
+    struct process_file_handle* handle = process_file_handle_get(process, fd);
+    if(!handle){
+        return -EINVARG;
+    }
+    return ftruncate(handle->fd, size);
+}
+
+// Returns 1 with the entry copied out, 0 at the end of the
+// directory, or a negative status.
+int process_freaddir(struct process* process, int fd, struct file_dirent* virt_entry){
+    struct process_file_handle* handle = process_file_handle_get(process, fd);
+    if(!handle){
+        return -EINVARG;
+    }
+    if(!user_range_ok(process, virt_entry, sizeof(struct file_dirent), true)){
+        return -EFAULT;
+    }
+    struct file_dirent* entry = kzalloc(sizeof(struct file_dirent));
+    if(!entry){
+        return -ENOMEM;
+    }
+    int res = freaddir(handle->fd, entry);
+    if(res == 1 && copy_to_user(process, virt_entry, entry, sizeof(*entry)) < 0){
+        res = -EFAULT;
+    }
+    kfree(entry);
+    return res;
+}
+
 // Lecture 112 - userland fstat.
 //
 // Checks that the process owns fd (the book did not) and
@@ -1316,7 +1398,7 @@ int process_fclose(struct process* process, int fd){
     if(!handle){
         return -EINVARG;
     }
-    fclose(handle->fd);
+    res = fclose(handle->fd);
     vector_pop_element(process->file_handles, &handle, sizeof(handle));
     kfree(handle);
     return res;

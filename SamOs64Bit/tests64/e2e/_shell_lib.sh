@@ -21,6 +21,8 @@ shell_key_for() {
         ' ')  echo spc ;;          $'\n') echo ret ;;
         '-')  echo minus ;;        '.')  echo dot ;;
         '/')  echo slash ;;        '_')  echo shift-minus ;;
+        ':')  echo shift-semicolon ;;  '>') echo shift-dot ;;   # Files
+        '"')  echo shift-apostrophe ;; '=') echo equal ;;
         *) echo "unmapped key '$c'" >&2; return 1 ;;
     esac
 }

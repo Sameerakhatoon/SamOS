@@ -203,6 +203,13 @@ int                            process_fseek(struct process* process, int fd,
                                              int offset, FILE_SEEK_MODE whence);
 int                            process_fstat(struct process* process, int fd,
                                              struct file_stat* virt_filestat_addr);
+// Write side and directories.
+int                            process_fopendir(struct process* process, const char* path);
+int                            process_fwrite(struct process* process, const void* virt_ptr,
+                                              uint64_t size, uint64_t nmemb, int fd);
+int                            process_ftruncate(struct process* process, int fd, uint32_t size);
+int                            process_freaddir(struct process* process, int fd,
+                                                struct file_dirent* virt_entry);
 
 // Lecture 108 - vector-backed allocation table accessors.
 int                            process_find_free_allocation_index(struct process* process);

@@ -43,4 +43,11 @@ void isr80h_register_commands(){
     isr80h_register_command(SYSTEM_COMMAND30_SLEEP_MS,             isr80h_command30_sleep_ms);
     isr80h_register_command(SYSTEM_COMMAND31_UPTIME,               isr80h_command31_uptime);
     isr80h_register_command(SYSTEM_COMMAND32_GETKEY_BLOCK,         isr80h_command32_getkey_block);
+    isr80h_register_command(SYSTEM_COMMAND40_FWRITE,               isr80h_command40_fwrite);
+    isr80h_register_command(SYSTEM_COMMAND41_FTRUNCATE,            isr80h_command41_ftruncate);
+    isr80h_register_command(SYSTEM_COMMAND42_UNLINK,               isr80h_command42_unlink);
+    isr80h_register_command(SYSTEM_COMMAND43_MKDIR,                isr80h_command43_mkdir);
+    isr80h_register_command(SYSTEM_COMMAND44_RMDIR,                isr80h_command44_rmdir);
+    isr80h_register_command(SYSTEM_COMMAND45_OPENDIR,              isr80h_command45_opendir);
+    isr80h_register_command(SYSTEM_COMMAND46_READDIR,              isr80h_command46_readdir);
 }

@@ -48,6 +48,17 @@ enum SystemCommands {
     SYSTEM_COMMAND30_SLEEP_MS,     // void sleep_ms(unsigned long ms)
     SYSTEM_COMMAND31_UPTIME,       // unsigned long uptime(void), ms
     SYSTEM_COMMAND32_GETKEY_BLOCK, // int getkey_block(void)
+
+    // Write side of the VFS and directories. 33-39
+    // are left free for the platform work (time, shutdown, reboot) so the two
+    // branches do not hand out the same numbers.
+    SYSTEM_COMMAND40_FWRITE = 40,  // long fwrite(const void* buf, size_t size, size_t count, long fd)
+    SYSTEM_COMMAND41_FTRUNCATE,    // int ftruncate(int fd, unsigned long size)
+    SYSTEM_COMMAND42_UNLINK,       // int unlink(const char* path), files only
+    SYSTEM_COMMAND43_MKDIR,        // int mkdir(const char* path)
+    SYSTEM_COMMAND44_RMDIR,        // int rmdir(const char* path), empty directories only
+    SYSTEM_COMMAND45_OPENDIR,      // int opendir(const char* path), close with fclose
+    SYSTEM_COMMAND46_READDIR,      // int readdir(int fd, struct file_dirent* out)
 };
 
 void isr80h_register_commands();

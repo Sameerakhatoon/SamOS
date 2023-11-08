@@ -118,7 +118,10 @@ static int file_resolve_path(const char* path, struct path_root** root_out, stru
     return 0;
 }
 
-int fopen(const char* filename, const char* mode_str){
+// Fopen that says why it failed: a descriptor > 0 or
+// a negative status. The fopen syscall returns this, so a program
+// can tell -ENOENT from -EISDIR or -ERDONLY.
+int fopen_status(const char* filename, const char* mode_str){
     int res = 0;
     struct path_root* root_path = NULL;
     struct disk* disk = NULL;
@@ -163,11 +166,13 @@ out:
     if(root_path){
         pathparser_free(root_path);
     }
-    // fopen should never return a negative value.
-    if(res < 0){
-        res = 0;
-    }
     return res;
+}
+
+// The kernel's own callers test for 0 (unchanged API).
+int fopen(const char* filename, const char* mode_str){
+    int res = fopen_status(filename, mode_str);
+    return res < 0 ? 0 : res;
 }
 
 int fread(void* ptr, uint32_t size, uint32_t nmemb, int fd){
