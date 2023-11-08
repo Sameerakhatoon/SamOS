@@ -87,6 +87,40 @@ struct process* process_get_from_kernel_window(struct window* window){
 }
 
 // Lecture 154 - resolve the userspace handle to its process_window record.
+// Lecture 161 - drain one window event from the head of the ring.
+// Returns -EOUTOFRANGE when empty, -EINVARG on bad args, 0 on
+// success. Note: upstream reads index 0 unconditionally and
+// decrements total_unpopped without advancing a read head. The
+// producer side overwrites at `index % MAX`; the consumer always
+// reads slot 0. Preserved verbatim - L162+ wires the loop in
+// userland and will reveal whether this is intended.
+int process_pop_window_event(struct process* process, struct window_event* event_out){
+    int res = -EOUTOFRANGE;
+    if(!process || !event_out){
+        res = -EINVARG;
+        goto out;
+    }
+    if(process->window_events.total_unpopped > 0){
+        vector_at(process->window_events.vector, 0, event_out, sizeof(struct window_event));
+        process->window_events.total_unpopped--;
+        res = 0;
+    }
+out:
+    return res;
+}
+
+// Lecture 161 - enqueue a window event into the ring. We null
+// the kernel-only window pointer before storing because the
+// event might outlive that pointer's mapping.
+int process_push_window_event(struct process* process, struct window_event* event){
+    int element_index = process->window_events.index % PROCESS_MAX_WINDOW_EVENTS_RECORDED;
+    struct window_event event_copy = *event;
+    event_copy.window = NULL;
+    vector_overwrite(process->window_events.vector, element_index, &event_copy, sizeof(event_copy));
+    process->window_events.total_unpopped++;
+    return 0;
+}
+
 struct process_window* process_window_get_from_user_window(struct process* process,
                                                            struct process_userspace_window* user_win){
     size_t total_windows = vector_count(process->windows);
@@ -781,6 +815,15 @@ int process_terminate(struct process* process){
     if(process->windows){
         vector_free(process->windows);
         process->windows = NULL;
+    }
+
+    // Lecture 161 - drop the per-process window-events ring.
+    // Upstream wrote `vector_Free` (capital F) here, which would
+    // not compile; we use the correct identifier and note the
+    // upstream typo here for the audit trail.
+    if(process->window_events.vector){
+        vector_free(process->window_events.vector);
+        process->window_events.vector = NULL;
     }
 
     kfree(process->stack);
