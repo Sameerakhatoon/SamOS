@@ -81,3 +81,37 @@ void* isr80h_command17_sysout_to_window(struct interrupt_frame* frame){
     }
     return 0;
 }
+
+// Lecture 163 - userland passes in a struct window_event_userland*
+// it wants populated with the next event off its ring. We
+// translate the userland address through the task's page tables
+// and pop directly into it.
+void* isr80h_command18_get_window_event(struct interrupt_frame* frame){
+    int res = 0;
+    struct window_event_userland* win_event_out = NULL;
+
+    void* win_event_out_virtual_address = task_get_stack_item(task_current(), 0);
+    if(!win_event_out_virtual_address){
+        res = -EINVARG;
+        goto out;
+    }
+
+    win_event_out = task_virtual_address_to_physical(task_current(),
+                                                     win_event_out_virtual_address);
+    if(!win_event_out){
+        res = -EINVARG;
+        goto out;
+    }
+
+    struct window_event win_event_kern = {0};
+    res = process_pop_window_event(task_current()->process, &win_event_kern);
+    if(res < 0){
+        goto out;
+    }
+
+    window_event_to_userland(&win_event_kern, win_event_out);
+out:
+    // Upstream returns the int status as a void*. Preserve the
+    // sign-extension behaviour by casting through intptr_t.
+    return (void*)(intptr_t)res;
+}
