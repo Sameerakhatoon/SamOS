@@ -87,6 +87,142 @@ struct process* process_get_from_kernel_window(struct window* window){
 }
 
 // Lecture 154 - resolve the userspace handle to its process_window record.
+// Lecture 162 - forward declaration; the body lives further down
+// in this file next to process_unlink so the unlink call site
+// finds it.
+void process_window_closed(struct process* process, struct process_window* proc_win);
+
+// Lecture 162 - title-bar / body coordinates. Click and move
+// events arrive in window-root coords; userland wants
+// body-relative coords. Reject the event if the click landed
+// outside the body region.
+int process_window_event_get_relative_window_body_coords(struct window_event* event,
+                                                         int* out_x, int* out_y){
+    int res = 0;
+    int rel_body_x = event->data.click.x - event->window->graphics->relative_x;
+    int rel_body_y = event->data.click.y - event->window->graphics->relative_y;
+    if(rel_body_x < 0 || rel_body_y < 0 ||
+       rel_body_x > (int)event->window->graphics->width ||
+       rel_body_y > (int)event->window->graphics->height){
+        res = -EINVARG;
+        goto out;
+    }
+    *out_x = rel_body_x;
+    *out_y = rel_body_y;
+out:
+    return res;
+}
+
+int process_window_event_modify_for_userspace_mouse_click(struct window_event* event){
+    return process_window_event_get_relative_window_body_coords(event,
+                                                                &event->data.click.x,
+                                                                &event->data.click.y);
+}
+
+int process_window_event_modify_for_userspace_mouse_move(struct window_event* event){
+    return process_window_event_get_relative_window_body_coords(event,
+                                                                &event->data.move.x,
+                                                                &event->data.move.y);
+}
+
+// Lecture 162 - dispatch the coord-translation by event type.
+int process_window_event_modify_for_userspace(struct window_event* event){
+    int res = 0;
+    switch(event->type){
+        case WINDOW_EVENT_TYPE_MOUSE_CLICK:
+            res = process_window_event_modify_for_userspace_mouse_click(event);
+            break;
+        case WINDOW_EVENT_TYPE_MOUSE_MOVE:
+            res = process_window_event_modify_for_userspace_mouse_move(event);
+            break;
+    }
+    return res;
+}
+
+// Lecture 162 - exposed so the event handler below can swap the
+// active process on focus.
+void process_current_set(struct process* process){
+    current_process = process;
+}
+
+// Lecture 162 - kernel-side reaction to a focus event: make this
+// process current so the next scheduler tick lands in it.
+int process_window_event_handler_event_focus(struct window* window,
+                                             struct process* process,
+                                             struct window_event* event){
+    process_current_set(process);
+    return 0;
+}
+
+// Lecture 162 - same shape as process_get_from_kernel_window but
+// scoped to a single process.
+struct process_window* process_window_get_from_kernel_window(struct process* process,
+                                                             struct window* kern_win){
+    size_t total_windows = vector_count(process->windows);
+    for(size_t i = 0; i < total_windows; i++){
+        struct process_window* proc_win = NULL;
+        vector_at(process->windows, i, &proc_win, sizeof(proc_win));
+        if(proc_win){
+            if(proc_win->kernel_win == kern_win){
+                return proc_win;
+            }
+        }
+    }
+    return NULL;
+}
+
+// Lecture 162 - kernel-side reaction to a close event. Drop the
+// process_window record.
+int process_window_event_handler_event_close(struct window* window,
+                                             struct process* process,
+                                             struct window_event* event){
+    int res = 0;
+    struct process_window* proc_win =
+        process_window_get_from_kernel_window(process, window);
+    if(proc_win){
+        process_window_closed(process, proc_win);
+    }
+    return res;
+}
+
+int process_window_event_handler_kernel_handle_event(struct window* window,
+                                                     struct process* process,
+                                                     struct window_event* event){
+    int res = 0;
+    switch(event->type){
+        case WINDOW_EVENT_TYPE_FOCUS:
+            res = process_window_event_handler_event_focus(window, process, event);
+            break;
+        case WINDOW_EVENT_TYPE_WINDOW_CLOSE:
+            res = process_window_event_handler_event_close(window, process, event);
+            break;
+    }
+    return res;
+}
+
+// Lecture 162 - the handler registered with the window subsystem
+// at window-create time. Translates coords + pushes events into
+// the per-process ring (skipping moves for now), then runs the
+// kernel-side reactions.
+int process_window_event_handler(struct window* window, struct window_event* event){
+    int res = 0;
+    struct process* process = process_get_from_kernel_window(window);
+    if(!process){
+        return 0;
+    }
+    // Move events are disabled for now (upstream comment).
+    if(event->type != WINDOW_EVENT_TYPE_MOUSE_MOVE){
+        struct window_event cloned_event = *event;
+        res = process_window_event_modify_for_userspace(&cloned_event);
+        if(res >= 0){
+            process_push_window_event(process, &cloned_event);
+        }
+        res = 0;
+    }
+    res = process_window_event_handler_kernel_handle_event(window, process, event);
+    return res;
+}
+
 // Lecture 161 - drain one window event from the head of the ring.
 // Returns -EOUTOFRANGE when empty, -EINVARG on bad args, 0 on
 // success. Note: upstream reads index 0 unconditionally and
@@ -180,8 +316,9 @@ struct process_window* process_window_create(struct process* process, char* titl
     proc_win->user_win->height = height;
     strncpy(proc_win->user_win->title, title, sizeof(proc_win->user_win->title));
 
-    // Register the window event handler.
-    // TODO: L160 will land this.
+    // Lecture 162 - register the per-process event handler now
+    // that the body has landed.
+    window_event_handler_register(proc_win->kernel_win, process_window_event_handler);
 
     vector_push(process->windows, &proc_win);
 out:
@@ -773,6 +910,16 @@ static void process_unlink(struct process* process){
     if(current_process == process){
         process_switch_to_any();
     }
+}
+
+// Lecture 162 - the close-event handler calls here once a window
+// has gone away. Drop it from the process's owned-windows
+// vector, return its userspace mirror to the process heap,
+// kfree the kernel record.
+void process_window_closed(struct process* process, struct process_window* proc_win){
+    vector_pop_element(process->windows, &proc_win, sizeof(proc_win));
+    process_free(process, proc_win->user_win);
+    kfree(proc_win);
 }
 
 int process_terminate(struct process* process){
