@@ -9,6 +9,7 @@
 #include "window.h"
 #include "graphics/window.h"
 #include "graphics/graphics.h"
+#include "isr80h/graphics.h"   // L165 - userland_graphics builder
 #include "task/task.h"
 #include "task/process.h"
 #include "task/userlandptr.h"
@@ -114,4 +115,29 @@ out:
     // Upstream returns the int status as a void*. Preserve the
     // sign-extension behaviour by casting through intptr_t.
     return (void*)(intptr_t)res;
+}
+
+// Lecture 165 - userland passes its window handle, we hand back
+// a userland_graphics it owns. The kernel graphics_info pointer
+// stays hidden behind a userland_ptr sentinel.
+void* isr80h_command19_window_graphics_get(struct interrupt_frame* frame){
+    void* user_win_ptr = task_get_stack_item(task_current(), 0);
+    if(!user_win_ptr){
+        return NULL;
+    }
+
+    struct window* kern_window = isr80h_window_from_process_window_virt(user_win_ptr);
+    if(!kern_window){
+        return NULL;
+    }
+
+    struct graphics_info* graphics = kern_window->graphics;
+    struct userland_graphics* userland_graphics = NULL;
+    userland_graphics = isr80h_graphics_make_userland_metadata(task_current()->process, graphics);
+    if(!userland_graphics){
+        return NULL;
+    }
+
+    // Userland owns this pointer and must free it.
+    return (void*)userland_graphics;
 }
