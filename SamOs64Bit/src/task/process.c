@@ -6,6 +6,7 @@
 #include "memory/heap/kheap.h"
 #include "memory/paging/paging.h"
 #include "string/string.h"
+#include "graphics/graphics.h"   // L166 - struct framebuffer_pixel + graphics_info
 // L48 - FAT16 / VFS came back. L63 - elfloader.h back too now
 // that process_load_elf / process_map_elf are un-stubbed.
 #include "fs/file.h"
@@ -1340,5 +1341,87 @@ int process_load_switch(const char* filename, struct process** process){
     if(res == 0){
         process_switch(*process);
     }
+    return res;
+}
+
+// Lecture 166 - map a kernel-side physical range into the
+// process address space. Caller's phys range MUST be
+// page-aligned at both ends. Hands back the virt pointer.
+int process_map_into_userspace(struct process* process, void* phys_ptr,
+                               size_t t_size, int map_flags,
+                               void** virt_addr_out){
+    int res = 0;
+    void* virt_ptr = NULL;
+    void* end_phys_addr = phys_ptr + t_size;
+    if(!paging_is_aligned(phys_ptr)){
+        res = -EINVARG;
+        goto out;
+    }
+    if(!paging_is_aligned(end_phys_addr)){
+        res = -EINVARG;
+        goto out;
+    }
+
+    virt_ptr = process_malloc(process, t_size);
+    if(!virt_ptr){
+        res = -ENOMEM;
+        goto out;
+    }
+
+    map_flags |= PAGING_ACCESS_FROM_ALL;
+    // SamOs paging_map_range takes a PAGE count, not a byte
+    // count. Upstream passes bytes; we convert here so the
+    // existing paging API stays consistent.
+    size_t total_pages = t_size / PAGING_PAGE_SIZE;
+    res = paging_map_range(process->paging_desc, virt_ptr, phys_ptr, total_pages, map_flags);
+    if(res < 0){
+        goto out;
+    }
+    *virt_addr_out = virt_ptr;
+out:
+    return res;
+}
+
+// Lecture 166 - map a graphics_info's pixel buffer into
+// userspace. Rounds the size up to the next page boundary and
+// hands back the virtual base. Optional size_out reports the
+// rounded size.
+int process_map_graphics_framebuffer_pixels_into_userspace(struct process* process,
+                                                           struct graphics_info* graphics_in,
+                                                           struct framebuffer_pixel** virt_addr_out,
+                                                           size_t* size_out){
+    int res = 0;
+    struct framebuffer_pixel* pixels = NULL;
+    size_t graphics_width  = 0;
+    size_t graphics_height = 0;
+
+    if(!graphics_in){
+        res = -EINVARG;
+        goto out;
+    }
+    pixels = graphics_in->pixels;
+    if(!pixels){
+        res = -EINVARG;
+        goto out;
+    }
+    graphics_width  = graphics_in->width;
+    graphics_height = graphics_in->height;
+
+    size_t memory_size =
+        paging_align_value_to_upper_page(graphics_width * graphics_height *
+                                         sizeof(struct framebuffer_pixel));
+
+    int map_flags = PAGING_ACCESS_FROM_ALL | PAGING_CACHE_DISABLED |
+                    PAGING_IS_PRESENT | PAGING_IS_WRITEABLE;
+
+    res = process_map_into_userspace(process, pixels, memory_size, map_flags,
+                                     (void**)virt_addr_out);
+    if(res < 0){
+        goto out;
+    }
+    if(size_out){
+        *size_out = memory_size;
+    }
+out:
     return res;
 }
