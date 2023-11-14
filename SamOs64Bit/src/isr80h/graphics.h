@@ -8,8 +8,12 @@
 #include <stdint.h>
 #include <stddef.h>
 
+// Lecture 168 - forward decls. Upstream added these once the
+// L165-L167 callers across multiple TUs needed graphics.h to
+// not pull in interrupt frame transitively.
 struct process;
 struct graphics_info;
+struct interrupt_frame;
 
 struct userland_graphics {
     size_t x;
