@@ -7,6 +7,7 @@
 #include "task/process.h"
 #include "status.h"
 #include "io/pit.h"
+#include "io/apic.h"
 
 // 256 gates; x86 has no more vectors (the book sized it 512).
 struct idt_desc  idt_descriptors[SAMOS_TOTAL_INTERRUPTS];
@@ -159,7 +160,17 @@ void interrupt_handler(struct trap_frame* frame){
         return;
     }
 
-    if(vector >= IDT_IRQ_BASE && vector < IDT_IRQ_END){
+    // With the APIC every vector from 32 up is a LAPIC
+    // interrupt (int 0x80 has its own entry) and gets a LAPIC EOI,
+    // except the LAPIC spurious vector and the masked 8259s' range,
+    // where only a spurious 8259 IRQ can land.
+    if(apic_active()){
+        if(vector == APIC_VECTOR_SPURIOUS ||
+           (vector >= APIC_VECTOR_PIC_BASE && vector < APIC_VECTOR_PIC_END)){
+            return;
+        }
+        lapic_eoi();
+    } else if(vector >= IDT_IRQ_BASE && vector < IDT_IRQ_END){
         if(pic_spurious(vector)){
             return;
         }
@@ -253,6 +264,8 @@ void idt_init(){
     // Lecture 52 - timer (IRQ0). kernel_main programs the PIT
     // and unmasks it.
     idt_register_interrupt_callback(IDT_IRQ_BASE, idt_clock);
+    // The LAPIC timer, when kernel_main starts it.
+    idt_register_interrupt_callback(APIC_VECTOR_TIMER, idt_clock);
 
     idt_load(&idtr_descriptor);
 }

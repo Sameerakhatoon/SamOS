@@ -95,6 +95,7 @@ struct pci_ecam_range {
     uint8_t  end_bus;
     uint64_t phys_base;
     void*    virt_base;
+    uint8_t  mapped[32];     // Bit per bus, mapped on first access
 };
 
 typedef void* (*pci_ecam_map_fn_t)(uint64_t phys, size_t size);

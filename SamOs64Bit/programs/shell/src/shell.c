@@ -1,8 +1,8 @@
 // The SamOS shell: a line editor, builtins, quoting, and
 // program launch.
 //
-// Builtins: help, echo (with > and >>), clear, exit, ls, cat, and
-// mkdir, write, rm, rmdir. Anything else is
+// Builtins: help, echo (with > and >>), clear, exit, ls, cat,
+// mkdir, write, rm, rmdir, date, shutdown, reboot. Anything else is
 // looked up on the boot filesystem and started as a program.
 
 #include "shell.h"
@@ -62,6 +62,9 @@ static int shell_mkdir(int argc, char** argv);
 static int shell_write(int argc, char** argv);
 static int shell_rm(int argc, char** argv);
 static int shell_rmdir(int argc, char** argv);
+static int shell_date(int argc, char** argv);
+static int shell_shutdown(int argc, char** argv);
+static int shell_reboot(int argc, char** argv);
 
 static const struct shell_builtin shell_builtins[] = {
     {"help",  "help              list the builtins",           shell_help},
@@ -74,6 +77,9 @@ static const struct shell_builtin shell_builtins[] = {
     {"write", "write file words... write the words to a file", shell_write},
     {"rm",    "rm files...       remove files",                shell_rm},
     {"rmdir", "rmdir dirs...     remove empty directories",    shell_rmdir},
+    {"date",     "date              print the date and time (UTC)", shell_date},
+    {"shutdown", "shutdown          power off",                     shell_shutdown},
+    {"reboot",   "reboot            restart the machine",           shell_reboot},
 };
 #define SHELL_BUILTIN_COUNT (sizeof(shell_builtins) / sizeof(shell_builtins[0]))
 
@@ -171,6 +177,41 @@ static int shell_write(int argc, char** argv){
 static int shell_clear(int argc, char** argv){
     print("\f");
     return 0;
+}
+
+// Unix seconds to a UTC date (civil-from-days, the inverse
+// of the kernel's rtc_to_unix).
+static int shell_date(int argc, char** argv){
+    long t = samos_time();
+    if(t < 0){
+        printf("date: no clock\n");
+        return 1;
+    }
+    long days = t / 86400, secs = t % 86400;
+    long z = days + 719468;
+    long era = z / 146097;
+    long doe = z - era * 146097;
+    long yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    long doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    long mp = (5 * doy + 2) / 153;
+    int day = (int)(doy - (153 * mp + 2) / 5 + 1);
+    int month = (int)(mp < 10 ? mp + 3 : mp - 9);
+    int year = (int)(yoe + era * 400 + (month <= 2));
+    printf("%d-%02d-%02d %02d:%02d:%02d UTC\n", year, month, day,
+           (int)(secs / 3600), (int)(secs / 60 % 60), (int)(secs % 60));
+    return 0;
+}
+
+static int shell_shutdown(int argc, char** argv){
+    printf("shutting down\n");
+    samos_shutdown();
+    return 1;
+}
+
+static int shell_reboot(int argc, char** argv){
+    printf("rebooting\n");
+    samos_reboot();
+    return 1;
 }
 
 static int shell_exit(int argc, char** argv){

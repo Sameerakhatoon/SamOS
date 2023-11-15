@@ -8,6 +8,7 @@
 #include "window.h" // L154 - command 16 window_create
 #include "graphics.h" // L166 - command 20 graphics pixels
 #include "time.h"     // L198 - command 25 udelay
+#include "platform.h" // Commands 48-50
 
 void isr80h_register_commands(){
     isr80h_register_command(SYSTEM_COMMAND0_SUM,    isr80h_command0_sum);
@@ -50,4 +51,7 @@ void isr80h_register_commands(){
     isr80h_register_command(SYSTEM_COMMAND44_RMDIR,                isr80h_command44_rmdir);
     isr80h_register_command(SYSTEM_COMMAND45_OPENDIR,              isr80h_command45_opendir);
     isr80h_register_command(SYSTEM_COMMAND46_READDIR,              isr80h_command46_readdir);
+    isr80h_register_command(SYSTEM_COMMAND48_TIME,                 isr80h_command48_time);
+    isr80h_register_command(SYSTEM_COMMAND49_SHUTDOWN,             isr80h_command49_shutdown);
+    isr80h_register_command(SYSTEM_COMMAND50_REBOOT,               isr80h_command50_reboot);
 }

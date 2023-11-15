@@ -48,6 +48,9 @@
 #include "io/serial.h"            // COM1 console
 #include "boot/boot_info.h"       // Loader handoff block
 #include "cpu/cpu.h"              // CPUID checks, CR0/CR4/EFER
+#include "acpi/acpi.h"            // ACPI tables, shutdown, reboot
+#include "io/rtc.h"               // Wall-clock time
+#include "io/apic.h"              // LAPIC, IOAPIC, LAPIC timer
 
 // L87 - bss-resident default_graphics_info lives in kernel.asm;
 // the long-mode entry stashes the UEFI framebuffer params into it
@@ -389,6 +392,11 @@ void kernel_main(void)
     boot_marker_set(BM_STAGE_MULTIHEAP_READY, 0);
     print("multiheap ready\n");
 
+    // ACPI tables (MADT, FADT, MCFG) before PCI and the
+    // interrupt controllers; the RTC needs the FADT century register.
+    acpi_init(samos_boot_info_ptr->acpi_rsdp);
+    rtc_init();
+
     // Lecture 87 - bring up the graphics subsystem. The struct
     // was filled in by long-mode entry from the UEFI handoff
     // regs. Lecture 100 stashes the resolved screen_info now so
@@ -407,8 +415,21 @@ void kernel_main(void)
     // PIT channel 0 at 100 Hz on IRQ0,
     // unmasked. Interrupts stay off in the kernel until the first
     // iretq into a task (or the idle loop) sets IF.
-    pit_init(PIT_TICK_HZ);
-    IRQ_enable(IRQ_TIMER);
+    // The LAPIC and IOAPIC replace the 8259s, and the
+    // LAPIC timer (calibrated against the TSC) the PIT tick, at the
+    // same 100 Hz. Without a usable MADT, or with samos.legacy_pic,
+    // the 8259s and the PIT stay.
+    if (!cmdline_has("samos.legacy_pic") && apic_init() == 0 &&
+        lapic_timer_calibrate() == 0)
+    {
+        lapic_timer_start(PIT_TICK_HZ);
+    }
+    else
+    {
+        serial_write("apic: legacy 8259 and PIT tick\n");
+        pit_init(PIT_TICK_HZ);
+        IRQ_enable(IRQ_TIMER);
+    }
 
     // e2e hooks: a kernel-mode fault must panic with a
     // register dump; a fault that cannot push its frame must reach
@@ -543,6 +564,16 @@ void kernel_main(void)
 
     // Memory-manager self-tests (leak, stress, PFA, slabs).
     memtest_run(cmdline_has("samos.memtest=full"));
+
+    // e2e hooks: power off or reset once the boot is done.
+    if (cmdline_has("samos.shutdown_test"))
+    {
+        acpi_shutdown();
+    }
+    if (cmdline_has("samos.reboot_test"))
+    {
+        acpi_reboot();
+    }
 
     // SamOs e2e (Phase 2): if a user-side selftest ELF is on the
     // primary FS, load it as the first task and drop into ring 3

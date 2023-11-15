@@ -14,7 +14,7 @@
 # we substitute the mformat/mcopy pipeline used by SamOs since it
 # does not need sudo or a real mount point.
 
-FILES = ./build/kernel.asm.o ./build/kernel.o ./build/early_fault.o ./build/cpu/cpu.o ./build/kernel_selftest.o ./build/string/string.o ./build/memory/memory.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/heap/multiheap.o ./build/memory/pfa.o ./build/memory/heap/slab.o ./build/memory/heap/memtest.o ./build/memory/paging/paging.o ./build/memory/paging/paging.asm.o ./build/io/io.asm.o ./build/io/cpuid.o ./build/io/tsc.o ./build/io/tsc.asm.o ./build/io/pit.o ./build/io/serial.o ./build/io/pci.o ./build/idt/idt.o ./build/idt/idt.asm.o ./build/idt/irq.o ./build/task/task.o ./build/task/task.asm.o ./build/task/process.o ./build/task/userlandptr.o ./build/task/uaccess.o ./build/task/tss.asm.o ./build/fs/file.o ./build/fs/pparser.o ./build/fs/fat/fat.o ./build/fs/storage_selftest.o ./build/disk/disk.o ./build/disk/driver.o ./build/disk/drivers/pata.o ./build/disk/drivers/nvme.o ./build/disk/drivers/ahci.o ./build/disk/mbr.o ./build/disk/streamer.o ./build/disk/gpt.o ./build/graphics/graphics.o ./build/graphics/font.o ./build/graphics/font_builtin.o ./build/graphics/terminal.o ./build/graphics/window.o ./build/graphics/image/image.o ./build/graphics/image/bmp.o ./build/mouse/mouse.o ./build/mouse/ps2mouse.o ./build/gdt/gdt.o ./build/keyboard/keyboard.o ./build/keyboard/classic.o ./build/isr80h/isr80h.o ./build/isr80h/io.o ./build/isr80h/heap.o ./build/isr80h/misc.o ./build/isr80h/window.o ./build/isr80h/graphics.o ./build/isr80h/time.o ./build/isr80h/file.o ./build/isr80h/process.o ./build/loader/formats/elf.o ./build/loader/formats/elfloader.o ./build/lib/vector/vector.o
+FILES = ./build/kernel.asm.o ./build/kernel.o ./build/early_fault.o ./build/cpu/cpu.o ./build/kernel_selftest.o ./build/string/string.o ./build/memory/memory.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/heap/multiheap.o ./build/memory/pfa.o ./build/memory/heap/slab.o ./build/memory/heap/memtest.o ./build/memory/paging/paging.o ./build/memory/paging/paging.asm.o ./build/io/io.asm.o ./build/io/cpuid.o ./build/io/tsc.o ./build/io/tsc.asm.o ./build/io/pit.o ./build/io/serial.o ./build/io/pci.o ./build/io/rtc.o ./build/io/apic.o ./build/acpi/acpi.o ./build/idt/idt.o ./build/idt/idt.asm.o ./build/idt/irq.o ./build/task/task.o ./build/task/task.asm.o ./build/task/process.o ./build/task/userlandptr.o ./build/task/uaccess.o ./build/task/tss.asm.o ./build/fs/file.o ./build/fs/pparser.o ./build/fs/fat/fat.o ./build/fs/storage_selftest.o ./build/disk/disk.o ./build/disk/driver.o ./build/disk/drivers/pata.o ./build/disk/drivers/nvme.o ./build/disk/drivers/ahci.o ./build/disk/mbr.o ./build/disk/streamer.o ./build/disk/gpt.o ./build/graphics/graphics.o ./build/graphics/font.o ./build/graphics/font_builtin.o ./build/graphics/terminal.o ./build/graphics/window.o ./build/graphics/image/image.o ./build/graphics/image/bmp.o ./build/mouse/mouse.o ./build/mouse/ps2mouse.o ./build/gdt/gdt.o ./build/keyboard/keyboard.o ./build/keyboard/classic.o ./build/isr80h/isr80h.o ./build/isr80h/io.o ./build/isr80h/heap.o ./build/isr80h/misc.o ./build/isr80h/window.o ./build/isr80h/graphics.o ./build/isr80h/time.o ./build/isr80h/platform.o ./build/isr80h/file.o ./build/isr80h/process.o ./build/loader/formats/elf.o ./build/loader/formats/elfloader.o ./build/lib/vector/vector.o
 INCLUDES = -I./src
 # No red zone (an interrupt pushes its frame right
 # below the interrupted rsp), no SSE/x87 code in the kernel (user FPU
@@ -107,6 +107,17 @@ user_programs_clean:
 
 ./build/io/pci.o: ./src/io/pci.c
 	x86_64-elf-gcc $(INCLUDES) -I./src/io $(FLAGS) -std=gnu99 -c ./src/io/pci.c -o ./build/io/pci.o
+
+# CMOS real-time clock and the ACPI tables.
+./build/io/rtc.o: ./src/io/rtc.c
+	x86_64-elf-gcc $(INCLUDES) -I./src/io $(FLAGS) -std=gnu99 -c ./src/io/rtc.c -o ./build/io/rtc.o
+
+./build/io/apic.o: ./src/io/apic.c
+	x86_64-elf-gcc $(INCLUDES) -I./src/io $(FLAGS) -std=gnu99 -c ./src/io/apic.c -o ./build/io/apic.o
+
+./build/acpi/acpi.o: ./src/acpi/acpi.c
+	mkdir -p ./build/acpi
+	x86_64-elf-gcc $(INCLUDES) -I./src/acpi $(FLAGS) -std=gnu99 -c ./src/acpi/acpi.c -o ./build/acpi/acpi.o
 
 ./build/idt/idt.o: ./src/idt/idt.c
 	x86_64-elf-gcc $(INCLUDES) -I./src/idt $(FLAGS) -std=gnu99 -c ./src/idt/idt.c -o ./build/idt/idt.o
@@ -248,6 +259,9 @@ user_programs_clean:
 
 ./build/isr80h/time.o: ./src/isr80h/time.c
 	x86_64-elf-gcc $(INCLUDES) -I./src/isr80h $(FLAGS) -std=gnu99 -c ./src/isr80h/time.c -o ./build/isr80h/time.o
+
+./build/isr80h/platform.o: ./src/isr80h/platform.c
+	x86_64-elf-gcc $(INCLUDES) -I./src/isr80h $(FLAGS) -std=gnu99 -c ./src/isr80h/platform.c -o ./build/isr80h/platform.o
 
 ./build/loader/formats/elf.o: ./src/loader/formats/elf.c
 	mkdir -p ./build/loader/formats

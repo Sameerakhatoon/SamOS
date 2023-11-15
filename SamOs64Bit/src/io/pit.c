@@ -39,15 +39,15 @@ void pit_tick(void){
 
 // Channel 2 in mode 0 (interrupt on terminal count): OUT2, readable
 // as bit 5 of port 0x61, goes high when the count runs out. Count the
-// TSC cycles in between.
-static uint64_t pit_measure_once(void){
+// cycles of `read` (the TSC, or the LAPIC timer) in between.
+static uint64_t pit_measure_once(uint64_t (*read)(void)){
     uint16_t latch = PIT_INPUT_HZ / PIT_CAL_DIVISOR;
     uint8_t gate = insb(PIT_GATE_PORT);
     outb(PIT_GATE_PORT, (gate & ~0x02) | 0x01);     // gate on, speaker off
     outb(PIT_COMMAND, 0xB0);                         // channel 2, lo/hi, mode 0
     outb(PIT_CHANNEL2, latch & 0xFF);
     outb(PIT_CHANNEL2, latch >> 8);                  // counting starts here
-    TIME_TSC start = read_tsc();
+    uint64_t start = read();
     uint32_t polls = 0;
     while(!(insb(PIT_GATE_PORT) & 0x20)){
         if(++polls == PIT_CAL_MAX_POLLS){
@@ -55,17 +55,17 @@ static uint64_t pit_measure_once(void){
             return 0;
         }
     }
-    TIME_TSC end = read_tsc();
+    uint64_t end = read();
     outb(PIT_GATE_PORT, gate);
     return (end - start) * PIT_CAL_DIVISOR;
 }
 
 // Median of three windows, so one window stretched by the host
 // descheduling the VM does not decide the frequency.
-uint64_t pit_measure_tsc_hz(void){
+uint64_t pit_measure_hz(uint64_t (*read)(void)){
     uint64_t r[PIT_CAL_ROUNDS];
     for(int i = 0; i < PIT_CAL_ROUNDS; i++){
-        r[i] = pit_measure_once();
+        r[i] = pit_measure_once(read);
         if(!r[i]){
             return 0;
         }
@@ -80,4 +80,8 @@ uint64_t pit_measure_tsc_hz(void){
         }
     }
     return r[PIT_CAL_ROUNDS / 2];
+}
+
+uint64_t pit_measure_tsc_hz(void){
+    return pit_measure_hz(read_tsc);
 }

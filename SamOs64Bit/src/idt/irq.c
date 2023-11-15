@@ -10,8 +10,15 @@
 
 #include "idt/irq.h"
 #include "io/io.h"
+#include "io/apic.h"
 
 void IRQ_enable(IRQ irq){
+    // With the APIC the 8259s stay masked; the line is
+    // the IRQ's IOAPIC entry (GSI, polarity, trigger from the MADT).
+    if(apic_active()){
+        ioapic_set_masked(irq, false);
+        return;
+    }
     int port = IRQ_MASTER_PORT;
     IRQ relative_irq = irq;
     if(irq >= PIC_SLAVE_STARTING_IRQ){
@@ -29,6 +36,10 @@ void IRQ_enable(IRQ irq){
 }
 
 void IRQ_disable(IRQ irq){
+    if(apic_active()){
+        ioapic_set_masked(irq, true);
+        return;
+    }
     int port = IRQ_MASTER_PORT;
     IRQ relative_irq = irq;
     if(irq >= PIC_SLAVE_STARTING_IRQ){

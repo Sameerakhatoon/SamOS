@@ -15,6 +15,11 @@
 #include "lib/vector/vector.h"
 #include "status.h"
 #include "kernel.h"
+#include "acpi/acpi.h"
+#include "io/serial.h"
+#include "memory/memory.h"
+#include "memory/paging/paging.h"
+#include "string/string.h"
 #include <stdbool.h>
 
 // ECAM globals.
@@ -41,11 +46,31 @@ static inline uint32_t pci_cfg_addr_legacy(uint8_t bus, uint8_t slot, uint8_t fu
            offset_aligned;
 }
 
+static pci_ecam_map_fn_t g_ecam_mapper;
+
+// A whole ECAM range is 1 MiB per bus (256 MiB on q35);
+// mapping it all in 4 KiB pages costs 128 page tables. Each bus is
+// mapped on its first access instead. The mapper must map linearly
+// (the direct map does), so the range keeps one virt_base.
+static bool pci_ecam_map_bus(struct pci_ecam_range* r, uint8_t bus){
+    uint8_t i = bus - r->start_bus;
+    if(r->mapped[i / 8] & (1 << (i % 8))){
+        return true;
+    }
+    size_t off = (size_t)i << PCI_ECAM_BUS_SHIFT;
+    void* v = g_ecam_mapper ? g_ecam_mapper(r->phys_base + off, 1u << PCI_ECAM_BUS_SHIFT) : NULL;
+    if(v != (uint8_t*)r->virt_base + off){
+        return false;
+    }
+    r->mapped[i / 8] |= 1 << (i % 8);
+    return true;
+}
+
 // Lecture 178 - ECAM range lookup. Upstream uses
-// `bus < r->start_bus || bus < r->end_bus` (note: the second
-// half should be `bus > r->end_bus`). Preserved verbatim
-// because it never breaks the build, just makes the loop fail
-// to find ranges; documented here.
+// `bus < r->start_bus || bus < r->end_bus`; the second half should
+// be `bus > r->end_bus`, and with it every bus but the last missed
+// its range. The platform work fixes it now that ECAM is really used.
+// A bus outside every range falls back to the 0xCF8 ports.
 static inline volatile uint8_t* pci_ecam_cfg_ptr(uint8_t bus, uint8_t slot, uint8_t func, uint16_t offset){
     if(!g_ecam_enabled){
         return NULL;
@@ -55,8 +80,11 @@ static inline volatile uint8_t* pci_ecam_cfg_ptr(uint8_t bus, uint8_t slot, uint
     }
     for(int i = 0; i < g_ecam_count; ++i){
         struct pci_ecam_range* r = &g_ecam[i];
-        if(bus < r->start_bus || bus < r->end_bus){
+        if(bus < r->start_bus || bus > r->end_bus){
             continue;
+        }
+        if(!pci_ecam_map_bus(r, bus)){
+            return NULL;
         }
         size_t bus_off  = ((size_t)(bus - r->start_bus)) << PCI_ECAM_BUS_SHIFT;
         size_t dev_off  = ((size_t)slot)                 << PCI_ECAM_DEV_SHIFT;
@@ -79,6 +107,8 @@ int pci_ecam_install_range(uint16_t seg_group, uint64_t phys_base,
     g_ecam[g_ecam_count].start_bus = start_bus;
     g_ecam[g_ecam_count].end_bus   = end_bus;
     g_ecam[g_ecam_count].virt_base = virt_base;
+    // A caller that installs a range has mapped all of it.
+    memset(g_ecam[g_ecam_count].mapped, 0xFF, sizeof(g_ecam[g_ecam_count].mapped));
     g_ecam_count++;
     g_ecam_enabled = true;
     return 0;
@@ -124,20 +154,26 @@ int pci_ecam_init_from_mcfg(void* mcfg_table_virt, pci_ecam_map_fn_t mapper){
     size_t count = entries_bytes / sizeof(acpi_mcfg_entry_t);
     acpi_mcfg_entry_t* ent = (acpi_mcfg_entry_t*)((uint8_t*)mcfg + sizeof(acpi_mcfg_t));
     int installed = 0;
+    g_ecam_mapper = mapper;
     for(size_t i = 0; i < count; i++){
         uint8_t start = ent[i].start_bus_number;
         uint8_t end   = ent[i].end_bus_number;
-        if(start > end){
+        // Only segment 0 is reachable through the
+        // (bus, slot, func) API.
+        if(start > end || ent[i].pci_segment_group != 0){
             continue;
         }
-        size_t buses  = (size_t)(end - start + 1);
-        size_t map_sz = buses << PCI_ECAM_BUS_SHIFT;
         uint64_t phys = ent[i].base_address + ((uint64_t)start << PCI_ECAM_BUS_SHIFT);
-        void* v = mapper(phys, map_sz);
+        // Map the first bus now, the rest on demand
+        // (pci_ecam_map_bus).
+        void* v = mapper(phys, 1u << PCI_ECAM_BUS_SHIFT);
         if(!v){
             continue;
         }
         if(pci_ecam_install_range(ent[i].pci_segment_group, phys, start, end, v) == 0){
+            struct pci_ecam_range* r = &g_ecam[g_ecam_count - 1];
+            memset(r->mapped, 0, sizeof(r->mapped));
+            r->mapped[0] = 1;
             installed++;
         }
     }
@@ -383,12 +419,31 @@ static void pci_scan_bus(uint8_t bus, struct pci_device* parent_bridge){
     }
 }
 
+static void* pci_ecam_map(uint64_t phys, size_t size){
+    return paging_map_mmio(phys, size, PAGING_CACHE_DISABLED);
+}
+
 // Lecture 180 - boot-time entry point. Allocates the device
 // vector and scans bus 0.
+// Config space goes through ECAM when ACPI has an MCFG
+// (q35), else through the 0xCF8/0xCFC ports (pc has no MCFG).
 int pci_init(void){
     pci_device_vector = vector_new(sizeof(struct pci_device*), 16, 0);
     if(!pci_device_vector){
         return -ENOMEM;
+    }
+    struct acpi_sdt_header* mcfg = acpi_find_table("MCFG", 0);
+    if(mcfg && pci_ecam_init_from_mcfg(mcfg, pci_ecam_map) == 0){
+        serial_write("pci: config access ECAM, base ");
+        serial_write_hex(g_ecam[0].phys_base);
+        serial_write(", buses ");
+        serial_write(itoa(g_ecam[0].start_bus));
+        serial_write("-");
+        serial_write(itoa(g_ecam[0].end_bus));
+        serial_write("\n");
+    } else {
+        serial_write(mcfg ? "pci: MCFG unusable, config access ports 0xcf8/0xcfc\n"
+                          : "pci: no MCFG, config access ports 0xcf8/0xcfc\n");
     }
     pci_scan_bus(0, NULL);
     return 0;

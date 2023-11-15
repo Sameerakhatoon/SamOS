@@ -18,5 +18,7 @@ void     pit_tick(void);
 // TSC cycles per second measured against channel 2, or 0 when the
 // channel never reached its terminal count.
 uint64_t pit_measure_tsc_hz(void);
+// The same for any up-counter (the LAPIC timer).
+uint64_t pit_measure_hz(uint64_t (*read)(void));
 
 #endif

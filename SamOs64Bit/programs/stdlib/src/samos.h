@@ -25,6 +25,9 @@ int           samos_wait(int* status);
 int           samos_kill(int pid);
 void          samos_sleep_ms(unsigned long ms);
 unsigned long samos_uptime(void);   // milliseconds since boot
+long          samos_time(void);     // Seconds since 1970 UTC, -1 on error
+void          samos_shutdown(void); // Power off, does not return
+void          samos_reboot(void);   // Reset, does not return
 
 struct command_argument {
     char argument[512];

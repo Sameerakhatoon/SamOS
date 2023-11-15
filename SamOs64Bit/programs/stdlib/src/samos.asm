@@ -49,6 +49,9 @@ global samos_waitpid:function
 global samos_kill:function
 global samos_sleep_ms:function
 global samos_uptime:function
+global samos_time:function
+global samos_shutdown:function
+global samos_reboot:function
 
 ; One wrapper per syscall: rax = number, int 0x80, return rax.
 %macro SYSCALL_WRAPPER 2
@@ -108,3 +111,6 @@ SYSCALL_WRAPPER  samos_mkdir,                 43  ; int (const char* path)
 SYSCALL_WRAPPER  samos_rmdir,                 44  ; int (const char* path)
 SYSCALL_WRAPPER  samos_opendir,               45  ; int (const char* path)
 SYSCALL_WRAPPER  samos_readdir,               46  ; int (long fd, struct file_dirent* out)
+SYSCALL_WRAPPER  samos_time,                  48  ; long samos_time(void)
+SYSCALL_WRAPPER  samos_shutdown,              49  ; void samos_shutdown(void)
+SYSCALL_WRAPPER  samos_reboot,                50  ; void samos_reboot(void)
