@@ -157,3 +157,23 @@ void* isr80h_command21_window_redraw(struct interrupt_frame* frame){
     window_redraw(kern_window);
     return NULL;
 }
+
+// Lecture 172 - userland asks the compositor to redraw a body
+// region (clip rect). Translates the userland window handle and
+// forwards the rect to window_redraw_body_region.
+void* isr80h_command23_window_redraw_region(struct interrupt_frame* frame){
+    long rect_x      = (long)task_get_stack_item(task_current(), 0);
+    long rect_y      = (long)task_get_stack_item(task_current(), 1);
+    long rect_width  = (long)task_get_stack_item(task_current(), 2);
+    long rect_height = (long)task_get_stack_item(task_current(), 3);
+    void* user_window_ptr = task_get_stack_item(task_current(), 4);
+    if(!user_window_ptr){
+        return ERROR(-EINVARG);
+    }
+    struct window* kern_window = isr80h_window_from_process_window_virt(user_window_ptr);
+    if(!kern_window){
+        return ERROR(-EINVARG);
+    }
+    window_redraw_body_region(kern_window, rect_x, rect_y, rect_width, rect_height);
+    return NULL;
+}
