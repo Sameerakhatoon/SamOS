@@ -26,6 +26,7 @@ enum SystemCommands {
     SYSTEM_COMMAND21_WINDOW_REDRAW, // L167 - userspace window redraw
     SYSTEM_COMMAND22_GRAPHICS_CREATE, // L171 - userspace relative graphics create
     SYSTEM_COMMAND23_WINDOW_REDRAW_REGION, // L172 - userspace body-region redraw
+    SYSTEM_COMMAND24_UPDATE_WINDOW, // L173 - userspace update window field
 };
 
 void isr80h_register_commands();
