@@ -24,6 +24,7 @@ enum SystemCommands {
     SYSTEM_COMMAND19_WINDOW_GRAPHICS_GET, // L165 - userspace graphics info
     SYSTEM_COMMAND20_GRAPHICS_PIXELS_BUFFER_GET, // L166 - userspace pixels mapping
     SYSTEM_COMMAND21_WINDOW_REDRAW, // L167 - userspace window redraw
+    SYSTEM_COMMAND22_GRAPHICS_CREATE, // L171 - userspace relative graphics create
 };
 
 void isr80h_register_commands();
