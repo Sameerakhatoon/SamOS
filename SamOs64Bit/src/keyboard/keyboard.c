@@ -4,6 +4,8 @@
 #include "kernel.h"
 #include "task/process.h"
 #include "task/task.h"
+#include "memory/memory.h"           // L174 - memcpy for listener clone
+#include "memory/heap/kheap.h"       // L174 - kzalloc / kfree for listeners
 
 static struct keyboard* keyboard_list_head = 0;
 static struct keyboard* keyboard_list_last = 0;
@@ -32,6 +34,16 @@ int keyboard_insert(struct keyboard* keyboard){
     }
 
     res = keyboard->init();
+    if(res >= 0){
+        // Lecture 174 - keyboard.c owns the listener vector. The
+        // driver's init must not pre-populate it; we panic if it
+        // did so we catch the bug early.
+        if(keyboard->key_listeners != NULL){
+            panic("Let the keyboard.c file make the key listeners vectors");
+        }
+        keyboard->key_listeners =
+            vector_new(sizeof(struct keyboard_listener*), 4, 0);
+    }
 
 out:
     return res;
@@ -59,6 +71,13 @@ void keyboard_push(char c){
     int real_index = keyboard_get_tail_index(process);
     process->keyboard.buffer[real_index] = c;
     process->keyboard.tail++;
+
+    // Lecture 174 - fan the keypress out to anyone registered on
+    // the default keyboard.
+    struct keyboard_event keyboard_event = {0};
+    keyboard_event.type = KEYBOARD_EVENT_KEY_PRESS;
+    keyboard_event.data.key_press.key = c;
+    keyboard_push_event_to_listeners(keyboard_default(), &keyboard_event);
 }
 
 void keyboard_set_capslock(struct keyboard* keyboard, KEYBOARD_CAPS_LOCK_STATE state){
@@ -86,4 +105,85 @@ char keyboard_pop(){
     process->keyboard.buffer[real_index] = 0;
     process->keyboard.head++;
     return c;
+}
+
+// Lecture 174 - head of the inserted-keyboards list. When
+// listener helpers receive a NULL keyboard they fall back to
+// this default.
+struct keyboard* keyboard_default(){
+    return keyboard_list_head;
+}
+
+// Lecture 174 - register a listener on the given keyboard
+// (NULL means the default). We clone the caller's listener into
+// kheap so the registration outlives the caller's stack frame.
+int keyboard_register_handler(struct keyboard* keyboard,
+                              struct keyboard_listener keyboard_listener){
+    int res = 0;
+    struct keyboard_listener* listener_clone = NULL;
+    if(keyboard == NULL){
+        keyboard = keyboard_default();
+    }
+    if(!keyboard){
+        res = -EINVARG;
+        goto out;
+    }
+
+    listener_clone = kzalloc(sizeof(struct keyboard_listener));
+    if(!listener_clone){
+        res = -ENOMEM;
+        goto out;
+    }
+    memcpy(listener_clone, &keyboard_listener, sizeof(struct keyboard_listener));
+    vector_push(keyboard->key_listeners, &listener_clone);
+
+out:
+    return res;
+}
+
+// Lecture 174 - linear-scan the keyboard's listener vector for a
+// match on on_event.
+struct keyboard_listener* keyboard_get_listener_ptr(struct keyboard* keyboard,
+                                                    struct keyboard_listener keyboard_listener){
+    struct keyboard_listener* listener_heap_ptr = NULL;
+    size_t total_children = vector_count(keyboard->key_listeners);
+    for(size_t i = 0; i < total_children; i++){
+        struct keyboard_listener* current_listener = NULL;
+        vector_at(keyboard->key_listeners, i, &current_listener, sizeof(current_listener));
+        if(current_listener &&
+           keyboard_listener.on_event &&
+           keyboard_listener.on_event == current_listener->on_event){
+            listener_heap_ptr = current_listener;
+            break;
+        }
+    }
+    return listener_heap_ptr;
+}
+
+// Lecture 174 - drain the listener vector through the recorded
+// on_event callbacks.
+void keyboard_push_event_to_listeners(struct keyboard* keyboard,
+                                      struct keyboard_event* event){
+    size_t total_children = vector_count(keyboard->key_listeners);
+    for(size_t i = 0; i < total_children; i++){
+        struct keyboard_listener* listener = NULL;
+        vector_at(keyboard->key_listeners, i, &listener, sizeof(listener));
+        if(listener){
+            listener->on_event(keyboard, event);
+        }
+    }
+}
+
+// Lecture 174 - remove a listener and free its clone.
+int keyboard_unregister_handler(struct keyboard* keyboard,
+                                struct keyboard_listener keyboard_listener){
+    int res = 0;
+    struct keyboard_listener* keyboard_listener_ptr =
+        keyboard_get_listener_ptr(keyboard, keyboard_listener);
+    if(keyboard_listener_ptr){
+        vector_pop_element(keyboard->key_listeners,
+                           &keyboard_listener_ptr, sizeof(keyboard_listener_ptr));
+    }
+    kfree(keyboard_listener_ptr);
+    return res;
 }
