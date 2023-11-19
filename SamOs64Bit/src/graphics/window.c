@@ -172,13 +172,28 @@ void window_click_handler(struct mouse* mouse, int abs_x, int abs_y,
     }
 }
 
+// Lecture 175 - forward decls for the window-level keyboard
+// listener. The listener struct itself follows the on_event
+// body in the second half of this file.
+void window_keyboard_event_listener_on_event(struct keyboard* keyboard,
+                                             struct keyboard_event* event);
+static struct keyboard_listener window_keyboard_listener = {
+    .on_event = window_keyboard_event_listener_on_event,
+};
+
 int window_system_initialize_stage2(void){
     // Lecture 143 - register the window-level mouse handlers
     // so clicks (handled below) and moves (TODO stub) flow
-    // into the window subsystem. Keyboard listener lands in
-    // L175.
+    // into the window subsystem. Keyboard listener lands here
+    // at L175.
     mouse_register_move_handler(NULL,  window_screen_mouse_move_handler);
     mouse_register_click_handler(NULL, window_click_handler);
+    // Lecture 175 - upstream typo: `keybaord_register_handler`
+    // (note the swapped letters) and a missing semicolon at the
+    // end of the line. The typo'd symbol would not link and the
+    // missing semicolon would not parse. We call the correctly
+    // spelled API here and document the upstream bug.
+    keyboard_register_handler(NULL, window_keyboard_listener);
     return 0;
 }
 
@@ -864,4 +879,41 @@ void window_event_to_userland(struct window_event* kernel_win_event_in,
     }
     memcpy(&userland_win_event_out->data, &kernel_win_event_in->data,
            sizeof(userland_win_event_out->data));
+}
+
+// Lecture 175 - translate a keyboard KEY_PRESS into a
+// WINDOW_EVENT_TYPE_KEY_PRESS on the focused window. The window
+// event is fanned out to whatever the window has registered
+// (which includes the L162 process_window_event_handler).
+void window_keyboard_event_listener_on_event_keypress(struct window* win,
+                                                      struct keyboard* keyboard,
+                                                      struct keyboard_event* event){
+    struct window_event win_event = {0};
+    win_event.type = WINDOW_EVENT_TYPE_KEY_PRESS;
+    win_event.data.keypress.key = event->data.key_press.key;
+    window_event_push(win, &win_event);
+}
+
+void window_keyboard_event_listener_on_event_capslock_change(struct window* win,
+                                                             struct keyboard* keyboard,
+                                                             struct keyboard_event* event){
+    // do nothing
+}
+
+// Lecture 175 - default keyboard listener. Routes events to the
+// currently focused window. Drops the event when nothing is
+// focused.
+void window_keyboard_event_listener_on_event(struct keyboard* keyboard,
+                                             struct keyboard_event* event){
+    struct window* focused_win = window_focused();
+    if(focused_win){
+        switch(event->type){
+            case KEYBOARD_EVENT_KEY_PRESS:
+                window_keyboard_event_listener_on_event_keypress(focused_win, keyboard, event);
+                break;
+            case KEYBOARD_EVENT_CAPS_LOCK_CHANGE:
+                window_keyboard_event_listener_on_event_capslock_change(focused_win, keyboard, event);
+                break;
+        }
+    }
 }
