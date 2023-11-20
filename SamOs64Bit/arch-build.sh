@@ -1,22 +1,35 @@
 #!/bin/bash
-# arch-build.sh - build a non-x86 SamOS kernel (the first riscv64 spike).
+# arch-build.sh - build a non-x86 SamOS kernel (the first aarch64 and riscv64 spikes).
 #
+#   bash arch-build.sh aarch64      # -> bin/aarch64/kernel.img
 #   bash arch-build.sh riscv64      # -> bin/riscv64/kernel.img
 #
 # Separate from build.sh and the Makefile on purpose: the x86 build
 # and its outputs are untouched until the hardware layer adds `make ARCH=...`.
 # Objects and kernel.elf go to build/<arch>/, which `make clean` does
-# not touch. Same interface as the aarch64 case on s-a1-arm64.
+# not touch.
 #
-# Toolchain: the Ubuntu cross compiler riscv64-linux-gnu-gcc, used
+# Toolchain: the Ubuntu cross compilers <arch>-linux-gnu-gcc, used
 # freestanding (no libc, no crt, own linker script). The plan named
-# riscv64-elf-gcc; the Linux triplet produces the same code with
-# these flags, so it stands in until bootstrap.sh builds the elf one.
+# the <arch>-elf-gcc ones; the Linux triplets produce the same code
+# with these flags, so they stand in until bootstrap.sh builds them.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 arch="${1:-}"
 case "$arch" in
+aarch64)
+    CROSS="${CROSS:-aarch64-linux-gnu-}"
+    # -mgeneral-regs-only: no FP/SIMD in the kernel (no FP context to
+    #   save yet, and gcc would otherwise use q registers for copies).
+    # -mstrict-align: the MMU is off, so all memory is Device memory
+    #   and an unaligned access faults.
+    ARCH_CFLAGS="-mgeneral-regs-only -mstrict-align -mcmodel=small"
+    # One RWX segment until the aarch64 MMU work brings the MMU and W^X.
+    ARCH_LDFLAGS="-Wl,--no-warn-rwx-segments"
+    SRCS="src/arch/aarch64/boot.S src/arch/aarch64/vectors.S src/arch/aarch64/main.c
+          src/arch/aarch64/pl011.c src/firmware/fdt.c"
+    ;;
 riscv64)
     CROSS="${CROSS:-riscv64-linux-gnu-}"
     # rv64imac: no F/D, so the kernel has no FP state to save yet.
@@ -31,7 +44,7 @@ riscv64)
           src/firmware/fdt.c src/string/string.c"
     ;;
 *)
-    echo "usage: $0 riscv64" >&2
+    echo "usage: $0 aarch64|riscv64" >&2
     exit 2
     ;;
 esac

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Host-side unit tests for code that does not need QEMU:
 # the userland libc (printf/snprintf, strtol, string helpers,
-# calloc, itoa_r), the shell parser and the line editor.
+# calloc, itoa_r), the shell parser and the line editor. The aarch64 port adds
+# the device tree parser (fdt_test.c, at the end).
 #
 # Builds programs/stdlib/src/*.c with the host gcc, renames every
 # symbol to sam_<name> with objcopy so they cannot collide with
@@ -28,3 +29,16 @@ gcc -ffreestanding -fno-builtin -O0 -std=gnu99 -Wall -Werror -Wno-unused-paramet
 gcc -O0 -g -Wall -Wno-format-security -I"$root/src" -o "$out/keyboard_test" \
     "$here/keyboard_test.c" "$out/classic.o"
 "$out/keyboard_test"
+
+# Device tree parser. Built freestanding first to prove it
+# needs nothing from libc (no undefined symbols), then linked into
+# the test with the sanitizers, against QEMU's own aarch64 and
+# riscv64 trees in fixtures/.
+gcc -ffreestanding -fno-builtin -O2 -std=gnu99 -Wall -Wextra -Werror -I"$root/src" \
+    -c "$root/src/firmware/fdt.c" -o "$out/fdt_free.o"
+if nm -u "$out/fdt_free.o" | grep -q .; then
+    echo "FAIL: fdt.c needs external symbols:"; nm -u "$out/fdt_free.o"; exit 1
+fi
+gcc -O1 -g -std=gnu99 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all \
+    -I"$root/src" -o "$out/fdt_test" "$here/fdt_test.c" "$root/src/firmware/fdt.c"
+"$out/fdt_test" "$here/fixtures"

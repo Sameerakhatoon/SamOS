@@ -2,8 +2,10 @@
 # tests64/run-all.sh - the single entry point for SamOS tests.
 #
 # Runs the e2e suite (tests64/e2e/[0-9]*-*.sh), then the host unit
-# tests (tests64/host/run.sh, host gcc, a few seconds), and ends with
-# one summary line per part. Arguments are passed through to
+# tests (tests64/host/run.sh, host gcc, a few seconds), then the
+# non-x86 boot tests (tests64/arch/run.sh, about 10 s; skipped
+# when the cross tools are missing), and ends with one summary line
+# per part. Arguments are passed through to
 # e2e/run-all.sh:
 #
 #   bash tests64/run-all.sh            # everything, parallel
@@ -45,6 +47,19 @@ else
     host_line="FAIL (exit $host; ${host_checks:-no summary})"
 fi
 
+# aarch64 (later riscv64) direct -kernel boots. Its own
+# build, its own QEMU; nothing here touches bin/os.img.
+echo
+bash "$here/arch/run.sh" > "$log/arch" 2>&1
+arch=$?
+grep -aE '^(PASS|FAIL|.* arch test:)' "$log/arch"
+arch_checks=$(grep -aE ' arch test: ' "$log/arch" | sed 's/ arch test:/:/' | paste -sd ';' - | sed 's/;/; /g')
+if [ $arch -eq 0 ]; then
+    arch_line="PASS ($arch_checks)"
+else
+    arch_line="FAIL (exit $arch; ${arch_checks:-no summary}; serial logs: bash tests64/arch/run.sh)"
+fi
+
 # The storage test boots its own four scratch disks twice
 # per machine, so it runs after the e2e suite, not inside it.
 storage=0
@@ -59,7 +74,8 @@ echo
 echo "==== summary ===="
 echo "e2e:     ${e2e_line:-no summary (exit $e2e)}"
 echo "host:    $host_line"
+echo "arch:    $arch_line"
 if [ $storage_wanted -eq 1 ]; then
     echo "storage: ${storage_line:-no summary (exit $storage)}"
 fi
-[ $e2e -eq 0 ] && [ $host -eq 0 ] && [ $storage -eq 0 ]
+[ $e2e -eq 0 ] && [ $host -eq 0 ] && [ $arch -eq 0 ] && [ $storage -eq 0 ]
