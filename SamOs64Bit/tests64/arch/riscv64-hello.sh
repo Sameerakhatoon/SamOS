@@ -20,6 +20,7 @@ kernel="${RISCV64_KERNEL:-$here/../../bin/riscv64/kernel.img}"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 fails=0
+checks=0
 
 # boot <name> <smp> <append>: run QEMU until it powers off (or the
 # kernel halts, or 20 s pass); output in $tmp/<name>.log without the
@@ -46,6 +47,7 @@ boot() {
 }
 
 expect() {
+    checks=$((checks + 1))
     if grep -Eq "$1" "$cur"; then
         echo "  ok: $2"
     else
@@ -56,6 +58,7 @@ expect() {
 
 expect_count() {
     local n
+    checks=$((checks + 1))
     n=$(grep -Ec "$1" "$cur")
     if [ "$n" -eq "$2" ]; then
         echo "  ok: $3"
@@ -80,6 +83,7 @@ expect '^hsm: 0=started$' "one hart, started"
 expect '^SamOS riscv64: hello$' "hello"
 expect '^riscv64: halted$' "halted"
 expect_count 'EARLY FAULT' 0 "no trap"
+checks=$((checks + 1))
 if [ $powered_off -eq 1 ]; then echo "  ok: QEMU powered off by SBI"; else echo "  FAIL: QEMU still running"; fails=$((fails + 1)); fi
 
 echo "riscv64 -smp 4"
@@ -99,6 +103,8 @@ expect '^  ra 0x[0-9a-f]+ sp 0x[0-9a-f]+ gp 0x[0-9a-f]+ tp 0x[0-9a-f]+$' "regist
 expect '^System halted\.$' "halted after the dump"
 expect_count '^SamOS riscv64: hello$' 0 "no hello after the trap"
 
+# Summary line read by tests64/arch/run.sh and run-all.sh (the arch tests' format).
+echo "riscv64 arch test: $checks checks, $fails failures"
 if [ $fails -eq 0 ]; then
     echo "PASS: tests64/arch/riscv64-hello"
 else
