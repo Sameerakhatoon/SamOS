@@ -60,25 +60,19 @@ type_text() {
 
 log_size() { stat -c %s "$E2E_SERIAL" 2>/dev/null || echo 0; }
 
-# Wait until the serial log past byte $1 contains $2 (fixed string).
-wait_serial_from() {
-    local from=$1 pattern=$2 limit=$3 t=0
-    while [ $t -lt $((limit * 10)) ]; do
-        if tail -c +"$((from + 1))" "$E2E_SERIAL" 2>/dev/null | grep -qF -- "$pattern"; then
-            return 0
-        fi
+# Type a command line and wait for the next prompt after it: "> " at
+# the start of a line, since help's own text contains "> " (the
+# "[> file | >> file]" of echo).
+run_cmd() {
+    local before t=0
+    before=$(log_size)
+    type_text "$1"$'\n'
+    while [ $t -lt 200 ]; do
+        tail -c +"$((before + 1))" "$E2E_SERIAL" 2>/dev/null | tr -d '\r' | grep -q '^> ' && return 0
         sleep 0.1
         t=$((t + 1))
     done
-    return 1
-}
-
-# Type a command line and wait for the next prompt after it.
-run_cmd() {
-    local before
-    before=$(log_size)
-    type_text "$1"$'\n'
-    wait_serial_from "$before" "> " 20 || e2e_log "no prompt after: $1"
+    e2e_log "no prompt after: $1"
 }
 
 _shell_script() {

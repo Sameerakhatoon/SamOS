@@ -29,12 +29,14 @@ FILES_VOLS="1:16 2:32"   # drive:FAT type
 # typed. Under a loaded host a sendkey now and then never reaches the
 # guest (seen once on q35: "cat 2:/IR/NOTE.TXT"); the command is
 # typed again once. A garbled command names a path that does not
-# exist, so running it is harmless.
+# exist, so running it is harmless. The echoed line may or may not
+# carry the "> " in front: shell_cmd returns as soon as the prompt
+# starts a line, so the next command's log can begin after it.
 files_cmd() {
     local before
     before=$(shell_log_size)
     shell_cmd "$1"
-    if ! tail -c +"$((before + 1))" "$E2E_SERIAL" | tr -d '\r' | grep -qxF -- "> $1"; then
+    if ! tail -c +"$((before + 1))" "$E2E_SERIAL" | tr -d '\r' | grep -qxF -e "> $1" -e "$1"; then
         e2e_log "retyping: $1"
         shell_cmd "$1"
     fi

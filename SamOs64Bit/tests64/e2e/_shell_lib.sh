@@ -50,6 +50,22 @@ shell_wait_from() {
     return 1
 }
 
+# shell_wait_prompt <byte> <seconds>: a prompt is "> " at the start of
+# a line. A bare "> " also appears inside output (help prints
+# "[> file | >> file]"), and matching that typed the next command
+# while the previous one was still printing.
+shell_wait_prompt() {
+    local from=$1 limit=$2 t=0
+    while [ $t -lt $((limit * 10)) ]; do
+        if tail -c +"$((from + 1))" "$E2E_SERIAL" 2>/dev/null | tr -d '\r' | grep -q '^> '; then
+            return 0
+        fi
+        sleep 0.1
+        t=$((t + 1))
+    done
+    return 1
+}
+
 shell_boot() {
     e2e_wait_serial '^e2e: user selftest done' 120 || true
     sleep 1
@@ -58,13 +74,13 @@ shell_boot() {
     sleep 1
 }
 
-# shell_cmd <line> [seconds]: the next prompt ("> ") the shell prints
-# after the command is the sentinel, as in e2e/126.
+# shell_cmd <line> [seconds]: the next prompt the shell prints after
+# the command is the sentinel, as in e2e/126.
 shell_cmd() {
     local before
     before=$(shell_log_size)
     shell_type "$1"$'\n'
-    shell_wait_from "$before" '> ' "${2:-30}" || e2e_log "no prompt after: $1"
+    shell_wait_prompt "$before" "${2:-30}" || e2e_log "no prompt after: $1"
 }
 
 serial_offset() {
