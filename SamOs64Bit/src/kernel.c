@@ -416,17 +416,22 @@ void kernel_main(void)
     // unmasked. Interrupts stay off in the kernel until the first
     // iretq into a task (or the idle loop) sets IF.
     // The LAPIC and IOAPIC replace the 8259s, and the
-    // LAPIC timer (calibrated against the TSC) the PIT tick, at the
-    // same 100 Hz. Without a usable MADT, or with samos.legacy_pic,
-    // the 8259s and the PIT stay.
-    if (!cmdline_has("samos.legacy_pic") && apic_init() == 0 &&
+    // LAPIC timer (calibrated against PIT channel 2) the PIT tick, at
+    // the same 100 Hz. Without a usable MADT, or with samos.legacy_pic,
+    // the 8259s and the PIT stay. If the APIC is up but the LAPIC
+    // timer measures 0, the PIT ticks through the IOAPIC instead
+    // (IRQ_enable routes IRQ0 to its GSI); samos.lapic_timer_fail
+    // forces that path for e2e/179.
+    int apic = !cmdline_has("samos.legacy_pic") && apic_init() == 0;
+    if (apic && !cmdline_has("samos.lapic_timer_fail") &&
         lapic_timer_calibrate() == 0)
     {
         lapic_timer_start(PIT_TICK_HZ);
     }
     else
     {
-        serial_write("apic: legacy 8259 and PIT tick\n");
+        serial_write(apic ? "apic: IOAPIC with PIT tick\n"
+                          : "apic: legacy 8259 and PIT tick\n");
         pit_init(PIT_TICK_HZ);
         IRQ_enable(IRQ_TIMER);
     }
