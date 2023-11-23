@@ -221,14 +221,9 @@ void pci_cfg_write_word(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset,
     outdw(PCI_DATA_ADDRESS, tmp);
 }
 
-// Lecture 179 - upstream calls `pci_cfg_reaD_dword` (capital D)
-// inside pci_size_bars. That symbol does not exist; left as-is
-// it would not link. We add a static inline shim under the
-// typo'd name so the call site stays verbatim and the audit
-// trail records the upstream bug.
-static inline uint32_t pci_cfg_reaD_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset){
-    return pci_cfg_read_dword(bus, slot, func, offset);
-}
+// Lecture 180 - upstream L179 had a `pci_cfg_reaD_dword` typo.
+// L180 fixes it; SamOs drops the shim now that the call site
+// uses the correct identifier.
 
 // Lecture 179 - size every BAR on a (bus, dev, func). Disable
 // IO/MEM/master decode during the size probe, write all-ones,
@@ -310,10 +305,9 @@ restore64:
             } else {
                 uint32_t base = lo_orig & ~0xFu;
                 pci_cfg_write_dword(bus, dev, func, off, 0xFFFFFFFFu);
-                // Upstream typo: pci_cfg_reaD_dword (capital D).
-                // We added a static inline shim above; the call
-                // site stays verbatim.
-                uint32_t szv = pci_cfg_reaD_dword(bus, dev, func, off);
+                // Lecture 180 - upstream fixed the
+                // pci_cfg_reaD_dword typo here.
+                uint32_t szv = pci_cfg_read_dword(bus, dev, func, off);
                 pci_cfg_write_dword(bus, dev, func, off, lo_orig);
 
                 uint32_t masked = (szv & ~0xFu);
@@ -329,4 +323,159 @@ restore64:
     }
 
     pci_cfg_write_word(bus, dev, func, PCI_HEADER_COMMAND_OFFSET, cmd_orig);
+}
+
+// Lecture 180 - recursive bus scan. For each slot at bus, read
+// the vendor id; if valid, walk function 0..7 (multi-function
+// when the L141 bit is set in the header type), allocate a
+// pci_device record per function, capture vendor/device/class,
+// size the BARs, and push into the global device vector.
+//
+// A type-1 (PCI-PCI bridge) header has primary/secondary/
+// subordinate bus numbers we read and chase by recursing into
+// the secondary bus.
+static void pci_scan_bus(uint8_t bus, struct pci_device* parent_bridge){
+    for(int dev = 0; dev < 32; ++dev){
+        uint16_t vendor0 = pci_cfg_read_word(bus, dev, 0, PCI_HEADER_VENDOR_OFFSET);
+        if(vendor0 == 0xFFFF){
+            continue;
+        }
+        uint8_t hdr0 = pci_cfg_read_byte(bus, dev, 0, PCI_HEADER_HEADER_TYPE_OFFSET);
+        int func_limit = (hdr0 & 0x80) ? 8 : 1;
+        for(int func = 0; func < func_limit; ++func){
+            uint16_t vendor = pci_cfg_read_word(bus, dev, func, PCI_HEADER_VENDOR_OFFSET);
+            if(vendor == 0xFFFF){
+                continue;
+            }
+            struct pci_device* device = kzalloc(sizeof(*device));
+            if(!device){
+                panic("Out of memory for PCI devices\n");
+            }
+            device->addr.bus  = (uint8_t)bus;
+            device->addr.slot = (uint8_t)dev;
+            device->addr.func = (uint8_t)func;
+            device->vendor    = vendor;
+            device->device_id = pci_cfg_read_word(bus, dev, func, PCI_HEADER_DEVICE_OFFSET);
+
+            uint32_t classreg = pci_cfg_read_dword(bus, dev, func, PCI_HEADER_REVISION_ID_OFFSET);
+            device->class.base     = (classreg >> 24) & 0xFF;
+            device->class.subclass = (classreg >> 16) & 0xFF;
+
+            device->parent_bridge   = parent_bridge;
+            device->is_bridge       = false;
+            device->primary_bus     = bus;
+            device->secondary_bus   = 0;
+            device->subordinate_bus = 0;
+            pci_size_bars(bus, dev, func, device);
+
+            vector_push(pci_device_vector, &device);
+            uint8_t hdr = pci_cfg_read_byte(bus, dev, func, PCI_HEADER_HEADER_TYPE_OFFSET) & 0x7Fu;
+            if(hdr == 0x01){
+                device->is_bridge       = true;
+                device->primary_bus     = pci_cfg_read_byte(bus, dev, func, PCI_BRIDGE_PRIMARY_BUS_OFFSET);
+                device->secondary_bus   = pci_cfg_read_byte(bus, dev, func, PCI_BRIDGE_SECONDARY_BUS_OFFSET);
+                device->subordinate_bus = pci_cfg_read_byte(bus, dev, func, PCI_BRIDGE_SUBORDINATE_BUS_OFFSET);
+                if(device->secondary_bus != 0 && device->secondary_bus <= device->subordinate_bus){
+                    pci_scan_bus(device->secondary_bus, device);
+                }
+            }
+        }
+    }
+}
+
+// Lecture 180 - boot-time entry point. Allocates the device
+// vector and scans bus 0.
+int pci_init(void){
+    pci_device_vector = vector_new(sizeof(struct pci_device*), 16, 0);
+    if(!pci_device_vector){
+        return -ENOMEM;
+    }
+    pci_scan_bus(0, NULL);
+    return 0;
+}
+
+size_t pci_device_count(){
+    return vector_count(pci_device_vector);
+}
+
+int pci_device_base_class(struct pci_device* device){
+    return device->class.base;
+}
+
+int pci_device_subclass(struct pci_device* device){
+    return device->class.subclass;
+}
+
+int pci_device_get(size_t index, struct pci_device** device_out){
+    if(index >= pci_device_count()){
+        return -EOUTOFRANGE;
+    }
+    return vector_at(pci_device_vector, index, device_out, sizeof(*device_out));
+}
+
+// Lecture 180 - walk up from a device toward the root, OR'ing
+// BME/MSE/IOSE into each bridge's command register so the
+// physical path between root complex and device is enabled to
+// pass IO/MEM cycles and bus-master DMA.
+static void pci_enable_upstream_path(struct pci_device* bridge, bool need_io, bool need_mem){
+    for(struct pci_device* p = bridge; p; p = p->parent_bridge){
+        uint16_t cmd = pci_cfg_read_word(p->addr.bus, p->addr.slot, p->addr.func,
+                                         PCI_HEADER_COMMAND_OFFSET);
+        cmd |= 0x0004;  // BME (bus master enable)
+        if(need_mem){
+            cmd |= 0x0002;  // MSE
+        }
+        if(need_io){
+            cmd |= 0x0001;  // IOSE
+        }
+        pci_cfg_write_word(p->addr.bus, p->addr.slot, p->addr.func,
+                           PCI_HEADER_COMMAND_OFFSET, cmd);
+    }
+}
+
+// Lecture 180 - enable bus mastering + matching IO/MEM decode on
+// the device, then propagate the same enables up through every
+// bridge on the path to the root complex.
+//
+// Upstream's header decl is `bus_enable_bus_master`, the body
+// is `pci_enable_bus_master`. Preserved verbatim per the project
+// rule on upstream identifiers; a static wrapper under the
+// header-side name links the two.
+void pci_enable_bus_master(struct pci_device* d){
+    bool need_mem = false;
+    bool need_io  = false;
+    for(int i = 0; i < 6; ++i){
+        if(d->bars[i].size == 0){
+            continue;
+        }
+        if(d->bars[i].flags & PCI_DEVICE_BAR_FLAG_IS_EXT){
+            continue;
+        }
+        if(d->bars[i].type == PCI_DEVICE_IO_MEMORY){
+            need_mem = true;
+        } else {
+            need_io = true;
+        }
+    }
+    uint16_t cmd = pci_cfg_read_word(d->addr.bus, d->addr.slot, d->addr.func,
+                                     PCI_HEADER_COMMAND_OFFSET);
+    if(need_mem){
+        cmd |= 0x0002;
+    }
+    if(need_io){
+        cmd |= 0x0001;
+    }
+    cmd |= 0x0004;  // BME
+    pci_cfg_write_word(d->addr.bus, d->addr.slot, d->addr.func,
+                       PCI_HEADER_COMMAND_OFFSET, cmd);
+    if(d->parent_bridge){
+        pci_enable_upstream_path(d->parent_bridge, need_io, need_mem);
+    }
+}
+
+// Lecture 180 - the L177 header decl is `bus_enable_bus_master`.
+// Forward to the real implementation so callers using either
+// spelling link cleanly.
+void bus_enable_bus_master(struct pci_device* device){
+    pci_enable_bus_master(device);
 }
