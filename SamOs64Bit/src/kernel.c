@@ -316,6 +316,12 @@ void kernel_main(void)
     //   [BITS 64]
     //   jmp $
     // so the user task spins forever; we never come back.
+    // Lecture 181 - report the PCI device count to confirm the
+    // L180 scan walked the bus tree.
+    print("Total PCI devices:");
+    print(itoa((int)pci_device_count()));
+    print("\n");
+
     print("Loading program...\n");
     struct process* p = 0;
     // L63 - upstream switches to "0:/blank.elf" here. SamOs
