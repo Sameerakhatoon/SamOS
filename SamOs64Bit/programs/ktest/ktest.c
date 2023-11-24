@@ -553,6 +553,7 @@ static int bss_test(void)
 #define CMD_OPENDIR   45
 #define CMD_READDIR   46
 
+#define S_EBADPATH    (-4)
 #define S_ERDONLY     (-6)
 #define S_ENOENT      (-14)
 #define S_EEXIST      (-16)
@@ -609,7 +610,7 @@ static int files_test(void)
     files_expect("fopen missing file", fopen("@:/NOSUCH.TXT", "r"), S_ENOENT);
     files_expect("mkdir", mkdir("@:/KTDIR"), 0);
     files_expect("mkdir existing", mkdir("@:/KTDIR"), S_EEXIST);
-    files_expect("mkdir missing parent", mkdir("@:/NODIR/SUB") < 0, 1);
+    files_expect("mkdir missing parent", mkdir("@:/NODIR/SUB"), S_EBADPATH);
     files_expect("mkdir under a file", mkdir("@:/HELLO.TXT/SUB"), S_ENOTDIR);
     files_expect("fopen directory for writing", fopen("@:/KTDIR", "w"), S_EISDIR);
     files_expect("mkdir kernel path", ktest_syscall(CMD_MKDIR, k, 0, 0, 0), S_EFAULT);

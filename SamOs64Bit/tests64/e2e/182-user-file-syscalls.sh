@@ -4,8 +4,9 @@
 # and the fopen/fclose changes, from user mode. KTEST.ELF files checks
 # the error statuses (ENOENT, EEXIST, ENOTDIR, EISDIR, ENOTEMPTY,
 # ERDONLY), kernel pointers refused with EFAULT, a write buffer and a
-# readdir entry that cross a page boundary, a write that runs into
-# the guard page refused whole (the file keeps its size), fclose
+# readdir entry that cross a page boundary, a write whose buffer runs
+# past the end of its malloc block into the unmapped page after it
+# refused whole (the file keeps its size), fclose
 # really closing (600 opens through 512 descriptors), and directory
 # descriptors a process leaves open closed on exit (two children
 # that each leave 300 open).
