@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include "fs/file.h"
+#include "driver.h"           // L184 - struct disk_driver
 
 typedef unsigned int SAMOS_DISK_TYPE;
 
@@ -25,6 +26,10 @@ struct disk {
     int                 sector_size;
     int                 id;
     struct filesystem*  filesystem;
+
+    // Lecture 184 - owning disk driver (NULL for the bootstrap
+    // disk0 that predates the abstraction).
+    struct disk_driver* driver;
 
     // Lecture 183 - back-pointer to the physical disk this disk
     // is hosted on. Partition disks point at their hardware
