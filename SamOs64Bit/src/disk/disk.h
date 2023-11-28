@@ -65,6 +65,16 @@ int          disk_create_new(struct disk_driver* driver,
 // Lecture 183 - accessor for the disk's hardware backing.
 struct disk* disk_hardware_disk(struct disk* disk);
 
+// Lecture 186 - run fs_resolve against the disk and (if the
+// label matches) set primary_fs_disk.
+int          disk_filesystem_mount(struct disk* disk);
+
+// Lecture 186 - delegate partition creation to the disk's
+// driver.
+int          disk_create_partition(struct disk* disk,
+                                   int starting_lba, int ending_lba,
+                                   struct disk** partition_disk_out);
+
 struct disk* disk_primary(void);
 struct disk* disk_primary_fs_disk(void);
 
