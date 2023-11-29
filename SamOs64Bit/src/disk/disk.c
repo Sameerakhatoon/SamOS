@@ -68,6 +68,13 @@ struct disk* disk_hardware_disk(struct disk* disk){
     return disk->hardware_disk;
 }
 
+// Lecture 188 - per-disk driver private accessor. Upstream's
+// decl lands at L189; SamOs lands the body now so the L188
+// PATA driver source links.
+void* disk_private_data_driver(struct disk* disk){
+    return disk->driver_private;
+}
+
 // Lecture 186 - delegate partition creation to the disk's
 // driver. The driver vtable is responsible for spinning up the
 // virtual disk that maps starting_lba..ending_lba.

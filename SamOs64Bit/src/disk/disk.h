@@ -75,6 +75,11 @@ int          disk_create_partition(struct disk* disk,
                                    int starting_lba, int ending_lba,
                                    struct disk** partition_disk_out);
 
+// Lecture 188 - per-disk driver private data accessor.
+// (Upstream's decl lands at L189; SamOs hoists it here so the
+// L188 PATA source links cleanly.)
+void*        disk_private_data_driver(struct disk* disk);
+
 struct disk* disk_primary(void);
 struct disk* disk_primary_fs_disk(void);
 

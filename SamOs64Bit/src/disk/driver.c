@@ -6,14 +6,20 @@
 #include "disk/disk.h"
 #include "string/string.h"
 #include "memory/memory.h"
+#include "drivers/pata.h"      // L188 - pata_driver_init
 #include "status.h"
 
 struct vector* disk_driver_vec = NULL;
 
 int disk_driver_system_load_drivers(){
     int res = 0;
-    // Register ATA/IDE PATA. (L189 wires it.)
+    // Lecture 188 - register the PATA driver.
+    res = disk_driver_register(pata_driver_init());
+    if(res < 0){
+        goto out;
+    }
     // Register NVME. (L195 wires it.)
+out:
     return res;
 }
 
