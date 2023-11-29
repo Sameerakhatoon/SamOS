@@ -72,18 +72,13 @@ void* disk_driver_private_data(struct disk_driver* driver){
     return driver->private;
 }
 
-// Lecture 184 - register a driver. Upstream calls
-// `disk_driver_register(driver)` recursively inside the early
-// uniqueness check, where the intent was clearly
-// `disk_driver_registered(driver)`. As written the function
-// infinite-recurses on the very first call and overflows the
-// stack. We preserve the typo'd call verbatim per the project
-// rule; at L184 nothing actually invokes this path (the load
-// helper is an empty stub) so the bug stays dormant until a
-// later lecture (or a future fix commit) wires real drivers.
+// Lecture 184 / 189 - register a driver. L184 wrote
+// `disk_driver_register(driver)` in the uniqueness check
+// (self-recursion). L189 fixes it to `disk_driver_registered`.
+// SamOs follows the L189 fix here.
 int disk_driver_register(struct disk_driver* driver){
     int res = 0;
-    if(disk_driver_register(driver)){
+    if(disk_driver_registered(driver)){
         res = -EISTKN;
         goto out;
     }

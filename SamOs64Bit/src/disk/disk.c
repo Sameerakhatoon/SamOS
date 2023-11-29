@@ -169,23 +169,44 @@ out:
     return res;
 }
 
-void disk_search_and_init(){
+// Lecture 189 - run every registered disk driver's mount op.
+int disk_mount_all(){
     int res = 0;
+    res = disk_driver_mount_all();
+    return res;
+}
+
+// Lecture 189 - boot-time disk init now drives the driver
+// registry: disk_driver_system_init populates the registry
+// (which inserts the PATA driver), allocate the disk vector,
+// then mount-all. The legacy disk_create_new for disk0 is
+// gone; PATA's mount handler creates the REAL disk itself.
+int disk_search_and_init(){
+    int res = 0;
+
+    res = disk_driver_system_init();
+    if(res < 0){
+        res = -EIO;
+        goto out;
+    }
+
     disk_vector = vector_new(sizeof(struct disk*), 4, 0);
     if(!disk_vector){
         res = -ENOMEM;
         goto out;
     }
-    // Lecture 183 - REAL disks pass driver=NULL and
-    // hardware_disk=NULL; the new disk becomes its own hw disk.
-    res = disk_create_new(NULL, NULL, SAMOS_DISK_TYPE_REAL, 0, 0,
-                          SAMOS_SECTOR_SIZE, NULL,
-                          &disk_primary_handle);
+
+    res = disk_mount_all();
     if(res < 0){
         goto out;
     }
+
+    // SamOs DEVIATION: cache disk_primary_handle so disk_primary()
+    // keeps working. PATA's mount inserts the new REAL disk at
+    // index 0; we read it back.
+    disk_primary_handle = disk_get(0);
 out:
-    return;
+    return res;
 }
 
 struct disk* disk_primary(void){
