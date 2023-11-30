@@ -8,8 +8,11 @@
 #          from -append, and the hello line.
 #   el2:   virt,virtualization=on, entered at EL2: proves the drop
 #          to EL1 ("entered at EL2, running at EL1"), then hello.
-#   fault: samos.fault_test, brk #0x5a: the early vector table dumps
+#   fault: samos.fault_test, brk #0x5a: the vector table dumps
 #          ESR 0xf200005a (EC 0x3c, BRK) with ELR inside the kernel.
+# Plain virt has a GICv2, so since the aarch64 trap work these boots also show that the
+# kernel says so and still reaches hello without a tick; the GICv3
+# boots are in aarch64-traps.sh.
 # The kernel halts in wfi, so each boot is killed as soon as its last
 # expected line is on serial (or after ARCH_TIMEOUT seconds).
 set -uo pipefail
@@ -87,6 +90,7 @@ expect el1 '^fdt: 0x[0-9a-f]+, version 17, [0-9]+ bytes$' "device tree from x0"
 expect el1 '^memory: 0x40000000 size 0x20000000$' "/memory reg"
 expect el1 '^memory: 512 MiB in 1 region\(s\)$' "memory size"
 expect el1 '^bootargs: samos.test=1$' "bootargs"
+expect el1 '^gic: no arm,gic-v3 in the device tree' "GICv2 machine: no GICv3, said so"
 expect el1 '^SamOS aarch64: hello$' "hello"
 expect_no el1 '^exception:' "no exception"
 
@@ -102,7 +106,7 @@ boot fault virt "samos.test=1 samos.fault_test" '^exception: halted'
 dump fault
 expect fault '^bootargs: samos.test=1 samos.fault_test$' "bootargs"
 expect fault '^exception: sync \(current EL, SP_ELx\)$' "sync exception at EL1h"
-expect fault '^  ESR 0xf200005a \(EC 0x3c\)$' "ESR is BRK #0x5a"
+expect fault '^  ESR 0xf200005a \(EC 0x3c, brk\)$' "ESR is BRK #0x5a"
 expect fault '^  ELR 0x402[0-9a-f]{5}$' "ELR inside the kernel"
 expect_no fault '^SamOS aarch64: hello$' "no hello after the fault"
 

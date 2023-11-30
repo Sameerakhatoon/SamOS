@@ -44,6 +44,19 @@ primary_entry:
     mov     x1, #0x33ff             // CPTR_EL2: RES1 bits, no FP trap
     msr     cptr_el2, x1
     msr     hstr_el2, xzr
+    // GICv3: EL1's ICC_SRE_EL1.SRE is stuck at 0 unless EL2
+    // sets ICC_SRE_EL2.Enable. Only when the CPU has
+    // the system register interface (ID_AA64PFR0_EL1.GIC), else UNDEF.
+    mrs     x1, id_aa64pfr0_el1
+    ubfx    x1, x1, #24, #4
+    cbz     x1, 1f
+    mrs     x1, S3_4_C12_C9_5       // ICC_SRE_EL2
+    mov     x2, #0x9                // SRE (EL2 itself), Enable (EL1 may set SRE)
+    orr     x1, x1, x2
+    msr     S3_4_C12_C9_5, x1
+    isb
+    msr     S3_4_C12_C11_0, xzr     // ICH_HCR_EL2: virtual CPU interface off
+1:
     mrs     x1, midr_el1            // EL1 reads of MIDR/MPIDR see these
     msr     vpidr_el2, x1
     mrs     x1, mpidr_el1

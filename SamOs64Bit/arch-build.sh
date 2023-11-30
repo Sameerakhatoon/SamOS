@@ -28,7 +28,9 @@ aarch64)
     # One RWX segment until the aarch64 MMU work brings the MMU and W^X.
     ARCH_LDFLAGS="-Wl,--no-warn-rwx-segments"
     SRCS="src/arch/aarch64/boot.S src/arch/aarch64/vectors.S src/arch/aarch64/main.c
-          src/arch/aarch64/pl011.c src/firmware/fdt.c"
+          src/arch/aarch64/pl011.c src/firmware/fdt.c
+          src/arch/aarch64/console.c src/arch/aarch64/trap.c src/arch/aarch64/gicv3.c
+          src/arch/aarch64/timer.c src/arch/aarch64/sched.c src/arch/aarch64/fault_test.S"
     ;;
 riscv64)
     CROSS="${CROSS:-riscv64-linux-gnu-}"
