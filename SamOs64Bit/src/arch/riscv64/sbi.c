@@ -89,6 +89,11 @@ long sbi_hart_status(unsigned long hartid)
     return r.error ? r.error : r.value;
 }
 
+void sbi_set_timer(uint64_t stime)
+{
+    sbi_call(SBI_EXT_TIME, 0, (long)stime, 0, 0);
+}
+
 void sbi_shutdown(void)
 {
     if (sbi_probe(SBI_EXT_SRST)) {

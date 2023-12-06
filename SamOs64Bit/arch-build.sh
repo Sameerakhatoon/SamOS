@@ -43,6 +43,7 @@ riscv64)
     ARCH_LDFLAGS="-Wl,--no-warn-rwx-segments"
     SRCS="src/arch/riscv64/boot.S src/arch/riscv64/main.c src/arch/riscv64/sbi.c
           src/arch/riscv64/console.c src/arch/riscv64/trap.c src/arch/riscv64/uart16550.c
+          src/arch/riscv64/timer.c src/arch/riscv64/plic.c src/arch/riscv64/kthread.c
           src/firmware/fdt.c src/string/string.c"
     ;;
 *)

@@ -38,6 +38,9 @@ void sbi_console_putc(char c);
 void sbi_print_info(void);
 // HSM state of a hart, or a negative SBI error (no such hart).
 long sbi_hart_status(unsigned long hartid);
+// TIME extension: raise the supervisor timer interrupt once
+// the time CSR reaches `stime` (and clear a pending one until then).
+void sbi_set_timer(uint64_t stime);
 // SRST shutdown, legacy shutdown as fallback. Returns only if both fail.
 void sbi_shutdown(void);
 

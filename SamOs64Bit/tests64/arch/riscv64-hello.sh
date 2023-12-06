@@ -12,7 +12,9 @@
 #      HSM reports the boot hart started and three stopped, so only
 #      one hart runs the kernel.
 #   3. samos.trap_test: a load from OpenSBI's PMP-protected image
-#      ends in the early trap dump (load access fault, scause 5).
+#      ends in the trap dump (load access fault, scause 5).
+#      renamed its header from EARLY FAULT to KERNEL FAULT (x86 wording)
+#      once the dump became the real trap path's, not an early stub.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 kernel="${RISCV64_KERNEL:-$here/../../bin/riscv64/kernel.img}"
@@ -70,7 +72,7 @@ expect_count() {
 
 echo "riscv64 -smp 1"
 boot smp1 1 "samos.test=1"
-expect '^SamOS riscv64 \(S-R1\)$' "banner"
+expect '^SamOS riscv64 \(S-R[0-9]+\)$' "banner"
 expect '^boot hart: 0$' "boot hart id"
 expect '^dtb: 0x[0-9a-f]+$' "device tree address"
 expect '^sbi: extensions .*hsm' "SBI extensions probed"
@@ -82,13 +84,13 @@ expect '^bootargs: samos.test=1$' "bootargs"
 expect '^hsm: 0=started$' "one hart, started"
 expect '^SamOS riscv64: hello$' "hello"
 expect '^riscv64: halted$' "halted"
-expect_count 'EARLY FAULT' 0 "no trap"
+expect_count 'FAULT:' 0 "no trap"
 checks=$((checks + 1))
 if [ $powered_off -eq 1 ]; then echo "  ok: QEMU powered off by SBI"; else echo "  FAIL: QEMU still running"; fails=$((fails + 1)); fi
 
 echo "riscv64 -smp 4"
 boot smp4 4 "samos.test=1"
-expect_count '^SamOS riscv64 \(S-R1\)$' 1 "one banner"
+expect_count '^SamOS riscv64 \(S-R[0-9]+\)$' 1 "one banner"
 expect '^harts: 4$' "four harts in /cpus"
 expect '^hsm: ([0-3]=(started|stopped) ?){4}$' "four harts listed"
 expect '^hsm: ([0-3]=stopped )*[0-3]=started( [0-3]=stopped)*$' "only the boot hart started, three stopped"
@@ -97,7 +99,7 @@ expect '^SamOS riscv64: hello$' "hello"
 echo "riscv64 samos.trap_test"
 boot trap 1 "samos.test=1 samos.trap_test"
 expect '^bootargs: samos.test=1 samos.trap_test$' "bootargs"
-expect '^EARLY FAULT: scause 0x5 \(load access fault\)$' "scause dump"
+expect '^KERNEL FAULT: scause 0x5 \(load access fault\)$' "scause dump"
 expect '^  sepc 0x802[0-9a-f]{5} stval 0x80000000 sstatus 0x[0-9a-f]+$' "sepc in the kernel, stval the address"
 expect '^  ra 0x[0-9a-f]+ sp 0x[0-9a-f]+ gp 0x[0-9a-f]+ tp 0x[0-9a-f]+$' "register dump"
 expect '^System halted\.$' "halted after the dump"
