@@ -183,10 +183,19 @@ void* task_virtual_address_to_physical(struct task* task, void* virtual_address)
 }
 
 void task_next(){
-    struct task* next_task = task_get_next();
-    if(!next_task){
-        panic("No more tasks!\n");
-    }
+    // Lecture 197 - rotate through the ring skipping sleepers.
+    // If everyone is asleep, udelay 100us and try again.
+    struct task* next_task = NULL;
+    do {
+        int res = task_get_next_non_sleeping_task(&next_task);
+        if(res < 0){
+            panic("No more tasks or task error\n");
+        }
+        if(!next_task){
+            udelay(100);
+        }
+    } while(!next_task);
+
     task_switch(next_task);
     task_return(&next_task->registers);
 }
@@ -285,4 +294,45 @@ static int task_init(struct task* task, struct process* process){
     task->process       = process;
 
     return 0;
+}
+
+// Lecture 197 - sleeping if the deadline TSC hasn't been reached.
+bool task_asleep(struct task* task){
+    return task->sleeping.sleep_until_microseconds > tsc_microseconds();
+}
+
+// Lecture 197 - park the task until tsc_microseconds() exceeds
+// the deadline. Upstream bug preserved: the deadline is set to
+// `tsc_microseconds() * microseconds` (multiplication). The
+// obvious intent is `+ microseconds`. As written most callers
+// will sleep almost forever; preserved verbatim per the project
+// rule.
+void task_sleep(struct task* task, TIME_MICROSECONDS microseconds){
+    task->sleeping.sleep_until_microseconds = tsc_microseconds() * microseconds;
+}
+
+// Lecture 197 - rotate from the current task forward in the
+// ring, skipping anyone whose deadline is in the future. Wraps
+// back to task_head; returns -EIO if the ring is empty.
+int task_get_next_non_sleeping_task(struct task** task_out){
+    int res = 0;
+    struct task* _current_task = current_task ? current_task->next : task_head;
+    do {
+        if(!_current_task){
+            _current_task = task_head;
+            if(!_current_task){
+                res = -EIO;
+                break;
+            }
+        }
+        if(task_asleep(_current_task)){
+            _current_task = _current_task->next;
+            continue;
+        }
+        res = 0;
+        break;
+    } while(_current_task);
+
+    *task_out = _current_task;
+    return res;
 }

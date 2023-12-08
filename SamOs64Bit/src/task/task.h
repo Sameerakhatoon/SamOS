@@ -3,6 +3,8 @@
 
 #include "config.h"
 #include "memory/paging/paging.h"
+#include "io/tsc.h"           // L197 - TIME_MICROSECONDS / tsc_microseconds
+#include <stdbool.h>
 
 struct process;
 struct interrupt_frame;
@@ -30,6 +32,13 @@ struct task {
     // accessor task_paging_desc() forwards to it.
     struct registers     registers;
     struct process*      process;
+
+    // Lecture 197 - sleep state. task_get_next_non_sleeping_task
+    // skips tasks whose deadline is still in the future.
+    struct {
+        TIME_MICROSECONDS sleep_until_microseconds;
+    } sleeping;
+
     struct task*         next;
     struct task*         prev;
 };
@@ -48,6 +57,11 @@ void* task_get_stack_item(struct task* task, int index);
 int   copy_string_from_task(struct task* task, void* virtual, void* phys, int max);
 void* task_virtual_address_to_physical(struct task* task, void* virtual_address);
 void  task_next();
+
+// Lecture 197 - sleep API.
+void  task_sleep(struct task* task, TIME_MICROSECONDS microseconds);
+bool  task_asleep(struct task* task);
+int   task_get_next_non_sleeping_task(struct task** task_out);
 
 // Lecture 40 - paging_desc accessors.
 struct paging_desc* task_paging_desc(struct task* task);
