@@ -42,4 +42,18 @@ uint64_t lapic_timer_hz(void);
 // Unmask or mask ISA IRQ n at its IOAPIC entry (IRQ_enable's APIC path).
 int      ioapic_set_masked(uint8_t isa_irq, bool masked);
 
+// Disk completion interrupts. Each controller or ATA
+// channel gets a vector in 0x50-0x5F (priority class 5); while a
+// driver waits, the TPR is APIC_TPR_DISK_WAIT so only those are taken.
+// Their EOI goes out after the handler has acked the device.
+#define APIC_VECTOR_DISK_BASE  0x50
+#define APIC_VECTOR_DISK_END   0x60
+#define APIC_TPR_DISK_WAIT     0x40
+
+// Route a GSI to `vector` on the BSP with MPS INTI flags (polarity,
+// trigger). Returns -ENOENT without the APIC or an IOAPIC for the GSI.
+int      ioapic_route_gsi(uint32_t gsi, uint8_t vector, uint16_t inti_flags, bool masked);
+// Set this CPU's task priority; returns the old value.
+uint32_t lapic_set_tpr(uint32_t tpr);
+
 #endif

@@ -32,6 +32,7 @@ _mon() {
 e2e_run_qemu 300 _mon
 expect_serial '^apic: legacy 8259 and PIT tick$' "legacy path chosen"
 expect_no_serial '^apic: lapic' "no LAPIC set up"
+expect_serial '^disk: pata primary has no IOAPIC route, polled$' "PATA polled without the APIC"
 expect_serial '^e2e: user selftest done' "BLANK.ELF selftest"
 expect_serial "$SHELL_BANNER" "keyboard through the 8259"
 grep -Eq 'pic0: .*irq_base=20' "$E2E_QEMU_LOG" || e2e_fail "master 8259 not at vector 0x20"

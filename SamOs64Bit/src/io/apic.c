@@ -219,6 +219,26 @@ int ioapic_set_masked(uint8_t isa_irq, bool masked){
     return ioapic_route(isa_irq, masked);
 }
 
+// The disk interrupts: a PCI INTx GSI, or an ATA
+// channel's ISA IRQ moved off its 0x20 + n vector.
+int ioapic_route_gsi(uint32_t gsi, uint8_t vector, uint16_t inti_flags, bool masked){
+    uint32_t pin;
+    struct ioapic* io = active ? ioapic_for_gsi(gsi, &pin) : NULL;
+    if(!io){
+        return -ENOENT;
+    }
+    ioapic_write(io, IOAPIC_REG_REDIR(pin) + 1, irq_dest << 24);
+    ioapic_write(io, IOAPIC_REG_REDIR(pin), vector | inti_bits(inti_flags) | (masked ? LVT_MASKED : 0));
+    return 0;
+}
+
+uint32_t lapic_set_tpr(uint32_t tpr){
+    uint32_t old = lapic_read(LAPIC_TPR);
+    lapic_write(LAPIC_TPR, tpr);
+    (void)lapic_read(LAPIC_TPR);    // in effect before a following sti
+    return old;
+}
+
 int apic_init(void){
     const struct acpi_info* a = acpi_info();
     if(!a->have_madt || !a->lapic_phys || !a->ioapic_count){

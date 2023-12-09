@@ -534,3 +534,34 @@ void pci_enable_bus_master(struct pci_device* d){
 void bus_enable_bus_master(struct pci_device* device){
     pci_enable_bus_master(device);
 }
+
+// The GSI a device's INTx pin arrives on in APIC mode.
+// The general answer is the DSDT's _PRT, which needs an AML
+// interpreter. Until there is one only the machine SamOS boots on is
+// known: QEMU q35 (host bridge 8086:29C0) routes the ICH9 functions at
+// 00:1f.x (LPC, AHCI, SMBus) INTA-INTD to PIRQ A-D, GSI 16-19 (its
+// D31IR default and its _PRT). The GSIx link devices' _CRS says level,
+// active high: QEMU models PCI INTx as an active-high level, and KVM's
+// in-kernel IOAPIC honours the polarity bit, so active low would
+// storm there. Anything else returns -ENOENT and the driver polls.
+int pci_intx_gsi(struct pci_device* d, uint16_t* inti_flags){
+    uint8_t pin = pci_cfg_read_byte(d->addr.bus, d->addr.slot, d->addr.func,
+                                    PCI_HEADER_INTERRUPT_PIN_OFFSET);
+    if(pin < 1 || pin > 4 || d->addr.bus != 0 || d->addr.slot != 0x1F){
+        return -ENOENT;
+    }
+    if(pci_cfg_read_word(0, 0, 0, PCI_HEADER_VENDOR_OFFSET) != 0x8086 ||
+       pci_cfg_read_word(0, 0, 0, PCI_HEADER_DEVICE_OFFSET) != 0x29C0){
+        return -ENOENT;
+    }
+    *inti_flags = ACPI_INTI_POLARITY_HIGH | ACPI_INTI_TRIGGER_LEVEL;
+    return 16 + pin - 1;
+}
+
+// Clear the command register's INTx Disable bit (10).
+void pci_intx_enable(struct pci_device* d){
+    uint16_t cmd = pci_cfg_read_word(d->addr.bus, d->addr.slot, d->addr.func,
+                                     PCI_HEADER_COMMAND_OFFSET);
+    pci_cfg_write_word(d->addr.bus, d->addr.slot, d->addr.func,
+                       PCI_HEADER_COMMAND_OFFSET, cmd & ~0x0400);
+}

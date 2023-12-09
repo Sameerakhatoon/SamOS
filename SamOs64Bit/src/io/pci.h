@@ -124,4 +124,9 @@ int pci_device_subclass(struct pci_device* device);
 // any callers still spelling the old name.
 void pci_enable_bus_master(struct pci_device* d);
 
+// INTx through the IOAPIC: the GSI (and MPS INTI flags)
+// the device's pin arrives on, or -ENOENT; clear INTx Disable.
+int  pci_intx_gsi(struct pci_device* d, uint16_t* inti_flags);
+void pci_intx_enable(struct pci_device* d);
+
 #endif

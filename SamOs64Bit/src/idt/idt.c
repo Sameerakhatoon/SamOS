@@ -164,12 +164,19 @@ void interrupt_handler(struct trap_frame* frame){
     // interrupt (int 0x80 has its own entry) and gets a LAPIC EOI,
     // except the LAPIC spurious vector and the masked 8259s' range,
     // where only a spurious 8259 IRQ can land.
+    // A disk vector's EOI waits for its handler: the AHCI
+    // line is level-triggered, and an EOI while the device still
+    // asserts it delivers the interrupt again.
+    bool late_eoi = false;
     if(apic_active()){
         if(vector == APIC_VECTOR_SPURIOUS ||
            (vector >= APIC_VECTOR_PIC_BASE && vector < APIC_VECTOR_PIC_END)){
             return;
         }
-        lapic_eoi();
+        late_eoi = vector >= APIC_VECTOR_DISK_BASE && vector < APIC_VECTOR_DISK_END;
+        if(!late_eoi){
+            lapic_eoi();
+        }
     } else if(vector >= IDT_IRQ_BASE && vector < IDT_IRQ_END){
         if(pic_spurious(vector)){
             return;
@@ -183,6 +190,9 @@ void interrupt_handler(struct trap_frame* frame){
     }
     if(interrupt_callbacks[vector]){
         interrupt_callbacks[vector](frame);
+    }
+    if(late_eoi){
+        lapic_eoi();
     }
     if(from_user){
         task_page();

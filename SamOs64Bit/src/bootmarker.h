@@ -242,7 +242,12 @@ typedef enum {
     BM_FEATURE_MEM_PROCESS_LEAK = 183, // value = slab objects leaked per process cycle
     BM_FEATURE_MEM_ARENA      = 184, // Virtual-arena alloc/free gives frames and mappings back
 
-    BM_STAGE_MAX              = 185,
+    // Disk interrupts (src/disk/irqwait.h): running counts.
+    BM_FEATURE_DISK_IRQ_AHCI  = 185, // AHCI completions taken at the interrupt
+    BM_FEATURE_DISK_IRQ_PATA  = 186, // PATA completions taken at IRQ14/15
+    BM_FEATURE_DISK_IRQ_POLLED = 187, // waits that found the completion by polling
+
+    BM_STAGE_MAX              = 188,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.

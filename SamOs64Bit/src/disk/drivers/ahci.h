@@ -9,6 +9,7 @@
 #include <stdbool.h>
 #include "disk.h"
 #include "driver.h"
+#include "disk/irqwait.h"
 
 #define AHCI_PCI_BASE_CLASS 0x01
 #define AHCI_PCI_SUBCLASS   0x06
@@ -26,6 +27,7 @@
 #define AHCI_HBA_BOHC   0x28
 
 #define AHCI_GHC_AE     (1u << 31)
+#define AHCI_GHC_IE     (1u << 1)
 #define AHCI_CAP2_BOH   (1u << 0)
 #define AHCI_BOHC_BOS   (1u << 0)
 #define AHCI_BOHC_OOS   (1u << 1)
@@ -53,6 +55,9 @@
 #define AHCI_PxCMD_CR   (1u << 15)
 
 #define AHCI_PxIS_TFES  (1u << 30)
+#define AHCI_PxIS_DHRS  (1u << 0)      // D2H register FIS: DMA commands, FLUSH
+#define AHCI_PxIS_PSS   (1u << 1)      // PIO setup FIS: IDENTIFY
+#define AHCI_PxIE_COMPLETION (AHCI_PxIS_DHRS | AHCI_PxIS_PSS | AHCI_PxIS_TFES)
 
 #define AHCI_TFD_ERR    0x01
 #define AHCI_TFD_DRQ    0x08
@@ -96,10 +101,14 @@ struct ahci_cmd_table {
 } __attribute__((packed));
 
 struct pci_device;
+struct ahci_port_private;
 
 struct ahci_hba {
     struct pci_device* device;
     volatile uint8_t*  abar;
+    // Completion interrupt (one HBA; another one polls).
+    struct disk_irq    irq;
+    struct ahci_port_private* ports[AHCI_MAX_PORTS];
 };
 
 struct ahci_port_private {
@@ -112,6 +121,7 @@ struct ahci_port_private {
     struct ahci_cmd_table*  table;      // 128 B aligned
     uint8_t*                bounce;     // AHCI_BOUNCE_PAGES pages
     struct disk*            real_disk;
+    volatile uint32_t       irq_status; // PxIS bits the handler cleared
 };
 
 struct disk_driver* ahci_driver_init(void);

@@ -12,7 +12,11 @@
 //     LBA48 commands are used when the LBA needs them;
 //   - writes are supported and followed by a cache flush;
 //   - every wait has a timeout and checks ERR/DF.
-// Interrupts are disabled on the device (nIEN); it is polled.
+// IDENTIFY runs with interrupts off on the device (nIEN), polled.
+// After the probe each compatibility channel with a disk
+// gets IRQ14/15 through the IOAPIC on its own vector, nIEN is cleared,
+// and every point where the drive raises INTRQ waits for it before
+// the status checks below; without the APIC the driver polls.
 
 #include "pata.h"
 #include "status.h"
@@ -23,6 +27,9 @@
 #include "memory/heap/kheap.h"
 #include "kernel.h"
 #include "disk/poll.h"
+#include "disk/irqwait.h"
+#include "idt/idt.h"
+#include "idt/irq.h"
 
 
 int pata_address(int base, int offset){
@@ -70,6 +77,29 @@ static int pata_wait_drq(struct pata_driver_private_data* d){
         }
     }
     return -ETIMEOUT;
+}
+
+// One interrupt line per channel, shared by its two drives.
+static struct {
+    struct disk_irq irq;
+    uint16_t        io_base;
+} pata_channels[2];
+
+// Reading the status register acks INTRQ.
+static void pata_irq_handler(struct trap_frame* frame){
+    int channel = (int)frame->vector - DISK_VECTOR_PATA(0);
+    insb(pata_channels[channel].io_base + PATA_REG_STATUS);
+    disk_irq_signal(&pata_channels[channel].irq);
+}
+
+// Alternate status: does not ack the interrupt.
+static bool pata_done(void* ctx){
+    struct pata_driver_private_data* d = ctx;
+    return !(insb(d->ctrl_base) & PATA_SR_BSY);
+}
+
+static void pata_irq_wait(struct pata_driver_private_data* d){
+    disk_irq_wait(&pata_channels[d->disk_drive].irq, pata_done, d);
 }
 
 static void pata_select(struct pata_driver_private_data* d, uint8_t head_bits){
@@ -170,10 +200,16 @@ static int pata_transfer(struct pata_driver_private_data* d, uint64_t lba, int c
     }
     uint8_t cmd = write ? (ext ? PATA_CMD_WRITE_PIO_EXT : PATA_CMD_WRITE_PIO)
                         : (ext ? PATA_CMD_READ_PIO_EXT  : PATA_CMD_READ_PIO);
+    disk_irq_arm(&pata_channels[d->disk_drive].irq);
     outb(d->io_base + PATA_REG_COMMAND, cmd);
 
+    // INTRQ comes before each sector of a read, and after each
+    // sector of a write (the first DRQ of a write has none).
     uint16_t* ptr = buf;
     for(int s = 0; s < count; s++){
+        if(!write || s > 0){
+            pata_irq_wait(d);
+        }
         pata_delay400(d);
         res = pata_wait_drq(d);
         if(res < 0){
@@ -191,12 +227,15 @@ static int pata_transfer(struct pata_driver_private_data* d, uint64_t lba, int c
     }
 
     if(write){
+        pata_irq_wait(d);
         pata_delay400(d);
         res = pata_wait_not_busy(d);
         if(res < 0){
             return res;
         }
+        disk_irq_arm(&pata_channels[d->disk_drive].irq);
         outb(d->io_base + PATA_REG_COMMAND, ext ? PATA_CMD_CACHE_FLUSH_EXT : PATA_CMD_CACHE_FLUSH);
+        pata_irq_wait(d);
         pata_delay400(d);
         res = pata_wait_not_busy(d);
         if(res < 0){
@@ -273,6 +312,35 @@ static bool pata_find_ports(uint16_t io[2], uint16_t ctrl[2]){
     return false;
 }
 
+// IRQ14/15 for a compatibility-mode channel, at the GSI
+// and with the flags the MADT override gives (ISA: edge, active high).
+// A native-mode channel would use the PCI INTx; it stays polled.
+static void pata_irq_init(int channel, uint16_t io, uint16_t ctrl){
+    static const uint16_t legacy_io[2] = {PATA_PRIMARY_DRIVE_BASE_ADDRESS, PATA_SECONDARY_DRIVE_BASE_ADDRESS};
+    struct disk_irq* q = &pata_channels[channel].irq;
+    q->name   = channel ? "pata secondary" : "pata primary";
+    q->marker = BM_FEATURE_DISK_IRQ_PATA;
+    if(!apic_active() || io != legacy_io[channel]){
+        serial_write("disk: ");
+        serial_write(q->name);
+        serial_write(" has no IOAPIC route, polled\n");
+        return;
+    }
+    uint16_t inti;
+    uint32_t gsi = acpi_isa_irq_to_gsi(channel ? IRQ_SECONDARY_ATA_HDD : IRQ_PRIMARY_ATA_HDD, &inti);
+    uint8_t vector = DISK_VECTOR_PATA(channel);
+    pata_channels[channel].io_base = io;
+    idt_register_interrupt_callback(vector, pata_irq_handler);
+    bool masked = disk_irq_masked_by_cmdline();
+    if(ioapic_route_gsi(gsi, vector, inti, masked) < 0){
+        return;
+    }
+    insb(io + PATA_REG_STATUS);      // drop an INTRQ left from the probe
+    outb(ctrl, 0x00);                // nIEN clear: the drives interrupt
+    q->enabled = true;
+    disk_irq_report(q, gsi, inti, vector, masked);
+}
+
 int pata_driver_mount(struct disk_driver* driver){
     uint16_t io[2], ctrl[2];
     int found = 0;
@@ -280,6 +348,7 @@ int pata_driver_mount(struct disk_driver* driver){
         return -ENOENT;
     }
     for(int channel = 0; channel < 2; channel++){
+        int on_channel = 0;
         for(int slave = 0; slave < 2; slave++){
             struct pata_driver_private_data* d = kzalloc(sizeof(*d));
             if(!d){
@@ -299,6 +368,10 @@ int pata_driver_mount(struct disk_driver* driver){
                 continue;
             }
             found++;
+            on_channel++;
+        }
+        if(on_channel){
+            pata_irq_init(channel, io[channel], ctrl[channel]);
         }
     }
     return found ? 0 : -ENOENT;

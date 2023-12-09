@@ -9,7 +9,9 @@
 //      our command list and received-FIS area, clear errors,
 //      start it again;
 //   3. IDENTIFY DEVICE for the size and model.
-// I/O uses command slot 0 only and polls PxCI. Data moves
+// I/O uses command slot 0 only. It waits for the
+// completion interrupt (PCI INTx through the IOAPIC), then reads
+// PxCI; without a route for the interrupt it polls PxCI. Data moves
 // through a per-port bounce buffer with one PRDT entry per 4 KiB
 // page, so neither the caller's buffer nor the bounce buffer has
 // to be physically contiguous or aligned.
@@ -23,6 +25,7 @@
 #include "memory/paging/paging.h"
 #include "kernel.h"
 #include "disk/poll.h"
+#include "idt/idt.h"
 
 
 static inline uint32_t ahci_read(struct ahci_hba* hba, uint32_t off){
@@ -122,7 +125,14 @@ static int ahci_port_setup(struct ahci_port_private* p){
     return ahci_port_start(p);
 }
 
-// Issue one command in slot 0 and poll for completion. `bytes`
+// Slot 0 has finished, or the port stopped on a task-file error.
+static bool ahci_port_done(void* ctx){
+    struct ahci_port_private* p = ctx;
+    return !(ahci_port_read(p, AHCI_PxCI) & 1) ||
+           ((ahci_port_read(p, AHCI_PxIS) | p->irq_status) & AHCI_PxIS_TFES);
+}
+
+// Issue one command in slot 0 and wait for completion. `bytes`
 // of the bounce buffer take part in the transfer.
 static int ahci_command(struct ahci_port_private* p, uint8_t command, uint64_t lba,
                         uint32_t count, uint32_t bytes, bool write){
@@ -166,11 +176,14 @@ static int ahci_command(struct ahci_port_private* p, uint8_t command, uint64_t l
     h->ctbau = (uint32_t)(ctba >> 32);
 
     ahci_port_write(p, AHCI_PxIS, 0xFFFFFFFFu);
+    p->irq_status = 0;
+    disk_irq_arm(&p->hba->irq);
     __asm__ __volatile__("" ::: "memory");
     ahci_port_write(p, AHCI_PxCI, 1);
 
+    disk_irq_wait(&p->hba->irq, ahci_port_done, p);
     for(uint64_t end = disk_poll_deadline(); !disk_poll_expired(end); ){
-        if(ahci_port_read(p, AHCI_PxIS) & AHCI_PxIS_TFES){
+        if((ahci_port_read(p, AHCI_PxIS) | p->irq_status) & AHCI_PxIS_TFES){
             return -EIO;
         }
         if(!(ahci_port_read(p, AHCI_PxCI) & 1)){
@@ -262,6 +275,61 @@ static void ahci_bios_handoff(struct ahci_hba* hba){
     }
 }
 
+// The HBA on DISK_VECTOR_AHCI. The line is a shared,
+// level-triggered PCI INTx: clear PxIS then IS (only then does the HBA
+// drop the line), and an HBA with nothing pending was not the source.
+static struct ahci_hba* ahci_irq_hba;
+
+static void ahci_irq_handler(struct trap_frame* frame){
+    struct ahci_hba* hba = ahci_irq_hba;
+    uint32_t is = ahci_read(hba, AHCI_HBA_IS);
+    if(!is){
+        return;
+    }
+    for(int port = 0; port < AHCI_MAX_PORTS; port++){
+        if(!(is & (1u << port))){
+            continue;
+        }
+        uint32_t pis = ahci_read(hba, AHCI_PORT_BASE(port) + AHCI_PxIS);
+        ahci_write(hba, AHCI_PORT_BASE(port) + AHCI_PxIS, pis);
+        if(hba->ports[port]){
+            hba->ports[port]->irq_status |= pis;
+        }
+    }
+    ahci_write(hba, AHCI_HBA_IS, is);
+    disk_irq_signal(&hba->irq);
+}
+
+// After IDENTIFY (polled): PxIE for the completion FISes and errors,
+// GHC.IE, INTx unmasked at the PCI and routed through the IOAPIC.
+static void ahci_irq_init(struct ahci_hba* hba){
+    uint16_t inti = 0;
+    int gsi = apic_active() && !ahci_irq_hba ? pci_intx_gsi(hba->device, &inti) : -ENOENT;
+    if(gsi < 0){
+        serial_write("disk: ahci has no IOAPIC route, polled\n");
+        return;
+    }
+    for(int port = 0; port < AHCI_MAX_PORTS; port++){
+        if(hba->ports[port]){
+            ahci_port_write(hba->ports[port], AHCI_PxIS, 0xFFFFFFFFu);
+            ahci_port_write(hba->ports[port], AHCI_PxIE, AHCI_PxIE_COMPLETION);
+        }
+    }
+    ahci_write(hba, AHCI_HBA_IS, 0xFFFFFFFFu);
+    hba->irq.name   = "ahci";
+    hba->irq.marker = BM_FEATURE_DISK_IRQ_AHCI;
+    ahci_irq_hba = hba;
+    idt_register_interrupt_callback(DISK_VECTOR_AHCI, ahci_irq_handler);
+    pci_intx_enable(hba->device);
+    ahci_write(hba, AHCI_HBA_GHC, ahci_read(hba, AHCI_HBA_GHC) | AHCI_GHC_IE);
+    bool masked = disk_irq_masked_by_cmdline();
+    if(ioapic_route_gsi((uint32_t)gsi, DISK_VECTOR_AHCI, inti, masked) < 0){
+        return;
+    }
+    hba->irq.enabled = true;
+    disk_irq_report(&hba->irq, (uint32_t)gsi, inti, DISK_VECTOR_AHCI, masked);
+}
+
 static int ahci_mount_controller(struct disk_driver* driver, struct pci_device* dev){
     struct pci_device_bar* bar = &dev->bars[5];
     if(bar->type != PCI_DEVICE_IO_MEMORY || bar->addr == 0){
@@ -318,7 +386,11 @@ static int ahci_mount_controller(struct disk_driver* driver, struct pci_device* 
             kfree(p);
             continue;
         }
+        hba->ports[port] = p;
         found++;
+    }
+    if(found){
+        ahci_irq_init(hba);
     }
     return found;
 }
