@@ -27,6 +27,7 @@ enum SystemCommands {
     SYSTEM_COMMAND22_GRAPHICS_CREATE, // L171 - userspace relative graphics create
     SYSTEM_COMMAND23_WINDOW_REDRAW_REGION, // L172 - userspace body-region redraw
     SYSTEM_COMMAND24_UPDATE_WINDOW, // L173 - userspace update window field
+    SYSTEM_COMMAND25_UDELAY, // L198 - userspace udelay / task sleep
 };
 
 void isr80h_register_commands();
