@@ -36,7 +36,9 @@ set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 K64="$(cd "$HERE/../.." && pwd)"
-WORK="${STORAGE_WORK:-/tmp/samos-storage-test}"
+# A fresh directory per run: worktrees run this test at the same time,
+# and a shared default made one run delete another's disk images.
+WORK="${STORAGE_WORK:-$(mktemp -d "${TMPDIR:-/tmp}/samos-storage-test.XXXXXX")}"
 OVMF="${OVMF:-/usr/share/ovmf/OVMF.fd}"
 # build.sh copies the loader to <repo>/bin/SamOs.efi; the EDK2 build
 # tree is shared by every worktree, so do not read it from there.
