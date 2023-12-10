@@ -743,6 +743,13 @@ void* process_realloc(struct process* process, void* old_virt_ptr, size_t new_si
     void*  old_phys_ptr         = NULL;
     size_t old_allocation_index = 0;
 
+    // Lecture 201 - realloc(NULL, n) is malloc(n). Without this
+    // early-out the lookup below fails on a NULL needle and
+    // userland sees -ENOTFOUND instead of a fresh allocation.
+    if(old_virt_ptr == NULL){
+        return process_malloc(process, new_size);
+    }
+
     res = process_allocation_exists(process, old_virt_ptr, &old_allocation_index);
     if(res < 0){
         goto out;
