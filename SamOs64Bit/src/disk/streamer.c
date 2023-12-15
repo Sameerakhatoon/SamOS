@@ -2,7 +2,105 @@
 #include "memory/heap/kheap.h"
 #include "memory/memory.h"   // L64 - memcpy
 #include "config.h"
+#include "kernel.h"          // L204 - panic + krealloc
+#include "status.h"          // L204 - status codes
 #include <stdbool.h>
+
+// Lecture 204 - per-disk stream cache. The cache is a sparse
+// three-level lookup tree (level1 -> level2 -> level3 of cache
+// sectors) plus a round-robin eviction queue. L205 lands the
+// path-walk + lookup helpers, L206/L207 wire it into read.
+
+struct disk_stream_cache* diskstreamer_cache_new(){
+    struct disk_stream_cache* cache = kzalloc(sizeof(struct disk_stream_cache));
+    if(!cache){
+        goto out;
+    }
+out:
+    return cache;
+}
+
+// Lecture 204 - lazily grow the level-1 array to `index + 1`
+// and return the bucket at `index`. Upstream uses
+// `sizeof(struct disk_Stream_cache_bucket_level1**)` (capital
+// S - struct typo). gcc accepts the typo as a forward decl of
+// an unrelated struct; sizeof of pointer-to-pointer-to-struct
+// is sizeof(void*) so the byte-count math accidentally works.
+// Preserved verbatim per the project rule.
+struct disk_stream_cache_bucket_level1* diskstreamer_cache_bucket_level1_get(
+    struct disk_stream_cache* cache, int index){
+    struct disk_stream_cache_bucket_level1* level1 = NULL;
+    if((int)cache->total <= index){
+        size_t old_total = cache->total;
+        size_t new_total = index + 1;
+        size_t new_size = new_total * sizeof(struct disk_Stream_cache_bucket_level1**);
+
+        struct disk_stream_cache_bucket_level1** new_buckets =
+            krealloc(cache->buckets, new_size);
+        if(!new_buckets){
+            return NULL;
+        }
+        memset(new_buckets + old_total, 0,
+               (new_total - old_total) * sizeof(*new_buckets));
+        cache->buckets = new_buckets;
+        cache->total   = new_total;
+    }
+
+    level1 = cache->buckets[index];
+    if(!level1){
+        cache->buckets[index] = kzalloc(sizeof(struct disk_stream_cache_bucket_level1));
+        if(!cache->buckets[index]){
+            return NULL;
+        }
+        level1 = cache->buckets[index];
+        level1->total_buckets = 0;
+    }
+    return level1;
+}
+
+struct disk_stream_cache_bucket_level2* diskstreamer_cache_bucket_level2_get(
+    struct disk_stream_cache_bucket_level1* level1_bucket, int index){
+    int max_buckets = (sizeof(level1_bucket->buckets) / sizeof(*level1_bucket->buckets));
+    if(index >= max_buckets){
+        return NULL;
+    }
+    struct disk_stream_cache_bucket_level2* level_two = level1_bucket->buckets[index];
+    if(!level_two){
+        level_two = kzalloc(sizeof(struct disk_stream_cache_bucket_level2));
+        if(!level_two){
+            return NULL;
+        }
+        level_two->total_buckets = 0;
+        level1_bucket->buckets[index] = level_two;
+    }
+    return level_two;
+}
+
+struct disk_stream_cache_bucket_level3* diskstreamer_cache_bucket_level3_get(
+    struct disk_stream_cache_bucket_level2* level2, int index){
+    struct disk_stream_cache_bucket_level3* level3 = NULL;
+    int max_buckets = (sizeof(level2->buckets) / sizeof(*level2->buckets));
+    if(index >= max_buckets){
+        return NULL;
+    }
+    level3 = level2->buckets[index];
+    if(!level3){
+        level3 = kzalloc(sizeof(struct disk_stream_cache_bucket_level3));
+        if(!level3){
+            return NULL;
+        }
+        level3->total_sectors = 0;
+        level2->buckets[index] = level3;
+    }
+    return level3;
+}
+
+void diskstreamer_cache_bucket_level3_free(struct disk_stream_cache_bucket_level3* level3){
+    for(size_t i = 0; i < DISK_STREAM_LEVEL3_SECTORS_ARRAY_SIZE; i++){
+        kfree(level3->sectors[i]);
+    }
+    kfree(level3);
+}
 
 struct disk_stream* diskstreamer_new(int disk_id){
     struct disk* disk = disk_get(disk_id);
