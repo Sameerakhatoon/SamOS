@@ -60,6 +60,10 @@ struct disk_stream_cache {
 
 struct disk_stream {
     int           pos;
+    // Lecture 205 - cache walk uses stream->sector_size. SamOs
+    // hoists this field at L205 so the L205 cache_find body
+    // compiles (upstream lands the field at L206).
+    int           sector_size;
     struct disk*  disk;
 };
 
