@@ -20,20 +20,16 @@ out:
     return cache;
 }
 
-// Lecture 204 - lazily grow the level-1 array to `index + 1`
-// and return the bucket at `index`. Upstream uses
-// `sizeof(struct disk_Stream_cache_bucket_level1**)` (capital
-// S - struct typo). gcc accepts the typo as a forward decl of
-// an unrelated struct; sizeof of pointer-to-pointer-to-struct
-// is sizeof(void*) so the byte-count math accidentally works.
-// Preserved verbatim per the project rule.
+// Lecture 204 / 206 - L204 shipped this sizeof with the typo
+// `struct disk_Stream_cache_bucket_level1**` (capital S). L206
+// fixes it to the correct struct name.
 struct disk_stream_cache_bucket_level1* diskstreamer_cache_bucket_level1_get(
     struct disk_stream_cache* cache, int index){
     struct disk_stream_cache_bucket_level1* level1 = NULL;
     if((int)cache->total <= index){
         size_t old_total = cache->total;
         size_t new_total = index + 1;
-        size_t new_size = new_total * sizeof(struct disk_Stream_cache_bucket_level1**);
+        size_t new_size = new_total * sizeof(struct disk_stream_cache_bucket_level1**);
 
         struct disk_stream_cache_bucket_level1** new_buckets =
             krealloc(cache->buckets, new_size);
@@ -188,8 +184,10 @@ struct disk_stream* diskstreamer_new(int disk_id){
     }
 
     struct disk_stream* streamer = kzalloc(sizeof(struct disk_stream));
-    streamer->pos  = 0;
-    streamer->disk = disk;
+    streamer->pos         = 0;
+    // Lecture 206 - record sector size up front for the cache walk.
+    streamer->sector_size = disk->sector_size;
+    streamer->disk        = disk;
     return streamer;
 }
 
@@ -201,8 +199,9 @@ struct disk_stream* diskstreamer_new_from_disk(struct disk* disk){
         return 0;
     }
     struct disk_stream* streamer = kzalloc(sizeof(struct disk_stream));
-    streamer->pos  = 0;
-    streamer->disk = disk;
+    streamer->pos         = 0;
+    streamer->sector_size = disk->sector_size;
+    streamer->disk        = disk;
     return streamer;
 }
 
@@ -211,48 +210,71 @@ int diskstreamer_seek(struct disk_stream* stream, int pos){
     return 0;
 }
 
-// Lecture 64 - rewritten iteratively.
-//
-// The original recursive form had two problems:
-//   1. It split the read at the FIRST sector boundary, then
-//      recursed for the remainder. Cross-sector reads stacked
-//      one C call per sector - 4 KB of read = 8 stack frames
-//      and could easily blow the kernel stack for large files.
-//   2. The `total_to_read = (offset + total) - SAMOS_SECTOR_SIZE`
-//      calculation for the overflow case was correct but easy
-//      to get wrong on review.
-//
-// The new loop computes a chunk that fits in the current
-// sector, reads it, advances out/pos/remaining, and repeats
-// until remaining hits 0. No recursion, no stack risk.
+// Lecture 64 / 205 / 206 - read through the per-disk stream
+// cache. The loop aligns the read window to the sector grid,
+// then for each sector it consults the cache: hit reads from
+// the cache buffer; miss reads the sector through
+// disk_read_block into the freshly allocated cache slot.
 int diskstreamer_read(struct disk_stream* stream, void* out, int total){
-    if(total <= 0){
-        return -1;
+    int res = 0;
+    int offset = stream->pos;
+    int offset_aligned_down = offset;
+    int starting_sector = 0;
+    int ending_sector   = 0;
+    int total_bytes_aligned = 0;
+    int total_sectors_to_read = 0;
+    int final_offset = 0;
+    int final_offset_aligned_up = 0;
+
+    if((offset % stream->sector_size) != 0){
+        offset_aligned_down -= (offset % stream->sector_size);
     }
 
-    char* outc = out;
-    int   remaining = total;
-
-    while(remaining > 0){
-        int  sector = stream->pos / SAMOS_SECTOR_SIZE;
-        int  offset = stream->pos % SAMOS_SECTOR_SIZE;
-        int  chunk  = SAMOS_SECTOR_SIZE - offset;
-        if(chunk > remaining){
-            chunk = remaining;
-        }
-
-        char buf[SAMOS_SECTOR_SIZE];
-        int res = disk_read_block(stream->disk, sector, 1, buf);
-        if(res < 0){
-            return res;
-        }
-
-        memcpy(outc, buf + offset, chunk);
-        outc         += chunk;
-        stream->pos  += chunk;
-        remaining    -= chunk;
+    starting_sector         = offset_aligned_down / stream->sector_size;
+    final_offset            = offset + total;
+    final_offset_aligned_up = final_offset;
+    if((final_offset % stream->sector_size) != 0){
+        final_offset_aligned_up += (stream->sector_size -
+                                    (final_offset_aligned_up % stream->sector_size));
     }
-    return 0;
+
+    ending_sector         = final_offset_aligned_up / stream->sector_size;
+    total_bytes_aligned   = final_offset_aligned_up - offset_aligned_down;
+    total_sectors_to_read = total_bytes_aligned / stream->sector_size;
+    if(total_sectors_to_read < 0){
+        panic("you went below zero\n");
+    }
+
+    for(int i = starting_sector; i <= ending_sector; i++){
+        int offset_in_sector = stream->pos % stream->sector_size;
+        int amount_read = stream->sector_size - (stream->pos % stream->sector_size);
+        if(total < stream->sector_size){
+            amount_read = total;
+        }
+
+        long real_offset = disk_real_offset(stream->disk, i);
+        struct disk_stream_cache_sector* cache_sector = NULL;
+        int cache_res = diskstreamer_cache_find(stream->disk, real_offset, &cache_sector);
+        if(cache_res < 0){
+            res = cache_res;
+            goto out;
+        }
+
+        if(cache_res == DISK_STREAMER_CACHE_STATUS_NEW_CACHE_ENTRY){
+            res = disk_read_block(stream->disk, i, 1, cache_sector->buf);
+            if(res < 0){
+                goto out;
+            }
+        }
+
+        for(int j = 0; j < amount_read; j++){
+            *(char*)out++ = cache_sector->buf[offset_in_sector + j];
+        }
+        stream->pos += amount_read;
+        total       -= amount_read;
+    }
+out:
+    return res;
 }
 
 void diskstreamer_close(struct disk_stream* stream){
