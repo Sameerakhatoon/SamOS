@@ -5,6 +5,10 @@
 // QEMU's -kernel follows): x0 = physical address of the DTB, x1-x3 =
 // 0, MMU off, D-cache off, entered at EL2 or EL1, primary CPU only
 // (QEMU holds the others in PSCI).
+//
+// Linked at 0xffffffff80000000 but entered at the load address:
+// everything before boot_high is PC-relative (adr, adrp), never an
+// absolute address of the image.
 
 #define SCTLR_EL1_RES1  0x30d00800      // RES1 bits; MMU, caches, alignment check off
 #define HCR_EL2_RW      (1 << 31)       // EL1 is AArch64
@@ -93,6 +97,38 @@ in_el1:
     stp     xzr, xzr, [x1], #16
     b       1b
 2:
+    // Page tables (MMU still off), then the MMU on and a jump
+    // to the linked, higher-half address. Until the jump the PC is
+    // the load address, fetched through mmu_early's identity map.
+    mov     x0, x19
+    bl      mmu_early
+    adrp    x1, mmu_boot_ttbr0
+    ldr     x1, [x1, :lo12:mmu_boot_ttbr0]
+    msr     ttbr0_el1, x1
+    adrp    x1, mmu_boot_ttbr1
+    ldr     x1, [x1, :lo12:mmu_boot_ttbr1]
+    msr     ttbr1_el1, x1
+    adrp    x1, mmu_boot_sctlr
+    ldr     x1, [x1, :lo12:mmu_boot_sctlr]
+    isb
+    tlbi    vmalle1
+    ic      iallu
+    dsb     nsh
+    isb
+    msr     sctlr_el1, x1
+    isb
+    ldr     x1, =boot_high
+    br      x1
+
+boot_high:
+    // Running at KERNEL_VBASE: a fresh stack and the vectors at their
+    // high addresses, then drop the identity map.
+    ldr     x1, =_stack_top
+    mov     sp, x1
+    ldr     x1, =aarch64_vectors
+    msr     vbar_el1, x1
+    isb
+    bl      mmu_late
     mov     x0, x19
     mov     x1, x20
     bl      aarch64_main

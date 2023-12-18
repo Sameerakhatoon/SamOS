@@ -9,7 +9,8 @@
 #   el2:   virt,virtualization=on, entered at EL2: proves the drop
 #          to EL1 ("entered at EL2, running at EL1"), then hello.
 #   fault: samos.fault_test, brk #0x5a: the vector table dumps
-#          ESR 0xf200005a (EC 0x3c, BRK) with ELR inside the kernel.
+#          ESR 0xf200005a (EC 0x3c, BRK) with ELR inside the kernel
+#          (at 0xffffffff80000000 since the aarch64 MMU work).
 # Plain virt has a GICv2, so since the aarch64 trap work these boots also show that the
 # kernel says so and still reaches hello without a tick; the GICv3
 # boots are in aarch64-traps.sh.
@@ -107,7 +108,7 @@ dump fault
 expect fault '^bootargs: samos.test=1 samos.fault_test$' "bootargs"
 expect fault '^exception: sync \(current EL, SP_ELx\)$' "sync exception at EL1h"
 expect fault '^  ESR 0xf200005a \(EC 0x3c, brk\)$' "ESR is BRK #0x5a"
-expect fault '^  ELR 0x402[0-9a-f]{5}$' "ELR inside the kernel"
+expect fault '^  ELR 0xffffffff800[0-9a-f]{5}$' "ELR inside the kernel (higher half)"
 expect_no fault '^SamOS aarch64: hello$' "no hello after the fault"
 
 echo "aarch64 arch test: $checks checks, $failures failures"

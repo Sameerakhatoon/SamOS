@@ -4,7 +4,8 @@
 # Builds bin/aarch64/kernel.img and boots it on -machine
 # virt,gic-version=3 -cpu cortex-a72 -m 512M:
 #   brk, undef, dabort: samos.fault_test=<kind> takes a BRK, a UDF and
-#          a data abort (load from the end of RAM, 0x60000000). Each
+#          a data abort (load from the end of RAM, 0x60000000, through
+#          its Device mapping at 0xffff800060000000 since the aarch64 MMU work). Each
 #          dump must decode ESR_EL1, show the marker registers x2/x28
 #          and have ELR at the faulting instruction, whose address
 #          comes from nm on kernel.elf (fault_test_*_insn).
@@ -144,9 +145,9 @@ for kind in brk undef dabort svc; do
         ;;
     dabort)
         expect dabort '^  ESR 0x96000010 \(EC 0x25, data abort\)$' "ESR decoded as data abort at EL1"
-        expect dabort '^  cause: data abort, read, DFSC 0x10 \(synchronous external abort\), FAR 0x60000000$' "DFSC and direction"
-        expect dabort '^  FAR 0x60000000$' "FAR is the address loaded"
-        expect dabort '^  x0  0x0000000060000000 ' "x0 holds the address in the dump"
+        expect dabort '^  cause: data abort, read, DFSC 0x10 \(synchronous external abort\), FAR 0xffff800060000000$' "DFSC and direction"
+        expect dabort '^  FAR 0xffff800060000000$' "FAR is the address loaded"
+        expect dabort '^  x0  0xffff800060000000 ' "x0 holds the address in the dump"
         ;;
     svc)
         svc_next="$(sym fault_test_svc_insn 4)"
@@ -161,7 +162,7 @@ for kind in brk undef dabort svc; do
         expect $kind "^  ELR $insn\$" "ELR is fault_test_${kind}_insn ($insn)"
         expect $kind '  x2  0x0000000000002222( |$)' "x2 marker in the dump"
         expect $kind '  x28 0x0000000000002828( |$)' "x28 marker in the dump"
-        expect $kind '^  sp  0x0000000040[0-9a-f]{6}$' "sp in the kernel stack"
+        expect $kind '^  sp  0xffffffff800[0-9a-f]{5}$' "sp in the kernel stack"
         expect $kind '^exception: halted$' "halted"
         expect_no $kind '^SamOS aarch64: hello$' "no hello after the fault"
     fi

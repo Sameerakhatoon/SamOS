@@ -2,6 +2,8 @@
 // device tree, "SamOS aarch64: hello".
 // Then the GICv3 and the 100 Hz generic timer tick, IRQs on,
 // and the idle thread sleeping in wfi.
+// Runs with the MMU on, high (boot.S, mmu.c): prints the layout,
+// the memory map and the page-frame allocator first.
 //
 // A standalone spike until the hardware layer splits the kernel: boot.S calls
 // aarch64_main instead of the shared kernel_main, and the console
@@ -12,10 +14,15 @@
 //       (fault_test.S); the first three dump and halt, svc returns.
 //   samos.sched_test  two busy kernel threads preempted by the tick,
 //       then the tick counter checked against CNTPCT_EL0 while idle.
+//   samos.mmu_test  mapping probes, the PFA over all RAM, user address
+//       spaces (mmu_test.c); samos.fault_test=textwrite|dataexec|ident|
+//       wxn|uexec take the matching abort there.
 #include <stdint.h>
 #include "firmware/fdt.h"
 #include "arch/aarch64/console.h"
 #include "arch/aarch64/gicv3.h"
+#include "arch/aarch64/memmap.h"
+#include "arch/aarch64/mmu.h"
 #include "arch/aarch64/pl011.h"
 #include "arch/aarch64/sched.h"
 #include "arch/aarch64/timer.h"
@@ -35,6 +42,8 @@ void fault_test_brk(void);
 void fault_test_undef(void);
 void fault_test_dabort(uint64_t addr);
 uint64_t fault_test_svc(uint64_t x0);
+void mmu_test(const struct fdt* f);
+int mmu_fault_test(const char* kind);
 
 static uint8_t work_stacks[2][WORK_STACK] __attribute__((aligned(16)));
 static uint64_t timer_epoch;        // CNTPCT when the tick started
@@ -89,7 +98,8 @@ static void svc_test_handler(struct trap_frame* f, uint32_t imm)
 }
 
 // `hole` is a physical address with nothing behind it (the end of
-// RAM), for the data abort.
+// RAM), for the data abort: mapped as Device memory, the load is an
+// external abort from the bus, not a translation fault.
 static void fault_test(const char* kind, uint64_t hole)
 {
     if (!*kind)
@@ -100,13 +110,13 @@ static void fault_test(const char* kind, uint64_t hole)
     } else if (str_eq(kind, "undef")) {
         fault_test_undef();
     } else if (str_eq(kind, "dabort")) {
-        fault_test_dabort(hole);
+        fault_test_dabort(mmu_map_device(hole, PAGE_SIZE));
     } else if (str_eq(kind, "svc")) {
         trap_set_svc_handler(svc_test_handler);
         console_printf("fault test: svc returned 0x%lx\n", fault_test_svc(0x5a));
         trap_set_svc_handler(0);
         return;
-    } else {
+    } else if (mmu_fault_test(kind) < 0) {
         console_printf("fault test: unknown kind, ignored\n");
         return;
     }
@@ -167,7 +177,7 @@ static void sched_test(void)
 void aarch64_main(uint64_t dtb, uint64_t boot_el)
 {
     struct fdt f;
-    int r = fdt_init(&f, (const void*)dtb, 0);
+    int r = fdt_init(&f, phys_to_virt(dtb), 0);
     const char* how = pl011_init(r == 0 ? &f : 0);
 
     console_printf("\nSamOS aarch64: booting (entered at EL%lu, running at EL%lu)\n", boot_el, current_el());
@@ -186,15 +196,20 @@ void aarch64_main(uint64_t dtb, uint64_t boot_el)
         total += mem[i].size;
     }
     console_printf("memory: %lu MiB in %d region(s)\n", total >> 20, n < 0 ? 0 : n);
+    mmu_report();
+    memmap_print(&f);
 
     const char* args = fdt_bootargs(&f);
     console_printf("bootargs: %s\n", args ? args : "(none)");
+
+    char unused[2];
+    if (cmdline_value(args, "samos.mmu_test", unused, sizeof unused) == 0)
+        mmu_test(&f);
 
     char kind[16];
     if (cmdline_value(args, "samos.fault_test", kind, sizeof kind) == 0)
         fault_test(kind, n > 0 ? mem[0].base + mem[0].size : 0);
 
-    char unused[2];
     int ticking = gic_init(&f) == 0 && timer_init(&f) == 0;
     if (ticking) {
         sched_init();

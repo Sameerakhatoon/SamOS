@@ -108,4 +108,27 @@ const char* fdt_bootargs(const struct fdt* f);
 // FDT_ERR_NOTFOUND.
 int         fdt_stdout_node(const struct fdt* f);
 
+// ---- memory reservations ---------------------------------
+// Entry `index` of the header's memory reservation block (the
+// /memreserve/ lines of a .dts). 0, FDT_ERR_NOTFOUND past the last
+// entry, FDT_ERR_TRUNCATED if the block runs past totalsize.
+int         fdt_memreserve(const struct fdt* f, int index, struct fdt_region* out);
+
+#define FDT_RESERVED_NOMAP      1   // "no-map": not even a cacheable mapping
+#define FDT_RESERVED_DYNAMIC    2   // only a "size": the OS would place it, base is 0
+
+struct fdt_reserved {
+    uint64_t base;
+    uint64_t size;
+    uint32_t flags;     // FDT_RESERVED_*
+    int      node;      // the /reserved-memory child, for its name
+};
+
+// Children of /reserved-memory whose status is okay (or absent): one
+// entry per reg entry, or one FDT_RESERVED_DYNAMIC entry for a node
+// with a size and no reg. Fills up to `max`, returns the number found
+// (may exceed `max`); 0 without /reserved-memory, FDT_ERR_* on a bad
+// reg or size.
+int         fdt_reserved_memory(const struct fdt* f, struct fdt_reserved* out, int max);
+
 #endif

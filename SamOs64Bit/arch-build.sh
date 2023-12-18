@@ -22,15 +22,23 @@ aarch64)
     CROSS="${CROSS:-aarch64-linux-gnu-}"
     # -mgeneral-regs-only: no FP/SIMD in the kernel (no FP context to
     #   save yet, and gcc would otherwise use q registers for copies).
-    # -mstrict-align: the MMU is off, so all memory is Device memory
-    #   and an unaligned access faults.
-    ARCH_CFLAGS="-mgeneral-regs-only -mstrict-align -mcmodel=small"
-    # One RWX segment until the aarch64 MMU work brings the MMU and W^X.
-    ARCH_LDFLAGS="-Wl,--no-warn-rwx-segments"
+    # -mstrict-align: until mmu_early turns the MMU on, all memory is
+    #   Device memory and an unaligned access faults.
+    #   Kept for the whole kernel: fdt, the PFA, the console and the
+    #   page-table code run both before and after.
+    # -mcmodel=small: adrp/add, PC-relative, so the code linked high
+    #   also runs at the load address before the MMU is on.
+    # -fno-tree-loop-distribute-patterns: no memset calls for the
+    #   table-zeroing loops, there is no libc.
+    ARCH_CFLAGS="-mgeneral-regs-only -mstrict-align -mcmodel=small -fno-tree-loop-distribute-patterns"
+    # W^X, three segments (linker.ld), no RWX warning to silence.
+    ARCH_LDFLAGS=""
     SRCS="src/arch/aarch64/boot.S src/arch/aarch64/vectors.S src/arch/aarch64/main.c
           src/arch/aarch64/pl011.c src/firmware/fdt.c
           src/arch/aarch64/console.c src/arch/aarch64/trap.c src/arch/aarch64/gicv3.c
-          src/arch/aarch64/timer.c src/arch/aarch64/sched.c src/arch/aarch64/fault_test.S"
+          src/arch/aarch64/timer.c src/arch/aarch64/sched.c src/arch/aarch64/fault_test.S
+          src/arch/aarch64/mmu.c src/arch/aarch64/pfa.c src/arch/aarch64/memmap.c
+          src/arch/aarch64/mmu_test.c"
     ;;
 riscv64)
     CROSS="${CROSS:-riscv64-linux-gnu-}"

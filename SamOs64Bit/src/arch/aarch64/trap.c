@@ -72,7 +72,7 @@ static void print_cause(const struct trap_frame* f)
     uint32_t iss = f->esr & 0x1ffffff;
     switch (ec) {
     case EC_UNKNOWN:
-        // MMU off: ELR is a physical RAM address, 4-byte aligned.
+        // ELR is in the kernel text, which is readable.
         console_printf("  cause: undefined instruction 0x%08x\n", *(const volatile uint32_t*)f->elr);
         break;
     case EC_SVC64:

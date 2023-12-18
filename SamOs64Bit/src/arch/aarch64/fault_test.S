@@ -25,8 +25,8 @@ fault_test_undef_insn:
     udf     #0x2a
     ret
 
-// x0 = address to load from (main.c passes a misaligned one: with the
-// MMU off that is an alignment fault).
+// x0 = address to load from (main.c: a Device mapping of the hole past
+// RAM; mmu_test.c: the removed identity map).
     .global fault_test_dabort, fault_test_dabort_insn
 fault_test_dabort:
     markers
@@ -41,4 +41,20 @@ fault_test_svc:
     mov     x2, #0x2222
 fault_test_svc_insn:
     svc     #0x80
+    ret
+
+// x0 = address, x1 = value: a store (kernel text: permission fault).
+    .global fault_test_store, fault_test_store_insn
+fault_test_store:
+    markers
+fault_test_store_insn:
+    str     x1, [x0]
+    ret
+
+// x0 = address to branch to (data, a W+X page, a user page):
+// an instruction abort with ELR = FAR = x0, x30 back here.
+    .global fault_test_call
+fault_test_call:
+    markers
+    blr     x0
     ret

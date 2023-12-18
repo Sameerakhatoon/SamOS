@@ -7,6 +7,7 @@
 // (ARE, then Group 1 enable) in both.
 #include "arch/aarch64/gicv3.h"
 #include "arch/aarch64/console.h"
+#include "arch/aarch64/mmu.h"
 #include "arch/aarch64/sysreg.h"
 
 #define GICD_CTLR           0x0000
@@ -41,8 +42,8 @@
 #define PRIORITY_DEFAULT    0xa0a0a0a0u
 #define MAX_RD_REGIONS      4
 
-static uint64_t gicd;           // distributor
-static uint64_t gicr;           // this CPU's redistributor (RD_base)
+static uint64_t gicd;           // distributor (virtual: Device memory)
+static uint64_t gicr;           // this CPU's redistributor (RD_base, virtual)
 static uint32_t gic_lines;      // INTIDs the distributor implements
 static uint32_t intid_cells;    // #interrupt-cells
 
@@ -74,7 +75,10 @@ static int find_redistributor(const struct fdt* f, int node, uint32_t aff, int* 
         struct fdt_region reg;
         if (fdt_reg_cpu(f, node, 1 + r, &reg) < 0)
             break;
-        for (uint64_t rd = reg.base; rd < reg.base + reg.size;) {
+        uint64_t va = mmu_map_device(reg.base, reg.size);
+        if (!va)
+            break;
+        for (uint64_t rd = va; rd < va + reg.size;) {
             uint32_t lo = rd32(rd + GICR_TYPER), hi = rd32(rd + GICR_TYPER + 4);
             if (hi == aff && found < 0) {
                 gicr = rd;
@@ -159,7 +163,11 @@ int gic_init(const struct fdt* f)
         console_printf("gic: CPU has no GICv3 system register interface\n");
         return -1;
     }
-    gicd = reg.base;
+    gicd = mmu_map_device(reg.base, reg.size);
+    if (!gicd) {
+        console_printf("gic: cannot map the distributor at 0x%lx\n", reg.base);
+        return -1;
+    }
     intid_cells = fdt_getprop_u32(f, node, "#interrupt-cells", 3);
 
     uint32_t aff = cpu_affinity();
@@ -175,8 +183,9 @@ int gic_init(const struct fdt* f)
         console_printf("gic: ICC_SRE_EL1.SRE reads 0, system register interface disabled\n");
         return -1;
     }
-    console_printf("gic: GICv3 distributor at 0x%lx, %u INTIDs\n", gicd, gic_lines);
-    console_printf("gic: redistributor at 0x%lx (frame %d of %d, affinity 0x%x)\n", gicr, index, count, aff);
+    console_printf("gic: GICv3 distributor at 0x%lx, %u INTIDs\n", virt_to_phys((void*)gicd), gic_lines);
+    console_printf("gic: redistributor at 0x%lx (frame %d of %d, affinity 0x%x)\n", virt_to_phys((void*)gicr),
+                   index, count, aff);
     return 0;
 }
 

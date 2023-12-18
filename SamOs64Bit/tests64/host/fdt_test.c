@@ -105,6 +105,10 @@ static void test_fixture(const char* dir, const char* name, const char* uart_com
     CHECK_EQ(fdt_path_offset(&f, full), memnode);
     CHECK_EQ(fdt_path_offset(&f, "/memory@1"), FDT_ERR_NOTFOUND);
     CHECK_STR(fdt_getprop_string(&f, memnode, "device_type"), "memory");
+    // QEMU's own trees reserve nothing (OpenSBI adds its region at
+    // run time, after the dump).
+    CHECK_EQ(fdt_memreserve(&f, 0, &r), FDT_ERR_NOTFOUND);
+    CHECK_EQ(fdt_reserved_memory(&f, NULL, 0), 0);
 
     // cpus: #address-cells 1, #size-cells 0.
     int cpu = fdt_path_offset(&f, "/cpus/cpu@0");
@@ -264,14 +268,20 @@ static void prop_cells(struct builder* b, const char* name, int n, ...)
     prop(b, name, v, 4 * n);
 }
 
-// Header + empty reserve map + struct + strings. version 16 omits
-// size_dt_struct (left 0) to check the older layout.
-static uint32_t finish(struct builder* b, uint8_t* out, uint32_t version)
+// Header + reserve map (`nrsv` base/size pairs, then the 0/0 end) +
+// struct + strings. version 16 omits size_dt_struct (left 0) to check
+// the older layout.
+static uint32_t finish_rsv(struct builder* b, uint8_t* out, uint32_t version,
+                           const uint64_t* rsv, int nrsv)
 {
     tok(b, 9);
-    uint32_t off_rsv = 40, off_st = off_rsv + 16, off_strs = off_st + b->st_len;
+    uint32_t off_rsv = 40, off_st = off_rsv + 16 * (nrsv + 1), off_strs = off_st + b->st_len;
     uint32_t total = off_strs + b->strs_len;
     memset(out, 0, total);
+    for (int i = 0; i < 2 * nrsv; i++) {
+        put32(out + off_rsv + 8 * i, rsv[i] >> 32);
+        put32(out + off_rsv + 8 * i + 4, (uint32_t)rsv[i]);
+    }
     put32(out, FDT_MAGIC);
     put32(out + 4, total);
     put32(out + 8, off_st);
@@ -284,6 +294,11 @@ static uint32_t finish(struct builder* b, uint8_t* out, uint32_t version)
     memcpy(out + off_st, b->st, b->st_len);
     memcpy(out + off_strs, b->strs, b->strs_len);
     return total;
+}
+
+static uint32_t finish(struct builder* b, uint8_t* out, uint32_t version)
+{
+    return finish_rsv(b, out, version, NULL, 0);
 }
 
 static uint32_t build_tree(uint8_t* out, uint32_t version, int with_ranges)
@@ -422,6 +437,113 @@ static void test_built(void)
     CHECK_EQ(fdt_memory_regions(&f, NULL, 0), 0);
 }
 
+// /memreserve/ entries and /reserved-memory children, the
+// page-frame allocator's reservations. `bad` adds a size property of
+// the wrong length.
+static uint32_t build_reserved(uint8_t* out, int bad)
+{
+    static struct builder b;
+    static const uint64_t rsv[] = { 0x40000000, 0x1000, 0x123456789000, 0x2000 };
+    memset(&b, 0, sizeof b);
+    begin(&b, "");
+    prop_cells(&b, "#address-cells", 1, 2);
+    prop_cells(&b, "#size-cells", 1, 2);
+    begin(&b, "memory@40000000");
+    prop_str(&b, "device_type", "memory");
+    prop_cells(&b, "reg", 4, 0, 0x40000000, 0, 0x20000000);
+    end(&b);
+    begin(&b, "reserved-memory");
+    prop_cells(&b, "#address-cells", 1, 2);
+    prop_cells(&b, "#size-cells", 1, 1);                // a different size width than the root
+    prop(&b, "ranges", "", 0);
+    begin(&b, "fw@48000000");
+    prop_cells(&b, "reg", 3, 0, 0x48000000, 0x100000);
+    prop(&b, "no-map", "", 0);
+    end(&b);
+    begin(&b, "pool@49000000");                         // two reg entries, one above 4 GiB
+    prop_cells(&b, "reg", 6, 0, 0x49000000, 0x200000, 0x1, 0x0, 0x1000);
+    prop_str(&b, "status", "okay");
+    end(&b);
+    begin(&b, "off@4a000000");
+    prop_cells(&b, "reg", 3, 0, 0x4a000000, 0x1000);
+    prop_str(&b, "status", "disabled");
+    end(&b);
+    begin(&b, "cma");                                   // dynamic: size only
+    prop_cells(&b, "size", 1, 0x400000);
+    prop_cells(&b, "alignment", 1, 0x400000);
+    end(&b);
+    begin(&b, "neither");                               // no reg, no size: ignored
+    prop_str(&b, "compatible", "samos,none");
+    end(&b);
+    if (bad) {
+        begin(&b, "bad");
+        prop_cells(&b, "size", 2, 0, 0x1000);           // #size-cells is 1
+        end(&b);
+    }
+    end(&b);
+    end(&b);
+    return finish_rsv(&b, out, 17, rsv, 2);
+}
+
+static void test_reserved(void)
+{
+    static uint8_t blob[8192];
+    struct fdt f;
+    struct fdt_region r = { 0, 0 };
+    struct fdt_reserved res[8];
+
+    build_reserved(blob, 0);
+    CHECK_EQ(fdt_init(&f, blob, sizeof blob), 0);
+    CHECK_EQ(fdt_memreserve(&f, 0, &r), 0);
+    CHECK_EQ(r.base, 0x40000000);
+    CHECK_EQ(r.size, 0x1000);
+    CHECK_EQ(fdt_memreserve(&f, 1, &r), 0);
+    CHECK_EQ(r.base, 0x123456789000);
+    CHECK_EQ(r.size, 0x2000);
+    CHECK_EQ(fdt_memreserve(&f, 2, &r), FDT_ERR_NOTFOUND);
+    CHECK_EQ(fdt_memreserve(&f, -1, &r), FDT_ERR_NOTFOUND);
+    struct fdt cut = f;                                 // map running past totalsize
+    cut.off_rsvmap = cut.size - 8;
+    CHECK_EQ(fdt_memreserve(&cut, 0, &r), FDT_ERR_TRUNCATED);
+
+    memset(res, 0xa5, sizeof res);
+    CHECK_EQ(fdt_reserved_memory(&f, res, 8), 4);
+    CHECK_EQ(res[0].base, 0x48000000);
+    CHECK_EQ(res[0].size, 0x100000);
+    CHECK_EQ(res[0].flags, FDT_RESERVED_NOMAP);
+    CHECK_STR(fdt_node_name(&f, res[0].node), "fw@48000000");
+    CHECK_EQ(res[1].base, 0x49000000);
+    CHECK_EQ(res[1].size, 0x200000);
+    CHECK_EQ(res[1].flags, 0);
+    CHECK_EQ(res[2].base, 0x100000000);
+    CHECK_EQ(res[2].size, 0x1000);
+    CHECK_EQ(res[2].node, res[1].node);
+    CHECK_EQ(res[3].base, 0);
+    CHECK_EQ(res[3].size, 0x400000);
+    CHECK_EQ(res[3].flags, FDT_RESERVED_DYNAMIC);
+    CHECK_STR(fdt_node_name(&f, res[3].node), "cma");
+    CHECK_EQ(res[4].size, 0xa5a5a5a5a5a5a5a5);         // nothing past the count
+    // Fewer slots than entries: only those are written, all are counted.
+    memset(res, 0xa5, sizeof res);
+    CHECK_EQ(fdt_reserved_memory(&f, res, 1), 4);
+    CHECK_EQ(res[0].base, 0x48000000);
+    CHECK_EQ(res[1].size, 0xa5a5a5a5a5a5a5a5);
+    CHECK_EQ(fdt_reserved_memory(&f, NULL, 0), 4);
+    // The /memory node is unaffected by the reservations.
+    CHECK_EQ(fdt_memory_regions(&f, &r, 1), 1);
+    CHECK_EQ(r.size, 0x20000000);
+
+    build_reserved(blob, 1);
+    CHECK_EQ(fdt_init(&f, blob, sizeof blob), 0);
+    CHECK_EQ(fdt_reserved_memory(&f, res, 8), FDT_ERR_BADVALUE);
+
+    // A tree with neither: empty reserve map, no /reserved-memory.
+    build_tree(blob, 17, 1);
+    CHECK_EQ(fdt_init(&f, blob, sizeof blob), 0);
+    CHECK_EQ(fdt_memreserve(&f, 0, &r), FDT_ERR_NOTFOUND);
+    CHECK_EQ(fdt_reserved_memory(&f, res, 8), 0);
+}
+
 int main(int argc, char** argv)
 {
     const char* dir = argc > 1 ? argv[1] : "fixtures";
@@ -430,6 +552,7 @@ int main(int argc, char** argv)
     test_fixture(dir, "qemu-virt-riscv64.dtb", "ns16550a", 0x10000000, 0x100, 0x80000000,
                  "samos.test=1 console=ttyS0", "/soc/serial@10000000");
     test_built();
+    test_reserved();
     printf("fdt host test: %d checks, %d failures\n", checks, failures);
     return failures != 0;
 }

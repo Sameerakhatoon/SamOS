@@ -561,3 +561,77 @@ int fdt_stdout_node(const struct fdt* f)
         return FDT_ERR_NOTFOUND;
     return fdt_path_offset(f, path);
 }
+
+// ---- memory reservations ---------------------------------
+
+int fdt_memreserve(const struct fdt* f, int index, struct fdt_region* out)
+{
+    if (index < 0)
+        return FDT_ERR_NOTFOUND;
+    // 16-byte entries (address, size), big-endian, ended by 0/0.
+    for (int i = 0;; i++) {
+        uint64_t o = (uint64_t)f->off_rsvmap + 16ull * (uint64_t)i;
+        if (o + 16 > f->size)
+            return FDT_ERR_TRUNCATED;
+        uint64_t base = read_cells(f->blob + o, 2);
+        uint64_t size = read_cells(f->blob + o + 8, 2);
+        if (!base && !size)
+            return FDT_ERR_NOTFOUND;
+        if (i == index) {
+            out->base = base;
+            out->size = size;
+            return 0;
+        }
+    }
+}
+
+static int is_enabled(const struct fdt* f, int node)
+{
+    const char* status = fdt_getprop_string(f, node, "status");
+    return !status || str_eq(status, "okay") || str_eq(status, "ok");
+}
+
+int fdt_reserved_memory(const struct fdt* f, struct fdt_reserved* out, int max)
+{
+    int rm = fdt_path_offset(f, "/reserved-memory");
+    if (rm == FDT_ERR_NOTFOUND)
+        return 0;
+    if (rm < 0)
+        return rm;
+    int count = 0;
+    for (int n = fdt_first_child(f, rm); n >= 0; n = fdt_next_sibling(f, n)) {
+        if (!is_enabled(f, n))
+            continue;
+        struct fdt_reserved e = { 0, 0, 0, n };
+        if (fdt_getprop(f, n, "no-map", NULL))
+            e.flags |= FDT_RESERVED_NOMAP;
+        if (fdt_getprop(f, n, "reg", NULL)) {
+            for (int i = 0;; i++) {
+                struct fdt_region r;
+                int err = fdt_reg(f, n, i, &r);
+                if (err == FDT_ERR_NOTFOUND)
+                    break;
+                if (err < 0)
+                    return err;
+                e.base = r.base;
+                e.size = r.size;
+                if (count < max)
+                    out[count] = e;
+                count++;
+            }
+            continue;
+        }
+        uint32_t len, sc = fdt_size_cells(f, n);
+        const uint8_t* size = fdt_getprop(f, n, "size", &len);
+        if (!size)
+            continue;
+        if (sc == 0 || sc > FDT_MAX_CELLS || len != 4 * sc)
+            return FDT_ERR_BADVALUE;
+        e.size = read_cells(size, sc);
+        e.flags |= FDT_RESERVED_DYNAMIC;
+        if (count < max)
+            out[count] = e;
+        count++;
+    }
+    return count;
+}

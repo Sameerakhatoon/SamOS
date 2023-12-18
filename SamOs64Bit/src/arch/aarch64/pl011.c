@@ -5,6 +5,7 @@
 // device tree's clocks phandle, which a real board will need
 // but QEMU ignores. Linux's earlycon does the same.
 #include "arch/aarch64/pl011.h"
+#include "arch/aarch64/mmu.h"
 
 #define PL011_DR        0x00
 #define PL011_FR        0x18
@@ -13,6 +14,7 @@
 #define PL011_QEMU_VIRT 0x09000000UL
 
 static volatile uint32_t* uart;
+static uint64_t uart_pa;
 
 static uint64_t base_of(const struct fdt* f, int node)
 {
@@ -41,13 +43,15 @@ const char* pl011_init(const struct fdt* f)
         base = PL011_QEMU_VIRT;
         how = "fallback";
     }
-    uart = (volatile uint32_t*)base;
+    // Device memory in the high half (with the MMU off, base itself).
+    uart_pa = base;
+    uart = (volatile uint32_t*)mmu_map_device(base, 0x1000);
     return how;
 }
 
 uint64_t pl011_base(void)
 {
-    return (uint64_t)uart;
+    return uart_pa;
 }
 
 void pl011_putc(char c)
