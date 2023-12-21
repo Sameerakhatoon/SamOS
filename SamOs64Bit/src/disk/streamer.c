@@ -183,12 +183,10 @@ struct disk_stream* diskstreamer_new(int disk_id){
         return 0;
     }
 
-    struct disk_stream* streamer = kzalloc(sizeof(struct disk_stream));
-    streamer->pos         = 0;
-    // Lecture 206 - record sector size up front for the cache walk.
-    streamer->sector_size = disk->sector_size;
-    streamer->disk        = disk;
-    return streamer;
+    // Lecture 207 - delegate to diskstreamer_new_from_disk so
+    // both constructors share the same init path (pos +
+    // sector_size + disk).
+    return diskstreamer_new_from_disk(disk);
 }
 
 // Lecture 83 - alternative constructor for callers that already
