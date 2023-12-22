@@ -391,7 +391,11 @@ void kernel_main(void)
 
     while(1){
     }
-    int res = process_load_switch("@:/blank.elf", &p);
+    // Lecture 208 - upstream switches the default user program
+    // from blank.elf to shell.elf. SamOs's call site is
+    // unreachable (the spin loop above never exits) but we
+    // follow the rename for parity.
+    int res = process_load_switch("@:/shell.elf", &p);
     if(res != SAMOS_ALL_OK){
         panic("Failed to load user program\n");
     }
