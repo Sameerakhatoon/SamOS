@@ -1,9 +1,10 @@
 // PLIC driver (sifive,plic-1.0.0 / riscv,plic0). Register
-// offsets from the RISC-V PLIC specification; the MMU is off, so
-// they are plain physical addresses.
+// offsets from the RISC-V PLIC specification. Mapped into the
+// mmio window (mmu_map_mmio).
 
 #include "arch/riscv64/plic.h"
 #include "arch/riscv64/console.h"
+#include "arch/riscv64/mmu.h"
 #include "arch/riscv64/riscv64.h"
 #include "firmware/fdt.h"
 
@@ -66,7 +67,12 @@ int plic_init(const struct fdt* f, int cpu)
         console_printf("plic: none in the device tree\n");
         return -1;
     }
-    plic_base = reg.base;
+    // Through the mmio window, RW and never executable.
+    plic_base = mmu_map_mmio(reg.base, reg.size);
+    if (!plic_base) {
+        console_printf("plic: cannot map 0x%lx\n", reg.base);
+        return -1;
+    }
     plic_ndev = fdt_getprop_u32(f, node, "riscv,ndev", 0);
     if (plic_ndev >= PLIC_MAX_IRQ) {
         plic_ndev = PLIC_MAX_IRQ - 1;
@@ -86,7 +92,8 @@ int plic_init(const struct fdt* f, int cpu)
     }
     *plic_reg(PLIC_THRESHOLD(plic_ctx)) = 0;
     csr_set(sie, SIE_SEIE);
-    console_printf("plic: 0x%lx, %u sources, context %d\n", plic_base, plic_ndev, plic_ctx);
+    console_printf("plic: 0x%lx, %u sources, context %d\n", reg.base, plic_ndev, plic_ctx);
+    console_printf("plic: mapped at 0x%lx\n", plic_base);
     return 0;
 }
 

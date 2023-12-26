@@ -46,12 +46,15 @@ riscv64)
     # medany: the kernel sits at 0x80200000, past medlow's +-2 GiB.
     # -fno-tree-loop-distribute-patterns: the BSS-style loops must
     #   not turn into memset calls, there is no libc.
-    ARCH_CFLAGS="-march=rv64imac_zicsr -mabi=lp64 -mcmodel=medany -fno-tree-loop-distribute-patterns"
-    # One RWX segment until the riscv64 MMU work brings W^X.
-    ARCH_LDFLAGS="-Wl,--no-warn-rwx-segments"
+    # -mno-relax: boot.S and mmu_boot run at the load address before
+    #   the MMU maps the link address, so every symbol reference must
+    #   stay PC-relative; relaxation may rewrite some.
+    ARCH_CFLAGS="-march=rv64imac_zicsr -mabi=lp64 -mcmodel=medany -mno-relax -fno-tree-loop-distribute-patterns"
     SRCS="src/arch/riscv64/boot.S src/arch/riscv64/main.c src/arch/riscv64/sbi.c
           src/arch/riscv64/console.c src/arch/riscv64/trap.c src/arch/riscv64/uart16550.c
           src/arch/riscv64/timer.c src/arch/riscv64/plic.c src/arch/riscv64/kthread.c
+          src/arch/riscv64/mmu.c src/arch/riscv64/pfa.c src/arch/riscv64/uaccess.c
+          src/arch/riscv64/uaccess.S src/arch/riscv64/mmu_test.c
           src/firmware/fdt.c src/string/string.c"
     ;;
 *)

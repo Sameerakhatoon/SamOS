@@ -65,8 +65,44 @@ unsigned trap_probe_end(void)
     return probe_faults;
 }
 
+// __ex_table (linker.ld): instruction, fixup.
+struct ex_entry {
+    uint64_t insn, fixup;
+};
+extern const struct ex_entry __ex_table_start[], __ex_table_end[];
+static uint64_t fixups, fixup_cause;
+
+uint64_t trap_fixup_count(void)
+{
+    return fixups;
+}
+
+uint64_t trap_fixup_last_cause(void)
+{
+    return fixup_cause;
+}
+
+// Access faults (5, 7) and page faults (12, 13, 15) only: anything
+// else at a listed instruction is still a bug.
+static bool fixup(struct trap_frame* f)
+{
+    uint64_t c = f->scause;
+    if (!(f->sstatus & SSTATUS_SPP) || !(c == 5 || c == 7 || c == 12 || c == 13 || c == 15)) {
+        return false;
+    }
+    for (const struct ex_entry* e = __ex_table_start; e < __ex_table_end; e++) {
+        if (e->insn == f->sepc) {
+            fixups++;
+            fixup_cause = c;
+            f->sepc = e->fixup;
+            return true;
+        }
+    }
+    return false;
+}
+
 // 2 for a compressed instruction, 4 otherwise (no longer encodings
-// exist yet). The MMU is off, so sepc is readable as is.
+// exist yet). sepc is kernel text, mapped readable.
 static unsigned insn_length(uint64_t pc)
 {
     return (*(volatile uint16_t*)pc & 3) == 3 ? 4 : 2;
@@ -97,8 +133,18 @@ static void interrupt(struct trap_frame* f)
     }
 }
 
+static uint64_t sum_in_frame, sum_in_handler;
+
+void trap_sum_counts(uint64_t* in_frame, uint64_t* in_handler)
+{
+    *in_frame = sum_in_frame;
+    *in_handler = sum_in_handler;
+}
+
 struct trap_frame* riscv64_trap(struct trap_frame* f)
 {
+    sum_in_frame += (f->sstatus & SSTATUS_SUM) != 0;
+    sum_in_handler += (csr_read(sstatus) & SSTATUS_SUM) != 0;
     if (f->scause & SCAUSE_INTERRUPT) {
         interrupt(f);
         return sched_switch(f);
@@ -106,6 +152,9 @@ struct trap_frame* riscv64_trap(struct trap_frame* f)
     if (f->scause == EXC_ILLEGAL_INSTRUCTION && probe_active) {
         probe_faults++;
         f->sepc += insn_length(f->sepc);
+        return f;
+    }
+    if (fixup(f)) {
         return f;
     }
     if (f->scause == EXC_BREAKPOINT && (f->sstatus & SSTATUS_SPP)) {

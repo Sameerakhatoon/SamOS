@@ -34,8 +34,23 @@ _start:
     addi t0, t0, 8
     j 1b
 
+    // Page tables for the probed mode (mmu.c), then translation
+    // on and a jump to the same code at its link address. The image is
+    // identity mapped too, so the fetches between the satp write and
+    // the jump still work; mmu_init removes that map.
+2:  mv a0, s1
+    call mmu_boot
+    beqz a0, park
+    csrw satp, a0
+    sfence.vma
+    ld t0, high_entry
+    jr t0
+
+high:
+    // Now in the higher half: lla gives link addresses from here on.
+    lla sp, boot_stack_top
     // sscratch = 0: we are in the kernel (see trap_entry).
-2:  csrw sscratch, zero
+    csrw sscratch, zero
     lla t0, trap_entry
     csrw stvec, t0
     mv a0, s0
@@ -73,6 +88,10 @@ trap_entry:
     sd t0, TF_SEPC(sp)
     csrr t0, sstatus
     sd t0, TF_SSTATUS(sp)
+    // A trap in the middle of copy_from_user must not run its
+    // handler with user access on; sret puts SUM back from the frame.
+    li t0, SSTATUS_SUM_BIT
+    csrc sstatus, t0
     csrr t0, scause
     sd t0, TF_SCAUSE(sp)
     csrr t0, stval
@@ -99,7 +118,7 @@ trap_entry:
 
 // The trap tests' faulting instructions (main.c). Each is a
 // function, so the dump's sepc must equal the symbol.
-    .globl trap_test_illegal, trap_test_load, trap_test_ebreak
+    .globl trap_test_illegal, trap_test_load, trap_test_ebreak, trap_test_store
 trap_test_illegal:
     unimp
     ret
@@ -109,13 +128,23 @@ trap_test_load:
 trap_test_ebreak:
     ebreak
     ret
+// The MMU fault tests' store.
+trap_test_store:
+    sd zero, 0(a0)
+    ret
+
+    .section .rodata
+    .balign 8
+high_entry:
+    .quad high
 
     .data
     .balign 4
 boot_lottery:
     .word 0
 
-    .section .bss.stack, "aw", @nobits
+    // Its own section, placed after the page-table pool (linker.ld).
+    .section .boot_stack, "aw", @nobits
     .balign 16
 boot_stack:
     .space 16384

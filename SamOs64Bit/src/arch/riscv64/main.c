@@ -12,6 +12,8 @@
 #include "arch/riscv64/riscv64.h"
 #include "arch/riscv64/console.h"
 #include "arch/riscv64/kthread.h"
+#include "arch/riscv64/mmu.h"
+#include "arch/riscv64/mmu_test.h"
 #include "arch/riscv64/plic.h"
 #include "arch/riscv64/sbi.h"
 #include "arch/riscv64/timer.h"
@@ -26,6 +28,7 @@ bool riscv64_test_mode;
 
 static struct fdt fdt;
 static int uart_node = -1;
+static uintptr_t uart_va;
 
 void riscv64_halt(void)
 {
@@ -81,7 +84,12 @@ static void console_to_uart(void)
         console_printf("console: no ns16550a, staying on SBI\n");
         return;
     }
-    uart16550_init(reg.base, fdt_getprop_u32(&fdt, node, "reg-shift", 0));
+    uart_va = mmu_map_mmio(reg.base, reg.size);
+    if (!uart_va) {
+        console_printf("console: cannot map the ns16550a at 0x%lx\n", reg.base);
+        return;
+    }
+    uart16550_init(uart_va, fdt_getprop_u32(&fdt, node, "reg-shift", 0));
     console_set_putc(uart16550_putc);
     uart_node = node;
     console_printf("console: ns16550a at 0x%lx\n", reg.base);
@@ -137,9 +145,11 @@ static void trap_tests(const char* args)
 {
     if (cmdline_has(args, "samos.trap_test") || cmdline_has(args, "samos.trap_test=load")) {
         // OpenSBI guards its own image (RAM base) with PMP, so an
-        // S-mode load there is a load access fault.
-        console_printf("trap test: load from 0x80000000 at 0x%lx\n", (uint64_t)trap_test_load);
-        trap_test_load(0x80000000);
+        // S-mode load there is a load access fault. Through the
+        // direct map, which maps it like all of /memory.
+        uint64_t va = (uint64_t)phys_to_virt(0x80000000);
+        console_printf("trap test: load from 0x%lx (pa 0x80000000) at 0x%lx\n", va, (uint64_t)trap_test_load);
+        trap_test_load(va);
     }
     if (cmdline_has(args, "samos.trap_test=illegal")) {
         console_printf("trap test: illegal instruction at 0x%lx\n", (uint64_t)trap_test_illegal);
@@ -149,6 +159,27 @@ static void trap_tests(const char* args)
         console_printf("trap test: ebreak at 0x%lx\n", (uint64_t)trap_test_ebreak);
         trap_test_ebreak();
         console_printf("trap test: ebreak returned\n");
+    }
+}
+
+// samos.mmu_test (frame allocator, uaccess), samos.mmu_noasid
+// (flush on every satp switch instead), samos.mmu_fault=<kind>.
+static void mmu_tests(const char* args)
+{
+    if (cmdline_has(args, "samos.mmu_noasid")) {
+        mmu_disable_asids();
+        console_printf("mmu: asids off\n");
+    }
+    if (cmdline_has(args, "samos.mmu_test")) {
+        pfa_test();
+        uaccess_test();
+    }
+    const char* f = args;
+    while (f && *f && strncmp(f, "samos.mmu_fault=", 16) != 0) {
+        f++;
+    }
+    if (f && *f) {
+        mmu_fault_test(f + 16);
     }
 }
 
@@ -273,6 +304,7 @@ static void interrupts_init(uint64_t hartid, const char* args)
     csr_set(sstatus, SSTATUS_SIE);
     console_printf("interrupts: on\n");
     trap_tests(args);
+    mmu_tests(args);
     if (timer_ok && plic_ok && cmdline_has(args, "samos.uart_test")) {
         uart_test();
     }
@@ -284,17 +316,23 @@ static void interrupts_init(uint64_t hartid, const char* args)
 void riscv64_main(uint64_t hartid, uint64_t dtb)
 {
     sbi_init();
-    console_printf("\nSamOS riscv64 (S-R2)\n");
+    console_printf("\nSamOS riscv64 (S-R3)\n");
     console_printf("boot hart: %lu\n", hartid);
     console_printf("dtb: 0x%lx\n", dtb);
     sbi_print_info();
+    mmu_init();
 
     // 1 MiB is far beyond any real tree; it only bounds a bad header.
-    int err = fdt_init(&fdt, (const void*)dtb, 1 << 20);
+    // mmu_boot mapped the tree into the direct map.
+    int err = fdt_init(&fdt, phys_to_virt(dtb), 1 << 20);
     if (err != 0) {
         console_printf("fdt: no device tree at 0x%lx (error %d)\n", dtb, err);
     } else {
+        if (mmu_memory_init(&fdt) != 0) {
+            riscv64_halt();
+        }
         console_to_uart();
+        mmu_report(uart_va);
         print_memory();
         console_printf("harts: %d\n", count_harts());
         const char* args = fdt_bootargs(&fdt);

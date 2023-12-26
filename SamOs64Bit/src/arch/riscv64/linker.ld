@@ -1,21 +1,37 @@
 /* riscv64 kernel layout. OpenSBI fw_dynamic jumps to the
-   next stage at 0x80200000 (RAM base + 2 MiB, past its own image). */
+   next stage at 0x80200000 (RAM base + 2 MiB, past its own image).
+
+   Linked in the higher half at KERNEL_VMA (mmu.h), loaded
+   wherever OpenSBI puts it: boot.S and mmu_boot run at the load
+   address with the MMU off, PC-relative (medany, -mno-relax). The
+   W^X boundaries are page aligned: text RX, rodata R, then data,
+   bss, the boot page-table pool and the boot stack RW. */
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
 
 SECTIONS
 {
-    . = 0x80200000;
+    . = 0xffffffff80200000;
     __kernel_start = .;
 
     .text : {
         *(.text.boot)
         *(.text .text.*)
     }
-    .rodata : ALIGN(8) {
+    . = ALIGN(4096);
+    __text_end = .;
+
+    .rodata : {
         *(.rodata .rodata.* .srodata .srodata.*)
+        . = ALIGN(8);
+        __ex_table_start = .;
+        KEEP(*(__ex_table))
+        __ex_table_end = .;
     }
-    .data : ALIGN(8) {
+    . = ALIGN(4096);
+    __rodata_end = .;
+
+    .data : {
         *(.data .data.* .sdata .sdata.*)
     }
     .bss : ALIGN(8) {
@@ -23,6 +39,20 @@ SECTIONS
         *(.sbss .sbss.* .bss .bss.* COMMON)
         . = ALIGN(8);
         __bss_end = .;
+    }
+    . = ALIGN(4096);
+    __image_end = .;
+
+    /* Not zeroed by boot.S: pt_alloc zeroes each table it hands out. */
+    .pt_pool (NOLOAD) : {
+        __pt_pool_start = .;
+        . += 32 * 4096;
+        __pt_pool_end = .;
+    }
+    .boot_stack (NOLOAD) : {
+        __stack_start = .;
+        *(.boot_stack)
+        . = ALIGN(4096);
     }
 
     __kernel_end = .;

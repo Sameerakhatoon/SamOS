@@ -15,6 +15,9 @@
 #define TF_SCAUSE  264
 #define TF_STVAL   272
 
+// sstatus.SUM for trap_entry (riscv64.h's SSTATUS_SUM is C only).
+#define SSTATUS_SUM_BIT 0x40000
+
 #ifndef __ASSEMBLER__
 #include <stdint.h>
 
@@ -46,11 +49,22 @@ struct trap_frame* riscv64_trap(struct trap_frame* frame);
 void     trap_probe_begin(void);
 unsigned trap_probe_end(void);
 
+// The per-instruction form of the probe: an S-mode access or
+// page fault at an instruction listed in __ex_table (pairs of .quad
+// instruction, fixup; see uaccess.S) resumes at its fixup instead of
+// halting. Count and scause of the last one, for the tests.
+uint64_t trap_fixup_count(void);
+uint64_t trap_fixup_last_cause(void);
+// Traps taken with sstatus.SUM set in the interrupted code, and traps
+// whose handler ran with it set (trap_entry clears it: always 0).
+void trap_sum_counts(uint64_t* in_frame, uint64_t* in_handler);
+
 // The faulting instructions of the trap tests (boot.S), each a
 // function so its address is the sepc the dump must show.
 void trap_test_illegal(void);
 uint64_t trap_test_load(uint64_t addr);
 void trap_test_ebreak(void);
+void trap_test_store(uint64_t addr);
 #endif
 
 #endif

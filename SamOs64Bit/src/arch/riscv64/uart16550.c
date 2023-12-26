@@ -2,8 +2,8 @@
 //
 // OpenSBI has already programmed the UART for its own banner (QEMU
 // ignores the divisor anyway), so init keeps the line settings and
-// only masks the UART's interrupts and enables the FIFOs. The MMU is
-// off, so the registers are plain physical addresses.
+// only masks the UART's interrupts and enables the FIFOs. `base`
+// is the registers' virtual address in the mmio window.
 
 #include "arch/riscv64/uart16550.h"
 

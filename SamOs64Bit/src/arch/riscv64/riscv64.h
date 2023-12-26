@@ -27,6 +27,7 @@ int riscv64_cpu_node(const struct fdt* f, uint64_t hartid);
 #define SSTATUS_SIE  (1ul << 1)
 #define SSTATUS_SPIE (1ul << 5)
 #define SSTATUS_SPP  (1ul << 8)   // previous mode: 1 = S, 0 = U
+#define SSTATUS_SUM  (1ul << 18)  // S-mode may access U pages
 
 // sie / sip bits, and the interrupt causes (scause with bit 63 set).
 #define IRQ_S_SOFT   1

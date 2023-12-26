@@ -15,6 +15,9 @@
 #      ends in the trap dump (load access fault, scause 5).
 #      renamed its header from EARLY FAULT to KERNEL FAULT (x86 wording)
 #      once the dump became the real trap path's, not an early stub.
+#      Moved the kernel to the higher half (sepc 0xffffffff802...)
+#      and the load goes through the Sv48 direct map, so stval is
+#      0xffff800000000000 + 0x80000000; still a PMP access fault.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 kernel="${RISCV64_KERNEL:-$here/../../bin/riscv64/kernel.img}"
@@ -100,7 +103,7 @@ echo "riscv64 samos.trap_test"
 boot trap 1 "samos.test=1 samos.trap_test"
 expect '^bootargs: samos.test=1 samos.trap_test$' "bootargs"
 expect '^KERNEL FAULT: scause 0x5 \(load access fault\)$' "scause dump"
-expect '^  sepc 0x802[0-9a-f]{5} stval 0x80000000 sstatus 0x[0-9a-f]+$' "sepc in the kernel, stval the address"
+expect '^  sepc 0xffffffff802[0-9a-f]{5} stval 0xffff800080000000 sstatus 0x[0-9a-f]+$' "sepc in the kernel, stval the address"
 expect '^  ra 0x[0-9a-f]+ sp 0x[0-9a-f]+ gp 0x[0-9a-f]+ tp 0x[0-9a-f]+$' "register dump"
 expect '^System halted\.$' "halted after the dump"
 expect_count '^SamOS riscv64: hello$' 0 "no hello after the trap"

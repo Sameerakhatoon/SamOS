@@ -17,6 +17,9 @@
 #   5-7. samos.trap_test=illegal|load|ebreak: the dump's scause and
 #      sepc match the faulting instruction the kernel names; the
 #      breakpoint is stepped over and boot goes on.
+# All seven run twice, with the MMU on in Sv48 (default CPU)
+# and in Sv39 (-cpu rv64,sv48=off); the load test goes through the
+# direct map.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 kernel="${RISCV64_KERNEL:-$here/../../bin/riscv64/kernel.img}"
@@ -36,13 +39,13 @@ checks=0
 boot() {
     local name="$1" smp="$2" append="$3"
     shift 3
-    local log="$tmp/$name.log"
+    local log="$tmp/$mode-$name.log" cpu="rv64${CPUOPT:-}$mode_opt"
     if [ -n "${INPUT:-}" ]; then
         { for _ in $(seq 300); do grep -q 'uart test: waiting' "$log.raw" 2>/dev/null && break; sleep 0.1; done
           printf '%s\n' "$INPUT"; sleep 30; } | qemu-system-riscv64 -machine virt -m 512M \
-            -smp "$smp" -nographic -bios default "$@" -kernel "$kernel" -append "$append" > "$log.raw" 2>&1 &
+            -smp "$smp" -nographic -bios default -cpu "$cpu" "$@" -kernel "$kernel" -append "$append" > "$log.raw" 2>&1 &
     else
-        qemu-system-riscv64 -machine virt -m 512M -smp "$smp" -nographic -bios default "$@" \
+        qemu-system-riscv64 -machine virt -m 512M -smp "$smp" -nographic -bios default -cpu "$cpu" "$@" \
             -kernel "$kernel" -append "$append" < /dev/null > "$log.raw" 2>&1 &
     fi
     local pid=$! left=300
@@ -130,76 +133,89 @@ check_sched() {
     fi
 }
 
-echo "riscv64 timer on sstc"
-boot sstc 1 "samos.test=1"
-expect '^timer: device tree lists sstc, stimecmp works$' "Sstc in riscv,isa and stimecmp readable"
-expect '^timer: sstc stimecmp, 100 Hz, timebase 10000000 Hz, interval 100000$' "timer on stimecmp, 100 Hz from timebase-frequency"
-expect '^plic: 0xc000000, 95 sources, context 1$' "PLIC from the device tree, hart 0 S-mode context"
-expect '^uart: rx interrupt on plic irq 10$' "UART irq from the device tree"
-expect '^interrupts: on$' "interrupts on"
-check_sched
-expect_count 'FAULT:|unexpected|no handler' 0 "no fault or stray interrupt"
-expect '^SamOS riscv64: hello$' "hello"
-[ $powered_off -eq 1 ]
-check $? "QEMU powered off"
+# Every boot below runs with the MMU on, once per paging mode:
+# the default CPU (Sv48) and -cpu rv64,sv48=off (Sv39).
+run_mode() {
+    echo "riscv64 $mode timer on sstc"
+    boot sstc 1 "samos.test=1"
+    expect '^timer: device tree lists sstc, stimecmp works$' "Sstc in riscv,isa and stimecmp readable"
+    expect '^timer: sstc stimecmp, 100 Hz, timebase 10000000 Hz, interval 100000$' "timer on stimecmp, 100 Hz from timebase-frequency"
+    expect '^plic: 0xc000000, 95 sources, context 1$' "PLIC from the device tree, hart 0 S-mode context"
+    expect '^uart: rx interrupt on plic irq 10$' "UART irq from the device tree"
+    expect '^interrupts: on$' "interrupts on"
+    expect "^mmu: $mode, " "MMU on in $mode"
+    check_sched
+    expect_count 'FAULT:|unexpected|no handler' 0 "no fault or stray interrupt"
+    expect '^SamOS riscv64: hello$' "hello"
+    [ $powered_off -eq 1 ]
+    check $? "QEMU powered off"
 
-echo "riscv64 timer on sbi (-cpu rv64,sstc=off)"
-boot sbi 1 "samos.test=1" -cpu rv64,sstc=off
-expect '^timer: sbi set_timer, 100 Hz, timebase 10000000 Hz, interval 100000$' "no Sstc: SBI set_timer"
-expect '^timer: device tree does not list sstc, stimecmp traps$' "no Sstc in riscv,isa; the stimecmp probe traps and is skipped"
-check_sched
-expect_count 'FAULT:|unexpected|no handler' 0 "no fault or stray interrupt"
-expect '^SamOS riscv64: hello$' "hello"
+    echo "riscv64 $mode timer on sbi (-cpu rv64,sstc=off$mode_opt)"
+    CPUOPT=,sstc=off boot sbi 1 "samos.test=1"
+    expect '^timer: sbi set_timer, 100 Hz, timebase 10000000 Hz, interval 100000$' "no Sstc: SBI set_timer"
+    expect '^timer: device tree does not list sstc, stimecmp traps$' "no Sstc in riscv,isa; the stimecmp probe traps and is skipped"
+    check_sched
+    expect_count 'FAULT:|unexpected|no handler' 0 "no fault or stray interrupt"
+    expect '^SamOS riscv64: hello$' "hello"
 
-echo "riscv64 -smp 4"
-boot smp4 4 "samos.test=1"
-hart=$(field '^boot hart: ([0-9]+)$')
-expect "^plic: 0xc000000, 95 sources, context $((2 * ${hart:-0} + 1))$" "PLIC context of boot hart ${hart:-?} (S-mode)"
-expect "^hsm: .*${hart:-x}=started" "boot hart started"
-expect_count '=started' 1 "one hart started, the rest stopped"
-check_sched
-expect '^SamOS riscv64: hello$' "hello"
+    echo "riscv64 $mode -smp 4"
+    boot smp4 4 "samos.test=1"
+    hart=$(field '^boot hart: ([0-9]+)$')
+    expect "^plic: 0xc000000, 95 sources, context $((2 * ${hart:-0} + 1))$" "PLIC context of boot hart ${hart:-?} (S-mode)"
+    expect "^hsm: .*${hart:-x}=started" "boot hart started"
+    expect_count '=started' 1 "one hart started, the rest stopped"
+    check_sched
+    expect '^SamOS riscv64: hello$' "hello"
 
-echo "riscv64 uart receive interrupt"
-INPUT="samos-rx" boot uart 1 "samos.test=1 samos.uart_test"
-expect '^uart test: waiting for a line$' "waiting"
-expect "^uart rx: 'samos-rx' after [1-9][0-9]* interrupt\(s\) on irq 10$" "typed line arrived by interrupt"
-expect '^SamOS riscv64: hello$' "hello"
+    echo "riscv64 $mode uart receive interrupt"
+    INPUT="samos-rx" boot uart 1 "samos.test=1 samos.uart_test"
+    expect '^uart test: waiting for a line$' "waiting"
+    expect "^uart rx: 'samos-rx' after [1-9][0-9]* interrupt\(s\) on irq 10$" "typed line arrived by interrupt"
+    expect '^SamOS riscv64: hello$' "hello"
 
-# trap_test <name> <bootarg> <cause regex> <test line regex>
-trap_boot() {
-    boot "$1" 1 "samos.test=1 samos.trap_test=$2"
-    local at sepc
-    at=$(field "^trap test: $4 at (0x[0-9a-f]+)$")
+    # trap_test <name> <bootarg> <cause regex> <test line regex>
+    trap_boot() {
+        boot "$1" 1 "samos.test=1 samos.trap_test=$2"
+        local at sepc
+        at=$(field "^trap test: $4 at (0x[0-9a-f]+)$")
+        sepc=$(field '^  sepc (0x[0-9a-f]+) stval .*$')
+        expect "^(KERNEL FAULT|BREAKPOINT): scause $3$" "dump names the cause"
+        [ -n "$at" ] && [ "$at" = "$sepc" ]
+        check $? "sepc is the faulting instruction (${sepc:-none} vs ${at:-none})"
+        expect '^  ra 0x[0-9a-f]+ sp 0x[0-9a-f]+ gp 0x[0-9a-f]+ tp 0x[0-9a-f]+$' "register dump"
+    }
+
+    echo "riscv64 $mode trap test: illegal instruction"
+    trap_boot illegal illegal '0x2 \(illegal instruction\)' 'illegal instruction'
+    expect '^System halted\.$' "fatal: halted"
+    expect_count '^SamOS riscv64: hello$' 0 "no hello"
+
+    echo "riscv64 $mode trap test: load access fault"
+    trap_boot load load '0x5 \(load access fault\)' 'load from 0x[0-9a-f]+ \(pa 0x80000000\)'
+    # Through the direct map, still a PMP access fault.
+    va=$(field '^trap test: load from (0x[0-9a-f]+) \(pa 0x80000000\) at .*$')
+    expect "^  sepc 0x[0-9a-f]+ stval ${va:-none} " "stval is the direct-map address of 0x80000000 (${va:-none})"
+    expect '^System halted\.$' "fatal: halted"
+    expect_count '^SamOS riscv64: hello$' 0 "no hello"
+
+    echo "riscv64 $mode trap test: ebreak"
+    trap_boot ebreak ebreak '0x3 \(breakpoint\)' 'ebreak'
     sepc=$(field '^  sepc (0x[0-9a-f]+) stval .*$')
-    expect "^(KERNEL FAULT|BREAKPOINT): scause $3$" "dump names the cause"
-    [ -n "$at" ] && [ "$at" = "$sepc" ]
-    check $? "sepc is the faulting instruction (${sepc:-none} vs ${at:-none})"
-    expect '^  ra 0x[0-9a-f]+ sp 0x[0-9a-f]+ gp 0x[0-9a-f]+ tp 0x[0-9a-f]+$' "register dump"
+    resume=$(field '^breakpoint: resuming at (0x[0-9a-f]+)$')
+    len=$(( ${resume:-0} - ${sepc:-0} ))
+    [ -n "$resume" ] && { [ $len -eq 2 ] || [ $len -eq 4 ]; }
+    check $? "resumes past the ebreak ($len bytes)"
+    expect '^trap test: ebreak returned$' "sret back into the caller"
+    expect_count '^System halted\.$' 0 "not fatal"
+    check_sched
+    expect '^SamOS riscv64: hello$' "boot went on to hello"
 }
 
-echo "riscv64 trap test: illegal instruction"
-trap_boot illegal illegal '0x2 \(illegal instruction\)' 'illegal instruction'
-expect '^System halted\.$' "fatal: halted"
-expect_count '^SamOS riscv64: hello$' 0 "no hello"
-
-echo "riscv64 trap test: load access fault"
-trap_boot load load '0x5 \(load access fault\)' 'load from 0x80000000'
-expect '^  sepc 0x[0-9a-f]+ stval 0x80000000 ' "stval is the address"
-expect '^System halted\.$' "fatal: halted"
-expect_count '^SamOS riscv64: hello$' 0 "no hello"
-
-echo "riscv64 trap test: ebreak"
-trap_boot ebreak ebreak '0x3 \(breakpoint\)' 'ebreak'
-sepc=$(field '^  sepc (0x[0-9a-f]+) stval .*$')
-resume=$(field '^breakpoint: resuming at (0x[0-9a-f]+)$')
-len=$(( ${resume:-0} - ${sepc:-0} ))
-[ -n "$resume" ] && { [ $len -eq 2 ] || [ $len -eq 4 ]; }
-check $? "resumes past the ebreak ($len bytes)"
-expect '^trap test: ebreak returned$' "sret back into the caller"
-expect_count '^System halted\.$' 0 "not fatal"
-check_sched
-expect '^SamOS riscv64: hello$' "boot went on to hello"
+for mode in sv48 sv39; do
+    mode_opt=""
+    [ $mode = sv39 ] && mode_opt=",sv48=off"
+    run_mode
+done
 
 # Summary line read by tests64/arch/run.sh (the arch tests' format).
 echo "riscv64 arch test: $checks checks, $fails failures"
