@@ -13,12 +13,13 @@
 #          changed in the frame and the change survives the restore.
 #   tick:  GICv3 found in the DT, this CPU's redistributor, the timer
 #          PPI from the DT, 100 Hz; ticks match CNTPCT_EL0 and the idle
-#          wfi wakes once per tick. Also with -smp 4 (secondaries stay
+#          wfi sleeps between ticks (at most 2 wakeups per tick; fewer
+#          on a stalled host). Also with -smp 4 (secondaries stay
 #          in PSCI; the redistributor walk sees 4 frames).
 #   sched: samos.sched_test: two busy kernel threads that never yield
 #          interleave their lines, so the tick preempts them; their
 #          register checksums survive; then 100 idle ticks against
-#          CNTPCT_EL0 (within 3 ticks) and wfi once per tick. Also
+#          CNTPCT_EL0 (within 3 ticks) and wfi sleeping between ticks. Also
 #          entered at EL2 (virtualization=on).
 set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"

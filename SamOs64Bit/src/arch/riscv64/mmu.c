@@ -349,33 +349,27 @@ static void reserve(uint64_t base, uint64_t size, uint32_t type, const char* wha
     }
 }
 
-static uint64_t be64(const uint8_t* p)
-{
-    uint64_t v = 0;
-    for (int i = 0; i < 8; i++) {
-        v = v << 8 | p[i];
-    }
-    return v;
-}
-
 // The header's memory reservation block (/memreserve/), then every
-// /reserved-memory child with a reg (OpenSBI's mmode_resv
-// nodes for its PMP-protected image). Read here rather than in fdt.c,
-// which the aarch64 MMU work extends with the same lookups.
+// enabled /reserved-memory child with a reg (OpenSBI's
+// mmode_resv nodes for its PMP-protected image), through the shared
+// fdt helpers the aarch64 MMU work added. A dynamic node has no address to reserve.
+// A no-map node is reserved like the rest but stays in the direct map:
+// pt_map cannot split the megapages around it yet.
 static void reserve_from_fdt(const struct fdt* f)
 {
-    for (uint32_t off = f->off_rsvmap; off + 16 <= f->size; off += 16) {
-        uint64_t base = be64(f->blob + off), size = be64(f->blob + off + 8);
-        if (!base && !size) {
-            break;
-        }
-        reserve(base, size, MEM_REGION_RESERVED, "/memreserve/");
+    struct fdt_region r;
+    for (int i = 0; fdt_memreserve(f, i, &r) == 0; i++) {
+        reserve(r.base, r.size, MEM_REGION_RESERVED, "/memreserve/");
     }
-    int rm = fdt_path_offset(f, "/reserved-memory");
-    for (int n = rm < 0 ? rm : fdt_first_child(f, rm); n >= 0; n = fdt_next_sibling(f, n)) {
-        struct fdt_region r;
-        for (int i = 0; fdt_reg_cpu(f, n, i, &r) == 0; i++) {
-            reserve(r.base, r.size, MEM_REGION_RESERVED, fdt_node_name(f, n));
+    struct fdt_reserved rsv[16];
+    int n = fdt_reserved_memory(f, rsv, 16);
+    if (n > 16) {
+        console_printf("mmu: %d /reserved-memory entries, only 16 reserved\n", n);
+        n = 16;
+    }
+    for (int i = 0; i < n; i++) {
+        if (!(rsv[i].flags & FDT_RESERVED_DYNAMIC)) {
+            reserve(rsv[i].base, rsv[i].size, MEM_REGION_RESERVED, fdt_node_name(f, rsv[i].node));
         }
     }
 }

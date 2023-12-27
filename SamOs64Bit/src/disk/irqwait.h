@@ -7,7 +7,8 @@
 // cannot sleep and let another task run: the driver still waits in
 // place, but on the interrupt instead of the device. The handler acks
 // the device and sets `pending`; the wait opens interrupts with
-// `sti; pause; cli` and reads only that flag. The LAPIC TPR is
+// `sti; nop; cli; pause` (the nop gives the one-instruction sti shadow
+// something to cover) and reads only that flag. The LAPIC TPR is
 // APIC_TPR_DISK_WAIT meanwhile, so only the disk vectors (0x50-0x5F)
 // are taken: the keyboard, the mouse and the scheduler tick stay
 // pending in the LAPIC as they do with IF clear, and no other handler
