@@ -28,6 +28,7 @@
 #include "io/tsc.h"           // L129 - udelay
 #include "io/pci.h"           // L180 - pci_init
 #include "bootmarker.h"       // e2e: stage markers for runtime tests
+#include "kernel_selftest.h"  // e2e: feature-level runtime self-tests
 #include "keyboard/keyboard.h"
 #include "fs/file.h"
 #include "fs/pparser.h"
@@ -344,6 +345,12 @@ void kernel_main(void)
     isr80h_register_commands();
     boot_marker_set(BM_STAGE_ISR80H_READY, BM_STAGE_MAX - 1);
     print("register isr80h\n");
+
+    // e2e: run the kernel-side feature self-tests now that all
+    // subsystems are up. Each probe writes a 1/0 result into
+    // its dedicated marker slot; host-side tests in
+    // tests64/e2e/feature-*.sh dump the markers and assert.
+    kernel_selftest();
 
     // Lecture 58 / 196 - keyboard_init was originally called
     // here. L196 moves it before window_system_initialize_stage2
