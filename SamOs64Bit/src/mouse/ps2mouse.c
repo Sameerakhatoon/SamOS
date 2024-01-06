@@ -17,6 +17,7 @@
 #include "io/tsc.h"
 #include "kernel.h"
 #include "status.h"
+#include "graphics/graphics.h"   // gfx_lock
 #include "graphics/graphics.h"
 
 // L138 will land the body.
@@ -76,7 +77,16 @@ static int ps2_mouse_read(void){
 // positive) plus the left/right/middle button bits, clamps
 // the new position against the screen, and forwards the move
 // + click into the L132/L133 mouse_* API.
+// IRQ12 moves the cursor and windows: graphics lock.
+static void ps2_mouse_handle_interrupt_locked(struct trap_frame* frame);
+
 void ps2_mouse_handle_interrupt(struct trap_frame* frame){
+    gfx_lock();
+    ps2_mouse_handle_interrupt_locked(frame);
+    gfx_unlock();
+}
+
+static void ps2_mouse_handle_interrupt_locked(struct trap_frame* frame){
     (void)frame;
     static uint8_t packet[4];
     static int     packet_byte_count = 0;

@@ -1,6 +1,7 @@
 #ifndef DISK_H
 #define DISK_H
 
+#include "lib/spinlock/spinlock.h"
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -64,6 +65,10 @@ struct disk {
     // copy their parent's pointer.
     void*               driver_private;
 };
+
+// One CPU at a time in any disk driver and sector cache
+// (disk.c); held around every driver call and stream read or write.
+extern struct spinlock disk_lock;
 
 int          disk_search_and_init();
 int          disk_mount_all();

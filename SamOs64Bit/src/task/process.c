@@ -21,7 +21,22 @@
 #include "kernel.h"
 #include "io/serial.h"     // Mirror process output to COM1
 #include "uaccess.h"       // Checked user access
+#include "lib/spinlock/spinlock.h"
 #include <stdbool.h>
+
+// The process table: process_vector, pids, parent
+// links, the zombie list, the foreground process and the keyboard
+// rings. Recursive, so lookups can be made with it held. Never held
+// across file I/O or window calls (the graphics lock comes first).
+static struct spinlock process_table_lock = SPINLOCK_INIT("process", LOCK_LEVEL_PROCESS, 1);
+
+void process_lock(void){
+    spin_lock(&process_table_lock);
+}
+
+void process_unlock(void){
+    spin_unlock(&process_table_lock);
+}
 
 // The process the keyboard falls back to when no process
 // window has the focus: the one the kernel or a parent started in
@@ -87,17 +102,18 @@ bool process_owns_kernel_window(struct process* process, struct window* kernel_w
 // Lecture 154 - given a kernel window, find the process that
 // owns it. Used by the window event loop to deliver events.
 struct process* process_get_from_kernel_window(struct window* window){
+    struct process* found = NULL;
+    process_lock();
     size_t total_processes = vector_count(process_vector);
-    for(size_t i = 0; i < total_processes; i++){
+    for(size_t i = 0; i < total_processes && !found; i++){
         struct process* process = NULL;
         vector_at(process_vector, i, &process, sizeof(process));
-        if(process){
-            if(process_owns_kernel_window(process, window)){
-                return process;
-            }
+        if(process && process_owns_kernel_window(process, window)){
+            found = process;
         }
     }
-    return NULL;
+    process_unlock();
+    return found;
 }
 
 // Lecture 154 - resolve the userspace handle to its process_window record.
@@ -371,32 +387,37 @@ out:
 // mirrored to the COM1 serial console, and a process that never
 // redirected its output (sysout_win == NULL) falls back to the
 // kernel console instead of dereferencing NULL as upstream does.
+// The screen side under the graphics lock.
 void process_print_char(struct process* process, char c){
     serial_putc(c);
+    gfx_lock();
     struct process_window* printing_process_win = process->sysout_win;
     if(!printing_process_win){
         terminal_writechar(c, 15);
-        return;
+    } else {
+        struct terminal* win_term = window_terminal(printing_process_win->kernel_win);
+        if(win_term){
+            terminal_write(win_term, c);
+        }
     }
-    struct terminal* win_term = window_terminal(printing_process_win->kernel_win);
-    if(win_term){
-        terminal_write(win_term, c);
-    }
+    gfx_unlock();
 }
 
 void process_print(struct process* process, const char* message){
     serial_write(message);
+    gfx_lock();
     struct process_window* printing_process_win = process->sysout_win;
     if(!printing_process_win){
         for(const char* p = message; *p; p++){
             terminal_writechar(*p, 15);
         }
-        return;
+    } else {
+        struct terminal* win_term = window_terminal(printing_process_win->kernel_win);
+        if(win_term){
+            terminal_print(win_term, message);
+        }
     }
-    struct terminal* win_term = window_terminal(printing_process_win->kernel_win);
-    if(win_term){
-        terminal_print(win_term, message);
-    }
+    gfx_unlock();
 }
 
 void process_set_sysout_window(struct process* process, struct process_window* win){
@@ -920,11 +941,6 @@ int process_load_for_slot(const char* filename, struct process** process, int pr
     struct process* _process = 0;
     void* program_stack_ptr = 0;
 
-    if(process_get(process_slot) != 0){
-        res = -EISTKN;
-        goto out;
-    }
-
     _process = kzalloc(sizeof(struct process));
     if(!_process){
         res = -ENOMEM;
@@ -945,8 +961,6 @@ int process_load_for_slot(const char* filename, struct process** process, int pr
 
     strncpy(_process->filename, filename, sizeof(_process->filename));
     _process->stack = program_stack_ptr;
-    _process->id    = process_slot;
-    _process->pid   = process_next_pid++;
 
     // Lecture 113 - the paging descriptor moves from task to
     // process. Create it BEFORE task_new so process_map_memory
@@ -971,14 +985,36 @@ int process_load_for_slot(const char* filename, struct process** process, int pr
     }
     _process->task = task;
 
+    // Slot and pid are taken here, under the process lock,
+    // after the slow part of the load: two CPUs loading at once got
+    // the same free slot when it was looked up first. A slot < 0
+    // means any free one (process_load).
+    process_lock();
+    if(process_slot < 0){
+        process_slot = process_get_free_slot();
+    } else if(process_get(process_slot) != 0){
+        process_slot = -EISTKN;
+    }
+    if(process_slot >= 0){
+        _process->id  = process_slot;
+        _process->pid = process_next_pid++;
+        // Lecture 114 - take the slot by overwriting it with our
+        // pointer.
+        vector_overwrite(process_vector, process_slot, &_process, sizeof(&_process));
+    }
+    process_unlock();
+    if(process_slot < 0){
+        res = process_slot;
+        goto out;
+    }
     *process = _process;
-    // Lecture 114 - the vector slot was reserved by
-    // process_get_free_slot (either an existing NULL or a fresh
-    // push); take ownership by overwriting it with our pointer.
-    vector_overwrite(process_vector, process_slot, &_process, sizeof(&_process));
 
 out:
     if(ISERR(res) && _process){
+        if(task){
+            task_free(task);
+            _process->task = NULL;
+        }
         process_load_cleanup(_process);
     }
     return res;
@@ -1104,7 +1140,9 @@ int process_terminate(struct process* process){
     // Lecture 154 - tear down owned windows first; their kernel
     // backing buffers live in kheap and need to come down before
     // process_terminate_allocations walks the per-process arena.
+    gfx_lock();
     process_close_windows(process);
+    gfx_unlock();
     process_terminate_allocations(process);
     res = process_free_program_data(process);
 
@@ -1155,6 +1193,10 @@ int process_terminate(struct process* process){
         process->paging_desc = NULL;
     }
 
+    // The table part in one hold of the process lock, so a
+    // waiting parent either finds the zombie or is blocked already
+    // when it is woken.
+    process_lock();
     process_unlink(process);
     process_orphan_children(process);
     if(foreground_process == process){
@@ -1172,6 +1214,7 @@ int process_terminate(struct process* process){
     } else {
         kfree(process);
     }
+    process_unlock();
     return res;
 }
 
@@ -1478,24 +1521,21 @@ out:
 }
 
 int process_load(const char* filename, struct process** process){
-    int res = 0;
-    int process_slot = process_get_free_slot();
-    if(process_slot < 0){
-        res = -EISTKN;
-        goto out;
-    }
+    return process_load_for_slot(filename, process, -1);
+}
 
-    res = process_load_for_slot(filename, process, process_slot);
-
-out:
-    return res;
+// A loaded process runs only from here on.
+void process_start(struct process* process){
+    task_start(process->task);
 }
 
 // "switch" now means: this process takes the keyboard when
 // no process window has the focus. It runs when the scheduler
 // picks it.
 int process_switch(struct process* process){
+    process_lock();
     foreground_process = process;
+    process_unlock();
     return 0;
 }
 

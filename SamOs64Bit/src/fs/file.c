@@ -7,6 +7,21 @@
 #include "fat/fat.h"
 #include "string/string.h"
 #include "disk/disk.h"
+#include "lib/spinlock/spinlock.h"
+
+// One lock over the descriptor table, the path parser
+// and the filesystem drivers (FAT keeps one stream and its FAT cache
+// per volume, none of it safe to share). Recursive: the elf loader and
+// file_remove call several entry points under one hold.
+static struct spinlock vfs_spinlock = SPINLOCK_INIT("vfs", LOCK_LEVEL_VFS, 1);
+
+void vfs_lock(void){
+    spin_lock(&vfs_spinlock);
+}
+
+void vfs_unlock(void){
+    spin_unlock(&vfs_spinlock);
+}
 
 static struct filesystem**  fs_get_free_filesystem();
 static void                 fs_static_load();
@@ -121,7 +136,7 @@ static int file_resolve_path(const char* path, struct path_root** root_out, stru
 // Fopen that says why it failed: a descriptor > 0 or
 // a negative status. The fopen syscall returns this, so a program
 // can tell -ENOENT from -EISDIR or -ERDONLY.
-int fopen_status(const char* filename, const char* mode_str){
+static int fopen_status_locked(const char* filename, const char* mode_str){
     int res = 0;
     struct path_root* root_path = NULL;
     struct disk* disk = NULL;
@@ -175,7 +190,7 @@ int fopen(const char* filename, const char* mode_str){
     return res < 0 ? 0 : res;
 }
 
-int fread(void* ptr, uint32_t size, uint32_t nmemb, int fd){
+static int fread_locked(void* ptr, uint32_t size, uint32_t nmemb, int fd){
     int res = 0;
     if(size == 0 || nmemb == 0 || fd < 1){
         res = -EINVARG;
@@ -194,7 +209,7 @@ out:
     return res;
 }
 
-int fseek(int fd, int offset, FILE_SEEK_MODE whence){
+static int fseek_locked(int fd, int offset, FILE_SEEK_MODE whence){
     int res = 0;
     struct file_descriptor* desc = file_get_descriptor(fd);
     if(!desc || desc->is_directory){
@@ -208,7 +223,7 @@ out:
     return res;
 }
 
-int fstat(int fd, struct file_stat* stat){
+static int fstat_locked(int fd, struct file_stat* stat){
     int res = 0;
     struct file_descriptor* desc = file_get_descriptor(fd);
     if(!desc){
@@ -227,7 +242,7 @@ static void file_free_descriptor(struct file_descriptor* desc){
     kfree(desc);
 }
 
-int fclose(int fd){
+static int fclose_locked(int fd){
     int res = 0;
     struct file_descriptor* desc = file_get_descriptor(fd);
     if(!desc){
@@ -248,7 +263,7 @@ out:
 // Write side of the VFS.
 // ---------------------------------------------------------------
 
-int fwrite(const void* ptr, uint32_t size, uint32_t nmemb, int fd){
+static int fwrite_locked(const void* ptr, uint32_t size, uint32_t nmemb, int fd){
     if(size == 0 || nmemb == 0 || !ptr){
         return -EINVARG;
     }
@@ -262,7 +277,7 @@ int fwrite(const void* ptr, uint32_t size, uint32_t nmemb, int fd){
     return desc->filesystem->write(desc->disk, desc->private, size, nmemb, (const char*)ptr);
 }
 
-int ftruncate(int fd, uint32_t size){
+static int ftruncate_locked(int fd, uint32_t size){
     struct file_descriptor* desc = file_get_descriptor(fd);
     if(!desc || desc->is_directory){
         return -EINVARG;
@@ -273,7 +288,7 @@ int ftruncate(int fd, uint32_t size){
     return desc->filesystem->truncate(desc->private, size);
 }
 
-int fremove(const char* path){
+static int fremove_locked(const char* path){
     struct path_root* root_path = NULL;
     struct disk* disk = NULL;
     int res = file_resolve_path(path, &root_path, &disk);
@@ -291,7 +306,7 @@ int fremove(const char* path){
     return res;
 }
 
-int fmkdir(const char* path){
+static int fmkdir_locked(const char* path){
     struct path_root* root_path = NULL;
     struct disk* disk = NULL;
     int res = file_resolve_path(path, &root_path, &disk);
@@ -309,7 +324,7 @@ int fmkdir(const char* path){
     return res;
 }
 
-int fopendir(const char* path){
+static int fopendir_locked(const char* path){
     struct path_root* root_path = NULL;
     struct disk* disk = NULL;
     int res = file_resolve_path(path, &root_path, &disk);
@@ -338,10 +353,87 @@ int fopendir(const char* path){
     return desc->index;
 }
 
-int freaddir(int fd, struct file_dirent* entry){
+static int freaddir_locked(int fd, struct file_dirent* entry){
     struct file_descriptor* desc = file_get_descriptor(fd);
     if(!desc || !desc->is_directory || !entry){
         return -EINVARG;
     }
     return desc->filesystem->readdir(desc->private, entry);
+}
+
+int fopen_status(const char* filename, const char* mode_str){
+    vfs_lock();
+    int res = fopen_status_locked(filename, mode_str);
+    vfs_unlock();
+    return res;
+}
+
+int fread(void* ptr, uint32_t size, uint32_t nmemb, int fd){
+    vfs_lock();
+    int res = fread_locked(ptr, size, nmemb, fd);
+    vfs_unlock();
+    return res;
+}
+
+int fseek(int fd, int offset, FILE_SEEK_MODE whence){
+    vfs_lock();
+    int res = fseek_locked(fd, offset, whence);
+    vfs_unlock();
+    return res;
+}
+
+int fstat(int fd, struct file_stat* stat){
+    vfs_lock();
+    int res = fstat_locked(fd, stat);
+    vfs_unlock();
+    return res;
+}
+
+int fclose(int fd){
+    vfs_lock();
+    int res = fclose_locked(fd);
+    vfs_unlock();
+    return res;
+}
+
+int fwrite(const void* ptr, uint32_t size, uint32_t nmemb, int fd){
+    vfs_lock();
+    int res = fwrite_locked(ptr, size, nmemb, fd);
+    vfs_unlock();
+    return res;
+}
+
+int ftruncate(int fd, uint32_t size){
+    vfs_lock();
+    int res = ftruncate_locked(fd, size);
+    vfs_unlock();
+    return res;
+}
+
+int fremove(const char* path){
+    vfs_lock();
+    int res = fremove_locked(path);
+    vfs_unlock();
+    return res;
+}
+
+int fmkdir(const char* path){
+    vfs_lock();
+    int res = fmkdir_locked(path);
+    vfs_unlock();
+    return res;
+}
+
+int fopendir(const char* path){
+    vfs_lock();
+    int res = fopendir_locked(path);
+    vfs_unlock();
+    return res;
+}
+
+int freaddir(int fd, struct file_dirent* entry){
+    vfs_lock();
+    int res = freaddir_locked(fd, entry);
+    vfs_unlock();
+    return res;
 }

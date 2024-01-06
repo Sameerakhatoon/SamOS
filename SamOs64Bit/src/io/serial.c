@@ -1,5 +1,8 @@
 #include "serial.h"
 #include "io.h"
+#include "lib/spinlock/spinlock.h"
+#include "cpu/percpu.h"
+#include "arch/x86_64/atomic.h"
 #include <stdint.h>
 
 // COM1 serial console. Register offsets from the 16550
@@ -49,17 +52,67 @@ static void serial_raw_putc(char c)
     outb(SERIAL_COM1_PORT + COM_DATA, (unsigned char)c);
 }
 
+static void serial_out(char c)
+{
+    if (c == '\n')
+    {
+        serial_raw_putc('\r');
+    }
+    serial_raw_putc(c);
+}
+
+// One CPU at a time on the UART. Once the APs run,
+// each CPU collects its output up to a newline (or a full buffer)
+// and sends the line in one hold of the lock, so the lines tests
+// grep for are never cut by another CPU's output. serial_flush
+// sends a partial line (a shell prompt); the scheduler calls it
+// before a CPU returns to ring 3 or halts.
+static struct spinlock serial_lock = SPINLOCK_INIT("serial", LOCK_LEVEL_SERIAL, 0);
+
+static void serial_flush_cpu(struct cpu* c)
+{
+    if (!c->line_len)
+    {
+        return;
+    }
+    spin_lock(&serial_lock);
+    for (uint32_t i = 0; i < c->line_len; i++)
+    {
+        serial_out(c->line[i]);
+    }
+    c->line_len = 0;
+    spin_unlock(&serial_lock);
+}
+
+void serial_flush(void)
+{
+    if (serial_ready)
+    {
+        serial_flush_cpu(this_cpu());
+    }
+}
+
 void serial_putc(char c)
 {
     if (!serial_ready)
     {
         return;
     }
-    if (c == '\n')
+    if (!smp_active())
     {
-        serial_raw_putc('\r');
+        spin_lock(&serial_lock);
+        serial_out(c);
+        spin_unlock(&serial_lock);
+        return;
     }
-    serial_raw_putc(c);
+    uint64_t flags = irq_save();
+    struct cpu* cpu = this_cpu();
+    cpu->line[cpu->line_len++] = c;
+    if (c == '\n' || cpu->line_len == CPU_SERIAL_LINE)
+    {
+        serial_flush_cpu(cpu);
+    }
+    irq_restore(flags);
 }
 
 void serial_write(const char* str)
@@ -78,4 +131,36 @@ void serial_write_hex(unsigned long long value)
     {
         serial_putc(digits[(value >> shift) & 0xF]);
     }
+}
+
+// Panic path: no lock (its holder may be stopped for good), and this
+// CPU's buffered partial line goes out first.
+void serial_write_unlocked(const char* str)
+{
+    if (!serial_ready)
+    {
+        return;
+    }
+    struct cpu* c = this_cpu();
+    for (uint32_t i = 0; i < c->line_len; i++)
+    {
+        serial_out(c->line[i]);
+    }
+    c->line_len = 0;
+    while (str && *str)
+    {
+        serial_out(*str++);
+    }
+}
+
+void serial_write_hex_unlocked(unsigned long long value)
+{
+    static const char digits[] = "0123456789abcdef";
+    char buf[19] = "0x";
+    for (int i = 0; i < 16; i++)
+    {
+        buf[2 + i] = digits[(value >> (60 - 4 * i)) & 0xF];
+    }
+    buf[18] = 0;
+    serial_write_unlocked(buf);
 }

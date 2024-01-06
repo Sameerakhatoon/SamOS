@@ -40,6 +40,8 @@ static void require(int present, const char* name){
     }
 }
 
+static void cpu_setup_registers(uint64_t* cr0_out, uint64_t* cr4_out, uint64_t* efer_out);
+
 void cpu_init(void){
     uint32_t a, b, c, d;
 
@@ -57,6 +59,26 @@ void cpu_init(void){
     require(d & (1u << 25), "SSE\n");
     require(d & (1u << 26), "SSE2\n");
 
+    uint64_t cr0, cr4, efer;
+    cpu_setup_registers(&cr0, &cr4, &efer);
+
+    serial_write("cpu: cr0 ");
+    serial_write_hex(cr0);
+    serial_write(" cr4 ");
+    serial_write_hex(cr4);
+    serial_write(" efer ");
+    serial_write_hex(efer);
+    serial_write("\n");
+}
+
+// An AP runs the same CPU set-up as the BSP, without the
+// feature checks (the BSP passed them) or the log line.
+void cpu_init_ap(void){
+    uint64_t cr0, cr4, efer;
+    cpu_setup_registers(&cr0, &cr4, &efer);
+}
+
+static void cpu_setup_registers(uint64_t* cr0_out, uint64_t* cr4_out, uint64_t* efer_out){
     uint64_t cr0, cr4;
     __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
     cr0 |= CR0_MP | CR0_NE | CR0_WP;
@@ -71,12 +93,7 @@ void cpu_init(void){
     wrmsr(MSR_EFER, efer);
 
     __asm__ volatile("fninit");
-
-    serial_write("cpu: cr0 ");
-    serial_write_hex(cr0);
-    serial_write(" cr4 ");
-    serial_write_hex(cr4);
-    serial_write(" efer ");
-    serial_write_hex(efer);
-    serial_write("\n");
+    *cr0_out  = cr0;
+    *cr4_out  = cr4;
+    *efer_out = efer;
 }

@@ -15,5 +15,10 @@ void serial_init(void);
 void serial_putc(char c);
 void serial_write(const char* str);
 void serial_write_hex(unsigned long long value);
+// Send this CPU's buffered partial line; lock-free writers
+// for the panic path.
+void serial_flush(void);
+void serial_write_unlocked(const char* str);
+void serial_write_hex_unlocked(unsigned long long value);
 
 #endif

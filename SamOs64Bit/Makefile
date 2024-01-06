@@ -14,7 +14,7 @@
 # we substitute the mformat/mcopy pipeline used by SamOs since it
 # does not need sudo or a real mount point.
 
-FILES = ./build/kernel.asm.o ./build/kernel.o ./build/early_fault.o ./build/cpu/cpu.o ./build/kernel_selftest.o ./build/string/string.o ./build/memory/memory.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/heap/multiheap.o ./build/memory/pfa.o ./build/memory/heap/slab.o ./build/memory/heap/memtest.o ./build/memory/paging/paging.o ./build/memory/paging/paging.asm.o ./build/io/io.asm.o ./build/io/cpuid.o ./build/io/tsc.o ./build/io/tsc.asm.o ./build/io/pit.o ./build/io/serial.o ./build/io/pci.o ./build/io/rtc.o ./build/io/apic.o ./build/acpi/acpi.o ./build/idt/idt.o ./build/idt/idt.asm.o ./build/idt/irq.o ./build/task/task.o ./build/task/task.asm.o ./build/task/process.o ./build/task/userlandptr.o ./build/task/uaccess.o ./build/task/tss.asm.o ./build/fs/file.o ./build/fs/pparser.o ./build/fs/fat/fat.o ./build/fs/storage_selftest.o ./build/disk/disk.o ./build/disk/driver.o ./build/disk/drivers/pata.o ./build/disk/drivers/nvme.o ./build/disk/drivers/ahci.o ./build/disk/mbr.o ./build/disk/streamer.o ./build/disk/gpt.o ./build/graphics/graphics.o ./build/graphics/font.o ./build/graphics/font_builtin.o ./build/graphics/terminal.o ./build/graphics/window.o ./build/graphics/image/image.o ./build/graphics/image/bmp.o ./build/mouse/mouse.o ./build/mouse/ps2mouse.o ./build/gdt/gdt.o ./build/keyboard/keyboard.o ./build/keyboard/classic.o ./build/isr80h/isr80h.o ./build/isr80h/io.o ./build/isr80h/heap.o ./build/isr80h/misc.o ./build/isr80h/window.o ./build/isr80h/graphics.o ./build/isr80h/time.o ./build/isr80h/platform.o ./build/isr80h/file.o ./build/isr80h/process.o ./build/loader/formats/elf.o ./build/loader/formats/elfloader.o ./build/lib/vector/vector.o
+FILES = ./build/kernel.asm.o ./build/kernel.o ./build/early_fault.o ./build/cpu/cpu.o ./build/kernel_selftest.o ./build/string/string.o ./build/memory/memory.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/heap/multiheap.o ./build/memory/pfa.o ./build/memory/heap/slab.o ./build/memory/heap/memtest.o ./build/memory/paging/paging.o ./build/memory/paging/paging.asm.o ./build/io/io.asm.o ./build/io/cpuid.o ./build/io/tsc.o ./build/io/tsc.asm.o ./build/io/pit.o ./build/io/serial.o ./build/io/pci.o ./build/io/rtc.o ./build/io/apic.o ./build/acpi/acpi.o ./build/idt/idt.o ./build/idt/idt.asm.o ./build/idt/irq.o ./build/task/task.o ./build/task/task.asm.o ./build/task/process.o ./build/task/userlandptr.o ./build/task/uaccess.o ./build/task/tss.asm.o ./build/fs/file.o ./build/fs/pparser.o ./build/fs/fat/fat.o ./build/fs/storage_selftest.o ./build/disk/disk.o ./build/disk/driver.o ./build/disk/drivers/pata.o ./build/disk/drivers/nvme.o ./build/disk/drivers/ahci.o ./build/disk/mbr.o ./build/disk/streamer.o ./build/disk/gpt.o ./build/graphics/graphics.o ./build/graphics/font.o ./build/graphics/font_builtin.o ./build/graphics/terminal.o ./build/graphics/window.o ./build/graphics/image/image.o ./build/graphics/image/bmp.o ./build/mouse/mouse.o ./build/mouse/ps2mouse.o ./build/gdt/gdt.o ./build/keyboard/keyboard.o ./build/keyboard/classic.o ./build/isr80h/isr80h.o ./build/isr80h/io.o ./build/isr80h/heap.o ./build/isr80h/misc.o ./build/isr80h/window.o ./build/isr80h/graphics.o ./build/isr80h/time.o ./build/isr80h/platform.o ./build/isr80h/file.o ./build/isr80h/process.o ./build/loader/formats/elf.o ./build/loader/formats/elfloader.o ./build/lib/vector/vector.o ./build/lib/spinlock/spinlock.o ./build/cpu/smp.o ./build/cpu/smp_selftest.o ./build/cpu/ap_trampoline.asm.o
 INCLUDES = -I./src
 # No red zone (an interrupt pushes its frame right
 # below the interrupted rsp), no SSE/x87 code in the kernel (user FPU
@@ -305,3 +305,20 @@ clean:
 # Early exception handler (minimal IDT before idt_init).
 ./build/early_fault.o: ./src/early_fault.c
 	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c ./src/early_fault.c -o ./build/early_fault.o
+
+# Spinlocks, APs, IPIs, the AP trampoline.
+./build/lib/spinlock/spinlock.o: ./src/lib/spinlock/spinlock.c
+	mkdir -p ./build/lib/spinlock
+	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c ./src/lib/spinlock/spinlock.c -o ./build/lib/spinlock/spinlock.o
+
+./build/cpu/smp.o: ./src/cpu/smp.c
+	mkdir -p ./build/cpu
+	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c ./src/cpu/smp.c -o ./build/cpu/smp.o
+
+./build/cpu/smp_selftest.o: ./src/cpu/smp_selftest.c
+	mkdir -p ./build/cpu
+	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c ./src/cpu/smp_selftest.c -o ./build/cpu/smp_selftest.o
+
+./build/cpu/ap_trampoline.asm.o: ./src/cpu/ap_trampoline.asm
+	mkdir -p ./build/cpu
+	nasm -f elf64 -g ./src/cpu/ap_trampoline.asm -o ./build/cpu/ap_trampoline.asm.o

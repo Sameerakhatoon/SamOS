@@ -51,6 +51,9 @@
 #include "acpi/acpi.h"            // ACPI tables, shutdown, reboot
 #include "io/rtc.h"               // Wall-clock time
 #include "io/apic.h"              // LAPIC, IOAPIC, LAPIC timer
+#include "cpu/percpu.h"           // Per-CPU data
+#include "cpu/smp.h"              // APs, IPIs, panic stop
+#include "cpu/smp_selftest.h"     // IPI and shootdown checks
 
 // L87 - bss-resident default_graphics_info lives in kernel.asm;
 // the long-mode entry stashes the UEFI framebuffer params into it
@@ -82,11 +85,18 @@ void print(const char* str)
 {
     // Mirror every kernel print to COM1 (see io/serial.h).
     serial_write(str);
+    // The screen is the graphics lock's; skipped when
+    // the caller holds a lock that comes after it in the order.
+    if (!system_terminal || !gfx_lock_for_print())
+    {
+        return;
+    }
     size_t len = strlen(str);
     for (size_t i = 0; i < len; i++)
     {
         terminal_writechar(str[i], 15);
     }
+    gfx_unlock();
 }
 
 // Lecture 15 - tiny halt-with-message helper. Future fault handlers
@@ -94,8 +104,19 @@ void print(const char* str)
 // of silent while(1)s, so we get a visible reason on VGA.
 void panic(const char* msg)
 {
-    serial_write("\nKERNEL PANIC: ");
-    print(msg);
+    // Stop the other CPUs first (NMI), then write
+    // without locks: their holders may be among the stopped CPUs.
+    __asm__ volatile("cli");
+    smp_panic_begin();
+    serial_write_unlocked("\nKERNEL PANIC: ");
+    serial_write_unlocked(msg);
+    if (system_terminal && !smp_active())
+    {
+        for (const char* p = msg; *p; p++)
+        {
+            terminal_writechar(*p, 15);
+        }
+    }
     // SamOs divergence: halt with interrupts off instead of a
     // busy spin, so a panicked kernel stops burning a host CPU.
     while (1)
@@ -120,6 +141,8 @@ void kernel_page()
 {
     kernel_registers();
     paging_switch(kernel_paging_desc);
+    // No process address space on this CPU any more.
+    this_cpu()->user_desc = NULL;
 }
 
 // Lecture 38 - asm-side #DE trigger (kept around for ad-hoc
@@ -129,7 +152,6 @@ extern void div_test(void);
 // Lecture 50 - the static GDT lives in kernel.asm. C side
 // installs the TSS descriptor into slot 7 + 8.
 extern struct gdt_entry gdt[];
-struct tss tss;
 
 // Lecture 44 - public getter for the kernel's paging_desc.
 // Anyone needing to walk the kernel address space (e.g.
@@ -158,53 +180,11 @@ static int cmdline_has(const char* word)
 
 // TSS with the ring-0 stack and the IST stacks for #DF, NMI
 // and #MC. Runs before idt_init, whose gates name the IST slots.
+// The TSS and stacks are per CPU now (cpu_tss_init in
+// cpu/smp.c); this sets up the BSP's and loads its TSS.
 static void kernel_tss_init(void)
 {
-    // Allocate a 1 MiB kernel stack for ring transitions.
-    // kzalloc lays it out low-to-high; rsp0 needs the TOP of
-    // the region (stack grows down), so we add stack_size to
-    // the base.
-    size_t stack_size = 1024 * 1024;
-    void* tss_stack_low  = kzalloc(stack_size);
-    void* tss_stack_high = (void*)((uintptr_t)tss_stack_low + stack_size);
-
-    // Mark the lowest page of the stack as not-present so any
-    // overflow #PFs visibly instead of silently corrupting
-    // whatever sits below. paging_map with flags=0 unmaps the
-    // page (the "unmap idiom" introduced in L27). With the IST
-    // stack for #DF, that overflow now ends in a register dump.
-    // The stack is a direct-map address; flags 0 unmaps it.
-    paging_map(kernel_desc(), tss_stack_low, NULL, 0);
-
-    memset(&tss, 0x00, sizeof(tss));
-    tss.rsp0        = (uint64_t)tss_stack_high;
-    tss.iopb_offset = sizeof(tss);   // no IO bitmap
-
-    uint64_t ist[3];
-    for (int i = 0; i < 3; i++)
-    {
-        uint8_t* stack = kzalloc(KERNEL_IST_STACK_SIZE);
-        if (!stack)
-        {
-            panic("kernel_tss_init: no memory for IST stacks\n");
-        }
-        ist[i] = (uint64_t)(stack + KERNEL_IST_STACK_SIZE);
-    }
-    tss.ist1 = ist[0];   // IDT_IST_DOUBLE_FAULT
-    tss.ist2 = ist[1];   // IDT_IST_NMI
-    tss.ist3 = ist[2];   // IDT_IST_MACHINE_CHECK
-
-    // Install the TSS descriptor into GDT slot 7 (+ slot 8 for
-    // the high half of the base). The reserved slots were added
-    // to kernel.asm in L50.
-    struct tss_desc_64* tssdesc =
-        (struct tss_desc_64*)&gdt[KERNEL_LONG_MODE_TSS_GDT_INDEX];
-    gdt_set_tss(tssdesc, &tss, sizeof(tss) - 1, TSS_DESCRIPTOR_TYPE, 0x00);
-
-    // Lecture 55 - ltr the TSS. The GDTR limit was set at boot
-    // to gdt_end - gdt - 1, which (since L50 reserved the two
-    // TSS slots BEFORE gdt_end) already covers selector 0x38.
-    tss_load(KERNEL_LONG_MODE_TSS_SELECTOR);
+    smp_bsp_init();
 }
 
 // e2e hook: CMDLINE.TXT "samos.run=PROG.ELF arg ...;PROG2.ELF ..."
@@ -270,9 +250,18 @@ static void kernel_load_cmdline_programs(void)
         strncpy(path + 3, root->argument, sizeof(path) - 4);
         struct process* process = NULL;
         int res = process_load(path, &process);
-        if (res == SAMOS_ALL_OK)
+        if(res == SAMOS_ALL_OK)
         {
             res = process_inject_arguments(process, root);
+            // Started only once its arguments are in place.
+            if(res == SAMOS_ALL_OK)
+            {
+                process_start(process);
+            }
+            else
+            {
+                process_terminate(process);
+            }
         }
         print(res == SAMOS_ALL_OK ? "samos.run: loaded " : "samos.run: failed to load ");
         print(path);
@@ -423,10 +412,12 @@ void kernel_main(void)
     // (IRQ_enable routes IRQ0 to its GSI); samos.lapic_timer_fail
     // forces that path for e2e/179.
     int apic = !cmdline_has("samos.legacy_pic") && apic_init() == 0;
+    int lapic_tick = 0;
     if (apic && !cmdline_has("samos.lapic_timer_fail") &&
         lapic_timer_calibrate() == 0)
     {
         lapic_timer_start(PIT_TICK_HZ);
+        lapic_tick = 1;
     }
     else
     {
@@ -580,6 +571,16 @@ void kernel_main(void)
         acpi_reboot();
     }
 
+    // The other CPUs, once everything they could touch
+    // exists and before the first process. They need the LAPIC tick:
+    // on the legacy 8259/PIT path the BSP runs alone. samos.nosmp
+    // keeps one CPU on a multi-CPU machine.
+    if (lapic_tick && !cmdline_has("samos.nosmp"))
+    {
+        smp_start_aps();
+        smp_selftest_run(cmdline_has("samos.smp_panic_test"));
+    }
+
     // SamOs e2e (Phase 2): if a user-side selftest ELF is on the
     // primary FS, load it as the first task and drop into ring 3
     // so it can exercise the user syscall surface (fopen, fread,
@@ -604,6 +605,7 @@ void kernel_main(void)
         kernel_load_cmdline_programs();
         if(process_load_switch("@:/BLANK.ELF", &user_selftest_proc) == SAMOS_ALL_OK){
             print("e2e: running user-side BLANK.ELF selftest\n");
+            process_start(user_selftest_proc);
             // No sti here: task_return sets IF in the iretq
             // frame. An IRQ taken in this window (a latched IRQ1)
             // saved the kernel frame as the task's user state, and
@@ -704,6 +706,7 @@ void kernel_main(void)
         panic("Failed to load user program\n");
     }
     print("user enter\n");
+    process_start(p);
     // task_run_first_ever_task never returns. After this:
     //   - CR3 = task's PML4
     //   - iretq into ring 3 at SAMOS_PROGRAM_VIRTUAL_ADDRESS

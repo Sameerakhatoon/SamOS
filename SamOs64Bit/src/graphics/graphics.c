@@ -16,6 +16,25 @@
 #include "io/serial.h"
 #include "boot/boot_info.h"
 #include "boot/cmdline.h"
+#include "lib/spinlock/spinlock.h"
+
+static struct spinlock graphics_lock = SPINLOCK_INIT("gfx", LOCK_LEVEL_GFX, 1);
+
+void gfx_lock(void){
+    spin_lock(&graphics_lock);
+}
+
+void gfx_unlock(void){
+    spin_unlock(&graphics_lock);
+}
+
+bool gfx_lock_for_print(void){
+    if(!spin_held(&graphics_lock) && spin_held_level() > LOCK_LEVEL_GFX){
+        return false;
+    }
+    spin_lock(&graphics_lock);
+    return true;
+}
 
 static struct graphics_info* loaded_graphics_info  = NULL;
 

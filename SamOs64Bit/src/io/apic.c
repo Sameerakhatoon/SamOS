@@ -18,6 +18,7 @@
 #include "acpi/acpi.h"
 #include "memory/paging/paging.h"
 #include "string/string.h"
+#include "lib/spinlock/spinlock.h"
 #include "status.h"
 
 #define MSR_APIC_BASE         0x1B
@@ -60,6 +61,9 @@ static volatile uint8_t* lapic_mmio;
 static struct ioapic ioapics[ACPI_MAX_IOAPICS];
 static int ioapic_count;
 static bool active;
+// IOREGSEL/IOWIN is a register pair: one CPU at a time
+// once the disk waits steer their lines to the CPU that waits.
+static struct spinlock ioapic_lock = SPINLOCK_INIT("ioapic", LOCK_LEVEL_IOAPIC, false);
 static uint64_t timer_hz;              // LAPIC timer counts per second (divide 16)
 static uint32_t irq_dest;              // APIC id the ISA IRQs are sent to
 
@@ -216,7 +220,10 @@ int ioapic_set_masked(uint8_t isa_irq, bool masked){
     if(!active || isa_irq > 15){
         return -EINVARG;
     }
-    return ioapic_route(isa_irq, masked);
+    spin_lock(&ioapic_lock);
+    int res = ioapic_route(isa_irq, masked);
+    spin_unlock(&ioapic_lock);
+    return res;
 }
 
 // The disk interrupts: a PCI INTx GSI, or an ATA
@@ -227,8 +234,24 @@ int ioapic_route_gsi(uint32_t gsi, uint8_t vector, uint16_t inti_flags, bool mas
     if(!io){
         return -ENOENT;
     }
+    spin_lock(&ioapic_lock);
     ioapic_write(io, IOAPIC_REG_REDIR(pin) + 1, irq_dest << 24);
     ioapic_write(io, IOAPIC_REG_REDIR(pin), vector | inti_bits(inti_flags) | (masked ? LVT_MASKED : 0));
+    spin_unlock(&ioapic_lock);
+    return 0;
+}
+
+// Send a GSI to another CPU. Only the destination
+// changes, so the vector, trigger and mask stay as routed.
+int ioapic_set_dest(uint32_t gsi, uint32_t apic_id){
+    uint32_t pin;
+    struct ioapic* io = active ? ioapic_for_gsi(gsi, &pin) : NULL;
+    if(!io){
+        return -ENOENT;
+    }
+    spin_lock(&ioapic_lock);
+    ioapic_write(io, IOAPIC_REG_REDIR(pin) + 1, apic_id << 24);
+    spin_unlock(&ioapic_lock);
     return 0;
 }
 
@@ -307,6 +330,47 @@ int lapic_timer_calibrate(void){
     serial_write(itoa((int)(timer_hz / 1000)));
     serial_write(" kHz (divide 16), measured against PIT channel 2\n");
     return timer_hz ? 0 : -EIO;
+}
+
+// Interprocessor interrupts through the ICR. The high
+// half (destination) first: writing the low half sends.
+#define LAPIC_ICR_LOW         0x300
+#define LAPIC_ICR_HIGH        0x310
+#define ICR_PENDING           (1u << 12)
+#define ICR_ASSERT            (1u << 14)
+#define ICR_DELIVERY_NMI      (4u << 8)
+#define ICR_DELIVERY_INIT     (5u << 8)
+#define ICR_DELIVERY_STARTUP  (6u << 8)
+#define ICR_ALL_BUT_SELF      (3u << 18)
+
+static void lapic_icr_wait(void){
+    for(int i = 0; i < 1000000 && (lapic_read(LAPIC_ICR_LOW) & ICR_PENDING); i++){
+        __asm__ volatile("pause");
+    }
+}
+
+static void lapic_icr_send(uint32_t apic_id, uint32_t low){
+    lapic_icr_wait();
+    lapic_write(LAPIC_ICR_HIGH, apic_id << 24);
+    lapic_write(LAPIC_ICR_LOW, low);
+    lapic_icr_wait();
+}
+
+void lapic_send_ipi(uint32_t apic_id, uint8_t vector){
+    lapic_icr_send(apic_id, ICR_ASSERT | vector);
+}
+
+void lapic_send_init(uint32_t apic_id){
+    lapic_icr_send(apic_id, ICR_ASSERT | ICR_DELIVERY_INIT);
+}
+
+void lapic_send_startup(uint32_t apic_id, uint32_t page){
+    lapic_icr_send(apic_id, ICR_ASSERT | ICR_DELIVERY_STARTUP | (page & 0xFF));
+}
+
+void lapic_send_nmi_all_others(void){
+    lapic_icr_wait();
+    lapic_write(LAPIC_ICR_LOW, ICR_ALL_BUT_SELF | ICR_ASSERT | ICR_DELIVERY_NMI);
 }
 
 void lapic_timer_start(uint32_t hz){

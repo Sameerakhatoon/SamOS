@@ -17,6 +17,16 @@
 #include "graphics/image/image.h"   // L90 - struct image for draw_image
 #include "mouse/mouse.h"            // L141 - MOUSE_CLICK_TYPE for click handlers
 
+// One recursive lock for the window system, the
+// graphics tree, the terminals, the mouse and screen output
+// (docs/locking.md, the outermost level). gfx_lock_for_print takes it
+// only when the caller holds no lock below it in the order, and says
+// whether it did: kernel print() from inside the heap or the
+// scheduler then writes to COM1 only, instead of inverting the order.
+void gfx_lock(void);
+void gfx_unlock(void);
+bool gfx_lock_for_print(void);
+
 enum {
     GRAPHICS_FLAG_ALLOW_OUT_OF_BOUNDS                = 0b00000001,
     GRAPHICS_FLAG_CLONED_FRAMEBUFFER                 = 0b00000010,

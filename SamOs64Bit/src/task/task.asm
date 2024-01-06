@@ -63,13 +63,15 @@ task_return:
     mov rbx, [rdi + TF_RBX]
     mov rax, [rdi + TF_RAX]
     mov rdi, [rdi + TF_RDI]
+    swapgs                             ; User GS base for ring 3
     iretq
 
 ; void user_registers()
+; gs is not loaded; a selector load clears the GS base,
+; which holds this CPU's struct cpu while in the kernel.
 user_registers:
     mov ax, 0x33                       ; USER_DATA_SEGMENT
     mov ds, ax
     mov es, ax
     mov fs, ax
-    mov gs, ax
     ret

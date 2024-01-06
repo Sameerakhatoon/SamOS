@@ -73,6 +73,7 @@ struct idtr_desc {
 #define IDT_IRQ_END            0x30
 
 void idt_init();
+void idt_load_cpu(void);
 void enable_interrupts();
 void disable_interrupts();
 void idt_dump_frame(struct trap_frame* frame);

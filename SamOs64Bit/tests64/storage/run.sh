@@ -134,7 +134,11 @@ result_done() {
 
 run_qemu() {
     local machine=$1 tag=$2 result=$3
+    # STORAGE_SMP CPUs (default 1), one host thread each.
+    local smp=${STORAGE_SMP:-1} accel=tcg
+    [ "$smp" -gt 1 ] && accel=tcg,thread=multi
     local args=(-machine "$machine" -m 512M -cpu Skylake-Server -bios "$OVMF"
+                -smp "$smp" -accel "$accel"
                 -display none -no-reboot -monitor none
                 -serial "file:$WORK/serial-$tag.log")
     local i=0

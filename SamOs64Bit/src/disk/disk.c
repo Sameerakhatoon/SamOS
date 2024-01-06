@@ -36,6 +36,13 @@
 
 struct vector* disk_vector = NULL;
 
+// One CPU at a time in any disk driver, for every disk:
+// two PATA drives share a channel's registers and its interrupt, the
+// AHCI ports of one HBA share its interrupt line and wait flag, and
+// a disk wait steers that line to its own CPU. Recursive, so
+// the streamer holds it over a cache fill through disk_read_block.
+struct spinlock disk_lock = SPINLOCK_INIT("disk", LOCK_LEVEL_DISK, true);
+
 // Pointer to the first REAL disk.
 struct disk* disk_primary_handle = NULL;
 
@@ -279,7 +286,11 @@ int disk_read_block(struct disk* idisk, uint64_t lba, int total, void* buf){
     if(!hw->driver->functions.read){
         return -EIO;
     }
-    return hw->driver->functions.read(hw, disk_real_sector(idisk, lba), total, buf);
+    // Drivers are entered by one CPU at a time.
+    spin_lock(&disk_lock);
+    res = hw->driver->functions.read(hw, disk_real_sector(idisk, lba), total, buf);
+    spin_unlock(&disk_lock);
+    return res;
 }
 
 int disk_write_block(struct disk* idisk, uint64_t lba, int total, const void* buf){
@@ -295,8 +306,10 @@ int disk_write_block(struct disk* idisk, uint64_t lba, int total, const void* bu
         return -ERDONLY;
     }
     uint64_t abs_lba = disk_real_sector(idisk, lba);
+    spin_lock(&disk_lock);
     res = hw->driver->functions.write(hw, abs_lba, total, (void*)buf);
     // Keep the sector cache coherent with direct block writes.
     diskstreamer_cache_update(hw, abs_lba, total, buf, res == 0);
+    spin_unlock(&disk_lock);
     return res;
 }

@@ -118,4 +118,9 @@ int                 freaddir(int fd, struct file_dirent* entry);
 void                fs_insert_filesystem(struct filesystem* filesystem);
 struct filesystem*  fs_resolve(struct disk* disk);
 
+// The VFS lock, for callers that need several calls
+// to be one step (docs/locking.md).
+void vfs_lock(void);
+void vfs_unlock(void);
+
 #endif

@@ -37,7 +37,14 @@ idt_load:
 
 ; Save the general registers below the vector/error pair, call
 ; %1(struct trap_frame*), restore and iretq.
+; From ring 3 swapgs first, so GS holds this CPU's
+; struct cpu in the kernel, and again before the iretq back. [rsp+24]
+; is the CS the CPU pushed (above the vector and error code).
 %macro TRAP_BODY 1
+    test qword [rsp + 24], 3
+    jz %%from_kernel
+    swapgs
+%%from_kernel:
     push rax
     push rbx
     push rcx
@@ -77,6 +84,10 @@ idt_load:
     pop rbx
     pop rax
     add rsp, 16                        ; vector + error code
+    test qword [rsp + 8], 3
+    jz %%to_kernel
+    swapgs
+%%to_kernel:
     iretq
 %endmacro
 

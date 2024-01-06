@@ -138,9 +138,11 @@ void* isr80h_command41_ftruncate(struct trap_frame* frame){
 
 // unlink (dir = 0) refuses a directory with -EISDIR, rmdir (dir = 1)
 // refuses a file with -ENOTDIR; the VFS fremove takes either.
+// The type check and the remove in one hold of the VFS lock.
 static void* file_remove(struct trap_frame* frame, int dir){
     char path[SAMOS_MAX_PATH];
     long res = file_user_path(task_current()->process, path, isr80h_arg(frame, 0));
+    vfs_lock();
     if(res >= 0){
         res = file_path_is_dir(path);
     }
@@ -150,6 +152,7 @@ static void* file_remove(struct trap_frame* frame, int dir){
     if(res >= 0){
         res = fremove(path);
     }
+    vfs_unlock();
     return ERROR(res);
 }
 

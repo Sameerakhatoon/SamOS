@@ -8,6 +8,7 @@
 #include "memory/heap/heap.h"
 #include "string/string.h"
 #include "memory/paging/paging.h"
+#include "memory/heap/kheap.h"
 
 // The frame table and every frame it hands out are direct-map
 // addresses; the reserved ranges below stay physical.
@@ -175,15 +176,23 @@ struct heap* pfa_heap(void){
     return &pfa_frame_heap;
 }
 
+// The frame table is also the multiheap's sub-heap, so it
+// shares the kernel memory lock (kheap.c).
 void* pfa_alloc_frames(size_t count){
     if(count == 0 || count > pfa_frame_table.total){
         return NULL;
     }
-    return heap_malloc(&pfa_frame_heap, count * PFA_FRAME_SIZE);
+    kmem_lock();
+    void* frames = heap_malloc(&pfa_frame_heap, count * PFA_FRAME_SIZE);
+    kmem_unlock();
+    return frames;
 }
 
 int pfa_free_frames(void* addr){
-    return heap_free(&pfa_frame_heap, addr);
+    kmem_lock();
+    int res = heap_free(&pfa_frame_heap, addr);
+    kmem_unlock();
+    return res;
 }
 
 bool pfa_is_reserved(void* addr){

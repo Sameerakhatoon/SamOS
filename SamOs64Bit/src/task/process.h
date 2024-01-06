@@ -259,4 +259,11 @@ int                     process_map_graphics_framebuffer_pixels_into_userspace(s
                                                                                struct framebuffer_pixel** virt_addr_out,
                                                                                size_t* size_out);
 
+// The process table lock (docs/locking.md), and
+// starting a loaded process: process_load leaves its task NEW, so the
+// caller can inject arguments before any CPU runs it.
+void process_lock(void);
+void process_unlock(void);
+void process_start(struct process* process);
+
 #endif

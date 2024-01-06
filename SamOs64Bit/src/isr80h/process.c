@@ -14,10 +14,14 @@
 // first. The book jumped into the child and the caller later resumed
 // with whatever rax held ("the parent never receives a real return
 // value").
+// The parent goes to this CPU's queue, where an idle CPU may
+// take it at once; the child runs here.
 static void* isr80h_start_child(struct process* child){
     struct task* parent_task = task_current();
+    process_lock();
     child->parent = parent_task->process;
     process_switch(child);
+    process_unlock();
     parent_task->registers.rax = (uint64_t)child->pid;
     task_ready(parent_task);
     task_enter(child->task);
@@ -184,9 +188,16 @@ void* isr80h_command28_waitpid(struct trap_frame* frame){
         return ERROR(-EFAULT);
     }
     int status = 0;
+    // The look and the block in one hold of the process lock:
+    // a child exiting on another CPU takes it to add its zombie and
+    // wake the parent, so the wakeup cannot fall in between.
+    process_lock();
     int res = process_reap_child(process, pid, &status);
     if(res == 0){
         task_block(task_current(), TASK_BLOCK_WAIT);
+    }
+    process_unlock();
+    if(res == 0){
         task_next();
     }
     if(res > 0 && status_ptr && copy_to_user(process, status_ptr, &status, sizeof(status)) < 0){
@@ -197,16 +208,25 @@ void* isr80h_command28_waitpid(struct trap_frame* frame){
 
 // int kill(int pid): ends the process with status 128 + 9. Killing
 // yourself does not return.
+// Another process is not torn down here: it may be
+// running on another CPU. task_kill marks it and its own CPU ends it;
+// the caller's waitpid then sees the status as before.
 void* isr80h_command29_kill(struct trap_frame* frame){
     int pid = (int)(intptr_t)isr80h_arg(frame, 0);
+    process_lock();
     struct process* target = process_get_by_pid(pid);
     if(!target){
+        process_unlock();
         return ERROR(-ESRCH);
     }
-    bool self = target == task_current()->process;
-    process_exit(target, PROCESS_EXIT_KILLED);
-    if(self){
+    if(target == task_current()->process){
+        process_unlock();
+        process_exit(target, PROCESS_EXIT_KILLED);
         task_next();
     }
+    if(target->task){
+        task_kill(target->task, PROCESS_EXIT_KILLED);
+    }
+    process_unlock();
     return 0;
 }

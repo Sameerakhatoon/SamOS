@@ -38,6 +38,7 @@ extern kernel_main
 extern early_fault
 extern _kernel_bss_start
 extern _kernel_bss_end
+extern cpus
 
 CODE_SEG           equ 0x08
 DATA_SEG           equ 0x10
@@ -118,12 +119,28 @@ higher_half_entry:
 
     jmp long_mode_entry
 
+; GS base = &cpus[0] (cpu/smp.c), whose first field
+; points at itself, so this_cpu() works from the first C line on.
+; Runs after the segment loads below, which clear the base.
+bsp_gs_base:
+    mov rax, cpus
+    mov [rax], rax
+    mov rdx, rax
+    shr rdx, 32
+    mov ecx, 0xC0000101                ; IA32_GS_BASE
+    wrmsr
+    xor eax, eax
+    xor edx, edx
+    mov ecx, 0xC0000102                ; IA32_KERNEL_GS_BASE
+    wrmsr
+    ret
+
+; Not gs, which would clear the per-CPU GS base.
 kernel_registers:
     mov ax, LONG_MODE_DATA_SEG
     mov ds, ax
     mov es, ax
     mov fs, ax
-    mov gs, ax
     ret
 
 long_mode_entry:
@@ -137,6 +154,7 @@ long_mode_entry:
     mov fs, ax
     mov gs, ax
     mov ss, ax
+    call bsp_gs_base
 
     ; Lecture 74 - far return to reload CS from our new GDT.
     push QWORD LONG_MODE_CODE_SEG

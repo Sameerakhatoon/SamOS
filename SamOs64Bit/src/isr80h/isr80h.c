@@ -54,4 +54,7 @@ void isr80h_register_commands(){
     isr80h_register_command(SYSTEM_COMMAND48_TIME,                 isr80h_command48_time);
     isr80h_register_command(SYSTEM_COMMAND49_SHUTDOWN,             isr80h_command49_shutdown);
     isr80h_register_command(SYSTEM_COMMAND50_REBOOT,               isr80h_command50_reboot);
+    isr80h_register_command(SYSTEM_COMMAND51_CPU_STATS,            isr80h_command51_cpu_stats);
+    isr80h_register_command(SYSTEM_COMMAND52_MEM_STATS,            isr80h_command52_mem_stats);
+    isr80h_register_command(SYSTEM_COMMAND53_CPU_CURRENT,          isr80h_command53_cpu_current);
 }

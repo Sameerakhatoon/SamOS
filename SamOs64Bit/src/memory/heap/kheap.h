@@ -51,4 +51,8 @@ void          kheap_get_stats(struct kheap_stats* out);
 struct multiheap;
 extern struct multiheap* kernel_multiheap;
 
+// The kernel memory lock (docs/locking.md).
+void kmem_lock(void);
+void kmem_unlock(void);
+
 #endif

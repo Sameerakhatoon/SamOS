@@ -34,6 +34,16 @@
 #include "bootmarker.h"
 #include "boot/cmdline.h"
 #include "string/string.h"
+#include "cpu/percpu.h"
+#include "cpu/smp.h"
+
+// With several CPUs a wait runs under the disk lock
+// (interrupts off, opened only in the TPR-limited window below) on
+// whichever CPU made the request. disk_irq_arm points the line at
+// that CPU before the command goes out, so the completion is taken
+// by the CPU that waits for it; the BSP may be spinning on the disk
+// lock with interrupts off meanwhile. The disk lock is one for all
+// disks, so one line has one waiter at a time.
 
 #define DISK_VECTOR_AHCI          (APIC_VECTOR_DISK_BASE + 0)
 #define DISK_VECTOR_PATA(channel) (APIC_VECTOR_DISK_BASE + 2 + (channel))
@@ -48,6 +58,9 @@ struct disk_irq {
     uint8_t             misses;     // done without an interrupt, in a row
     const char*         name;
     boot_marker_stage_t marker;     // counts completions taken at the interrupt
+    uint32_t            gsi;        // The routed line
+    uint32_t            dest;       // APIC id it is sent to now
+    volatile uint32_t   signal_cpu; // CPU index the handler ran on
 };
 
 // e2e/185: route the line but leave it masked, for the fallback.
@@ -63,7 +76,10 @@ static inline void disk_irq_count(boot_marker_stage_t stage){
 }
 
 // "disk: ahci completions by interrupt, GSI 16 level active-high, vector 80"
+// Called once the line is routed (to the BSP, by ioapic_route_gsi).
 static inline void disk_irq_report(struct disk_irq* q, uint32_t gsi, uint16_t inti, uint8_t vector, bool masked){
+    q->gsi  = gsi;
+    q->dest = lapic_id();
     serial_write("disk: ");
     serial_write(q->name);
     serial_write(" completions by interrupt, GSI ");
@@ -76,11 +92,19 @@ static inline void disk_irq_report(struct disk_irq* q, uint32_t gsi, uint16_t in
 }
 
 // Before issuing a command: drop a flag a handler set since the last wait.
+// And steer the line to this CPU (see the top).
 static inline void disk_irq_arm(struct disk_irq* q){
     q->pending = 0;
+    if(q->enabled && smp_active()){
+        uint32_t id = this_cpu()->apic_id;
+        if(id != q->dest && ioapic_set_dest(q->gsi, id) == 0){
+            q->dest = id;
+        }
+    }
 }
 
 static inline void disk_irq_signal(struct disk_irq* q){
+    q->signal_cpu = this_cpu()->index;
     q->pending = 1;
 }
 
@@ -121,6 +145,13 @@ static inline bool disk_irq_wait(struct disk_irq* q, bool (*done)(void*), void* 
     if(irq){
         q->misses = 0;
         disk_irq_count(q->marker);
+        // (e2e/194): taken on the AP that waited, or elsewhere.
+        uint32_t me = this_cpu()->index;
+        if(q->signal_cpu != me){
+            disk_irq_count(BM_FEATURE_DISK_IRQ_OTHER_CPU);
+        } else if(me != 0){
+            disk_irq_count(BM_FEATURE_DISK_IRQ_AP);
+        }
         return true;
     }
     disk_irq_count(BM_FEATURE_DISK_IRQ_POLLED);

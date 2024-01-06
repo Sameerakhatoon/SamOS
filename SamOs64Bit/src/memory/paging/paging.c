@@ -22,8 +22,10 @@
 #include "kernel.h"     // L43 - for panic()
 #include "boot/boot_info.h"
 #include "status.h"
+#include "cpu/percpu.h"
+#include "cpu/smp.h"
 
-static struct paging_desc* current_paging_desc = 0;
+// The descriptor in CR3 is per CPU (struct cpu).
 
 // The kernel descriptor, whose upper half every new
 // descriptor copies (paging_kernel_desc_new).
@@ -151,7 +153,7 @@ void* paging_align_to_lower_page(void* addr)
 // queue page-table edits against the live PML4 without each
 // caller having to thread a desc pointer through.
 struct paging_desc* paging_current_descriptor(void){
-    return current_paging_desc;
+    return this_cpu()->paging_desc;
 }
 
 // Lecture 31 - real implementation. Walks PML4 -> PDPT -> PD ->
@@ -197,7 +199,7 @@ void* paging_get_physical_address(struct paging_desc* desc, void* virtual_addres
 
 void paging_switch(struct paging_desc* desc)
 {
-    current_paging_desc = desc;
+    this_cpu()->paging_desc = desc;
     paging_load_directory((uintptr_t*)paging_direct_to_phys(desc->pml));
 }
 
@@ -275,7 +277,29 @@ static int paging_intermediate(struct paging_desc_entry* entry, bool user)
 // Install one virt -> phys 4-KiB mapping. Allocates missing
 // intermediate tables (PDPT, PD, PT) on demand from kheap.
 // `phys` is a PHYSICAL address. flags 0 unmaps.
+static int paging_map_locked(struct paging_desc* desc, void* virt, void* phys, int flags);
+
+// The kernel half is shared by every descriptor and
+// every CPU, so its tables change under the kernel memory lock, and a
+// changed entry is flushed on every CPU (smp_tlb_shootdown). A user
+// half belongs to one process: only a CPU running that process in
+// ring 3 can cache it.
 int paging_map(struct paging_desc* desc, void* virt, void* phys, int flags)
+{
+    bool kernel_half = (uintptr_t)virt >= SAMOS_DIRECT_MAP_BASE;
+    if (kernel_half)
+    {
+        kmem_lock();
+    }
+    int res = paging_map_locked(desc, virt, phys, flags);
+    if (kernel_half)
+    {
+        kmem_unlock();
+    }
+    return res;
+}
+
+static int paging_map_locked(struct paging_desc* desc, void* virt, void* phys, int flags)
 {
     uintptr_t va = (uintptr_t)virt;
     bool user = (flags & PAGING_ACCESS_FROM_ALL) != 0;
@@ -324,6 +348,7 @@ int paging_map(struct paging_desc* desc, void* virt, void* phys, int flags)
     if (was_mapped)
     {
         paging_invalidate_tlb_entry(virt);
+        smp_tlb_shootdown(desc, va);
     }
     return 0;
 }

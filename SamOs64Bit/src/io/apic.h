@@ -56,4 +56,15 @@ int      ioapic_route_gsi(uint32_t gsi, uint8_t vector, uint16_t inti_flags, boo
 // Set this CPU's task priority; returns the old value.
 uint32_t lapic_set_tpr(uint32_t tpr);
 
+// IPIs: a fixed vector to one CPU, INIT and STARTUP for
+// AP bring-up (page = trampoline physical address >> 12), and an NMI
+// to every CPU but this one (panic).
+void     lapic_send_ipi(uint32_t apic_id, uint8_t vector);
+void     lapic_send_init(uint32_t apic_id);
+void     lapic_send_startup(uint32_t apic_id, uint32_t page);
+void     lapic_send_nmi_all_others(void);
+// Point a routed GSI at another CPU (a disk wait steers
+// its line to the CPU that issued the command).
+int      ioapic_set_dest(uint32_t gsi, uint32_t apic_id);
+
 #endif

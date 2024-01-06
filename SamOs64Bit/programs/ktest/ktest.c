@@ -34,6 +34,22 @@
 //   ktest files       errors, bad pointers, page-crossing buffers,
 //                     fclose, descriptors closed on exit ("FILES OK")
 //   ktest opendirs N  open the root N times and exit without closing
+//
+// SMP probes, syscalls 51-53:
+//   ktest cpubusy N MS     N children burn the CPU for MS ms; per-CPU
+//                          busy ticks over the middle of that time
+//                          ("CPUBUSY cpu I ... pct P", "CPUBUSY OK")
+//   ktest burn MS          spin for MS ms; exit status = mask of the
+//                          CPUs it ran on
+//   ktest stress R C N F H...  R rounds (after a warm-up round) of C
+//                          process create/exit cycles in 4 spawners
+//                          and N readers hashing files F (FNV-1a H,
+//                          hex), heap and frames unchanged after each
+//                          round ("STRESS round r ok", "STRESS OK")
+//   ktest quiet CODE       return CODE, print nothing
+//   ktest spawner K        K x (start "quiet", waitpid, check status)
+//   ktest reader N F H...  N passes over the files, hash each
+//   ktest readers N P F H...  N readers at once, P passes each
 
 #include "samos.h"
 #include "string.h"
@@ -717,6 +733,252 @@ static int files_test(void)
     return 0;
 }
 
+// ---------------------------------------------------------------
+// SMP probes.
+// ---------------------------------------------------------------
+
+#define CMD_CPU_STATS    51
+#define CMD_MEM_STATS    52
+#define CMD_CPU_CURRENT  53
+#define SMP_MAX_CPUS     16
+
+// kernel isr80h/misc.c struct cpu_stat
+struct cpu_stat {
+    unsigned long index, apic_id, ticks_busy, ticks_idle;
+    unsigned long tasks_entered, steals, ipi_resched, ipi_tlb;
+};
+
+// kernel memory/heap/kheap.h struct kheap_stats
+struct mem_stat {
+    unsigned long frames_total, frames_free, frames_used, frames_reserved;
+    unsigned long slab_chunks, slab_pages_in_use, slab_objects_in_use, bad_frees;
+};
+
+static int cpu_stats(struct cpu_stat* out)
+{
+    return (int)ktest_syscall(CMD_CPU_STATS, (long)out, SMP_MAX_CPUS, 0, 0);
+}
+
+static int burn_test(unsigned long ms)
+{
+    unsigned long end = samos_uptime() + ms;
+    int mask = 0;
+    while (samos_uptime() < end) {
+        for (volatile unsigned long n = 0; n < 200000; n++) {
+        }
+        mask |= 1 << (ktest_syscall(CMD_CPU_CURRENT, 0, 0, 0, 0) & 7);
+    }
+    return mask;
+}
+
+// N CPU-bound children for ms; the parent sleeps and compares each
+// CPU's busy and idle ticks across the middle half of that time.
+static int cpubusy_test(unsigned long n, unsigned long ms)
+{
+    static struct cpu_stat a[SMP_MAX_CPUS], b[SMP_MAX_CPUS];
+    int pids[32];
+    char cmd[64];
+    if (n > 32) {
+        n = 32;
+    }
+    snprintf(cmd, sizeof(cmd), "ktest.elf burn %lu", ms);
+    for (unsigned long i = 0; i < n; i++) {
+        pids[i] = samos_system_run(cmd);
+    }
+    samos_sleep_ms(ms / 4);
+    int cpus = cpu_stats(a);
+    samos_sleep_ms(ms / 2);
+    cpu_stats(b);
+    int failures = 0;
+    for (int i = 0; i < cpus && i < SMP_MAX_CPUS; i++) {
+        unsigned long busy = b[i].ticks_busy - a[i].ticks_busy;
+        unsigned long idle = b[i].ticks_idle - a[i].ticks_idle;
+        unsigned long pct = busy + idle ? busy * 100 / (busy + idle) : 0;
+        say("CPUBUSY cpu %lu busy %lu idle %lu pct %lu steals %lu entered %lu\n", b[i].index,
+            busy, idle, pct, b[i].steals, b[i].tasks_entered);
+        if (busy + idle == 0 || pct < 90) {
+            failures++;
+        }
+    }
+    int all = 0;
+    for (unsigned long i = 0; i < n; i++) {
+        int status = -1;
+        if (pids[i] <= 0 || samos_waitpid(pids[i], &status) != pids[i] || status < 0) {
+            say("CPUBUSY child %lu FAIL\n", i);
+            failures++;
+            continue;
+        }
+        all |= status;
+        say("CPUBUSY child %lu ran on cpus 0x%x\n", i, status);
+    }
+    say("CPUBUSY %d cpus, children together ran on 0x%x\n", cpus, all);
+    print(failures ? "CPUBUSY FAIL\n" : "CPUBUSY OK\n");
+    return failures != 0;
+}
+
+// K create/exit cycles, each child returning a different status.
+static int spawner_test(unsigned long k)
+{
+    char cmd[48];
+    for (unsigned long i = 0; i < k; i++) {
+        int code = (int)(i % 200);
+        snprintf(cmd, sizeof(cmd), "ktest.elf quiet %d", code);
+        int pid = samos_system_run(cmd);
+        int status = -1;
+        if (pid <= 0 || samos_waitpid(pid, &status) != pid || status != code) {
+            say("STRESS spawner cycle %lu FAIL pid %d status %d\n", i, pid, status);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static unsigned int fnv_file(const char* path, long* size_out)
+{
+    static char buf[4096];
+    unsigned int h = 2166136261u;
+    long size = 0;
+    char full[120] = "@:/";
+    if (!strchr(path, ':')) {
+        strncpy(full + 3, path, sizeof(full) - 4);
+        path = full;
+    }
+    int fd = fopen(path, "r");
+    if (fd <= 0) {
+        *size_out = -1;
+        return 0;
+    }
+    while (1) {
+        long got = fread(buf, 1, sizeof(buf), fd);
+        if (got <= 0) {
+            break;
+        }
+        for (long i = 0; i < got; i++) {
+            h = (h ^ (unsigned char)buf[i]) * 16777619u;
+        }
+        size += got;
+    }
+    fclose(fd);
+    *size_out = size;
+    return h;
+}
+
+// N passes over each (file, expected hash) pair.
+static int reader_test(unsigned long n, int argc, char** argv)
+{
+    int bad = 0;
+    for (unsigned long pass = 0; pass < n; pass++) {
+        for (int i = 3; i + 1 < argc; i += 2) {
+            long size = 0;
+            unsigned int h = fnv_file(argv[i], &size);
+            if (size <= 0 || h != (unsigned int)parse_hex(argv[i + 1])) {
+                say("STRESS reader %s pass %lu FAIL hash %x size %ld\n", argv[i], pass, h, size);
+                bad++;
+            }
+        }
+    }
+    return bad ? 1 : 0;
+}
+
+static int stress_round(unsigned long cycles, unsigned long readers, unsigned long passes,
+                        const char* files)
+{
+    int pids[16];
+    int n = 0;
+    char cmd[400];
+    snprintf(cmd, sizeof(cmd), "ktest.elf spawner %lu", cycles / 4);
+    for (int i = 0; i < 4; i++) {
+        pids[n++] = samos_system_run(cmd);
+    }
+    snprintf(cmd, sizeof(cmd), "ktest.elf reader %lu%s", passes, files);
+    for (unsigned long i = 0; i < readers && n < 16; i++) {
+        pids[n++] = samos_system_run(cmd);
+    }
+    int failures = 0;
+    for (int i = 0; i < n; i++) {
+        int status = -1;
+        if (pids[i] <= 0 || samos_waitpid(pids[i], &status) != pids[i] || status != 0) {
+            say("STRESS child %d pid %d FAIL status %d\n", i, pids[i], status);
+            failures++;
+        }
+    }
+    return failures;
+}
+
+static int stress_test(int argc, char** argv)
+{
+    unsigned long rounds  = argc > 2 ? parse_dec(argv[2]) : 10;
+    unsigned long cycles  = argc > 3 ? parse_dec(argv[3]) : 1000;
+    unsigned long readers = argc > 4 ? parse_dec(argv[4]) : 3;
+    char files[300] = "";
+    for (int i = 5; i < argc; i++) {
+        size_t len = strlen(files);
+        snprintf(files + len, sizeof(files) - len, " %s", argv[i]);
+    }
+    unsigned long passes = 20;
+    static struct mem_stat base, now;
+    static struct cpu_stat cs[SMP_MAX_CPUS];
+    unsigned long start = samos_uptime();
+
+    // Warm-up: the sector cache fills and the process table grows to
+    // this test's size once; the baseline is taken after it.
+    int failures = stress_round(cycles / 10, readers, 1, files);
+    ktest_syscall(CMD_MEM_STATS, (long)&base, 0, 0, 0);
+    say("STRESS warm-up done, frames used %lu slab objects %lu\n", base.frames_used,
+        base.slab_objects_in_use);
+    for (unsigned long r = 1; r <= rounds && !failures; r++) {
+        unsigned long t0 = samos_uptime();
+        failures += stress_round(cycles, readers, passes, files);
+        ktest_syscall(CMD_MEM_STATS, (long)&now, 0, 0, 0);
+        long frames = (long)now.frames_used - (long)base.frames_used;
+        long slab   = (long)now.slab_objects_in_use - (long)base.slab_objects_in_use;
+        long bad    = (long)now.bad_frees - (long)base.bad_frees;
+        int ok = !failures && frames == 0 && slab == 0 && bad == 0;
+        say("STRESS round %lu %s cycles %lu reads %lu ms %lu frames %ld slab %ld bad frees %ld\n",
+            r, ok ? "ok" : "FAIL", cycles, readers * passes, samos_uptime() - t0, frames, slab, bad);
+        if (!ok) {
+            failures++;
+        }
+    }
+    int cpus = cpu_stats(cs);
+    for (int i = 0; i < cpus && i < SMP_MAX_CPUS; i++) {
+        say("STRESS cpu %lu entered %lu steals %lu resched ipis %lu tlb ipis %lu\n", cs[i].index,
+            cs[i].tasks_entered, cs[i].steals, cs[i].ipi_resched, cs[i].ipi_tlb);
+    }
+    say(failures ? "STRESS FAIL after %lu ms\n" : "STRESS OK %lu rounds in %lu ms\n",
+        failures ? samos_uptime() - start : rounds, samos_uptime() - start);
+    return failures != 0;
+}
+
+// (e2e/194) - N readers at once, P passes each over the files,
+// for disk traffic from every CPU ("READERS OK" or "READERS FAIL").
+static int readers_test(int argc, char** argv)
+{
+    unsigned long n      = argc > 2 ? parse_dec(argv[2]) : 4;
+    unsigned long passes = argc > 3 ? parse_dec(argv[3]) : 1;
+    char cmd[400];
+    int len = snprintf(cmd, sizeof(cmd), "ktest.elf reader %lu", passes);
+    for (int i = 4; i < argc && len < (int)sizeof(cmd); i++) {
+        len += snprintf(cmd + len, sizeof(cmd) - len, " %s", argv[i]);
+    }
+    unsigned long t0 = samos_uptime();
+    int pids[16];
+    for (unsigned long i = 0; i < n && i < 16; i++) {
+        pids[i] = samos_system_run(cmd);
+    }
+    int failures = 0;
+    for (unsigned long i = 0; i < n && i < 16; i++) {
+        int status = -1;
+        if (pids[i] <= 0 || samos_waitpid(pids[i], &status) != pids[i] || status != 0) {
+            say("READERS child %lu pid %d FAIL status %d\n", i, pids[i], status);
+            failures++;
+        }
+    }
+    say("READERS %lu readers %lu passes in %lu ms\n", n, passes, samos_uptime() - t0);
+    say(failures ? "READERS FAIL\n" : "READERS OK\n");
+    return failures != 0;
+}
+
 static unsigned char data_code[16] = { 0xC3 };   // ret, in .data
 
 // Returns 1 if the mode was one of these, after the fault (which
@@ -791,6 +1053,20 @@ int main(int argc, char** argv)
         return opendirs_test(argc > 2 ? parse_dec(argv[2]) : 1);
     } else if (isolation_mode(mode, argc, argv)) {
         return 1;
+    } else if (strncmp(mode, "cpubusy", 8) == 0) {
+        return cpubusy_test(argc > 2 ? parse_dec(argv[2]) : 8, argc > 3 ? parse_dec(argv[3]) : 4000);
+    } else if (strncmp(mode, "burn", 5) == 0) {
+        return burn_test(argc > 2 ? parse_dec(argv[2]) : 1000);
+    } else if (strncmp(mode, "stress", 7) == 0) {
+        return stress_test(argc, argv);
+    } else if (strncmp(mode, "quiet", 6) == 0) {
+        return (int)(argc > 2 ? parse_dec(argv[2]) : 0);
+    } else if (strncmp(mode, "spawner", 8) == 0) {
+        return spawner_test(argc > 2 ? parse_dec(argv[2]) : 1);
+    } else if (strncmp(mode, "readers", 8) == 0) {
+        return readers_test(argc, argv);
+    } else if (strncmp(mode, "reader", 7) == 0) {
+        return reader_test(argc > 2 ? parse_dec(argv[2]) : 1, argc, argv);
     } else if (strncmp(mode, "spin", 5) == 0) {
         return spin_test(argc > 2 ? argv[2] : "?", argc > 3 ? parse_dec(argv[3]) : 5);
     } else if (strncmp(mode, "sleep", 6) == 0) {

@@ -8,6 +8,7 @@
 #include "io/pit.h"                  // pit_ticks
 #include "memory/memory.h"           // L174 - memcpy for listener clone
 #include "memory/heap/kheap.h"       // L174 - kzalloc / kfree for listeners
+#include "graphics/graphics.h"       // gfx_lock
 
 static struct keyboard* keyboard_list_head = 0;
 static struct keyboard* keyboard_list_last = 0;
@@ -88,6 +89,11 @@ static struct process* keyboard_target(void){
     return owner ? owner : process_foreground();
 }
 
+// The graphics lock (focus, listeners) and, inside it,
+// the process lock (target, ring, wakeup), so the target cannot exit
+// under us and a getkey_block cannot miss the wakeup.
+static void keyboard_push_locked(char c);
+
 void keyboard_push(char c){
     // Reject 0 here: keyboard_pop returns 0 to signal "buffer empty", so
     // legitimately storing a 0 in the buffer would be indistinguishable
@@ -95,13 +101,20 @@ void keyboard_push(char c){
     if(c == 0){
         return;
     }
+    gfx_lock();
+    keyboard_push_locked(c);
+    gfx_unlock();
+}
 
+static void keyboard_push_locked(char c){
+    process_lock();
     struct process* process = keyboard_target();
     if(!process){
         // Nobody to read it (for one, after the last process
         // has exited); say so, so the idle system visibly answers.
         // Quiet before the timer has ticked: the boot self-test
         // pushes a key with no process around.
+        process_unlock();
         if(!pit_ticks()){
             return;
         }
@@ -118,6 +131,7 @@ void keyboard_push(char c){
     // instead and count it.
     if(keyboard_buffer_used(process) >= (int)sizeof(process->keyboard.buffer)){
         keyboard_dropped++;
+        process_unlock();
         return;
     }
 
@@ -130,6 +144,7 @@ void keyboard_push(char c){
     if(task && task->state == TASK_BLOCKED && task->block_reason == TASK_BLOCK_KEY){
         task_wake(task);
     }
+    process_unlock();
 
     // Lecture 174 - fan the keypress out to anyone registered on
     // the default keyboard.

@@ -247,7 +247,13 @@ typedef enum {
     BM_FEATURE_DISK_IRQ_PATA  = 186, // PATA completions taken at IRQ14/15
     BM_FEATURE_DISK_IRQ_POLLED = 187, // waits that found the completion by polling
 
-    BM_STAGE_MAX              = 188,
+    // SMP (src/cpu/smp.c, smp_selftest.c).
+    BM_STAGE_SMP_CPUS         = 188, // value = CPUs online after AP start-up
+    BM_FEATURE_SMP_SELFTEST   = 189, // IPI call, TLB shootdown, locks across CPUs (1 = pass)
+    BM_FEATURE_DISK_IRQ_AP    = 190, // disk completions an AP waited for and took itself
+    BM_FEATURE_DISK_IRQ_OTHER_CPU = 191, // completions whose interrupt another CPU took
+
+    BM_STAGE_MAX              = 196,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.

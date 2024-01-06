@@ -62,6 +62,10 @@ enum SystemCommands {
     SYSTEM_COMMAND48_TIME = 48,    // long time(void), unix seconds
     SYSTEM_COMMAND49_SHUTDOWN,     // void shutdown(void), does not return
     SYSTEM_COMMAND50_REBOOT,       // void reboot(void), does not return
+    // What the CPUs and the heap are doing, for tests.
+    SYSTEM_COMMAND51_CPU_STATS,    // long cpu_stats(struct cpu_stat* out, long max): CPUs online
+    SYSTEM_COMMAND52_MEM_STATS,    // long mem_stats(struct kheap_stats* out)
+    SYSTEM_COMMAND53_CPU_CURRENT,  // long cpu_current(void): index of the CPU running the caller
 };
 
 void isr80h_register_commands();

@@ -8,6 +8,10 @@
 #include "status.h"
 #include "io/pit.h"
 #include "io/apic.h"
+#include "cpu/percpu.h"
+#include "cpu/smp.h"
+#include "isr80h/isr80h.h"
+#include "graphics/graphics.h"
 
 // 256 gates; x86 has no more vectors (the book sized it 512).
 struct idt_desc  idt_descriptors[SAMOS_TOTAL_INTERRUPTS];
@@ -112,7 +116,11 @@ static void idt_exception(struct trap_frame* frame, int from_user){
 // wake sleepers, preempt a ring-3 task if another one is ready; a
 // tick in ring 0 (the idle loop) never switches here.
 void idt_clock(struct trap_frame* frame){
-    pit_tick();
+    // Every CPU has its own LAPIC timer; the tick count is
+    // the BSP's.
+    if(this_cpu()->index == 0){
+        pit_tick();
+    }
     task_tick(frame);
 }
 
@@ -156,6 +164,15 @@ void interrupt_handler(struct trap_frame* frame){
     int from_user = (frame->cs & 3) == 3;
 
     if(vector < 32){
+        // An NMI or a fault can land between a
+        // swapgs and its iretq; and an NMI during a panic is the
+        // other CPU telling this one to stop.
+        if(!from_user){
+            smp_fix_gs();
+        }
+        if(vector == 2 && smp_nmi_stop()){
+            return;
+        }
         idt_exception(frame, from_user);
         return;
     }
@@ -195,6 +212,8 @@ void interrupt_handler(struct trap_frame* frame){
         lapic_eoi();
     }
     if(from_user){
+        // A kill from another CPU takes effect here.
+        task_check_killed();
         task_page();
     }
 }
@@ -244,7 +263,17 @@ void* isr80h_handle_command(int command, struct trap_frame* frame){
     if(!command_func){
         return 0;
     }
+    // The window and graphics syscalls run under the
+    // graphics lock as a whole; none of them blocks.
+    bool gfx = command >= SYSTEM_COMMAND16_WINDOW_CREATE &&
+               command <= SYSTEM_COMMAND24_UPDATE_WINDOW;
+    if(gfx){
+        gfx_lock();
+    }
     result = command_func(frame);
+    if(gfx){
+        gfx_unlock();
+    }
     return result;
 }
 
@@ -254,6 +283,7 @@ void* isr80h_handle_command(int command, struct trap_frame* frame){
 void isr80h_handler(struct trap_frame* frame){
     kernel_page();
     task_current_save_state(frame);
+    task_check_killed();
     frame->rax = (uint64_t)isr80h_handle_command((int)frame->rax, frame);
     task_page();
 }
@@ -276,6 +306,13 @@ void idt_init(){
     idt_register_interrupt_callback(IDT_IRQ_BASE, idt_clock);
     // The LAPIC timer, when kernel_main starts it.
     idt_register_interrupt_callback(APIC_VECTOR_TIMER, idt_clock);
+    // TLB shootdown, reschedule and cross-CPU call IPIs.
+    smp_register_ipis();
 
+    idt_load(&idtr_descriptor);
+}
+
+// An AP loads the IDT the BSP built.
+void idt_load_cpu(void){
     idt_load(&idtr_descriptor);
 }

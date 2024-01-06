@@ -29,7 +29,9 @@ void* isr80h_command1_print(struct trap_frame* frame){
 }
 
 void* isr80h_command2_getkey(struct trap_frame* frame){
+    process_lock();
     char c = keyboard_pop();
+    process_unlock();
     // Lecture 54 - cast widened to intptr_t so 'c' (a char with
     // its sign extended through int) doesn't trigger the int-to-
     // pointer-of-different-size diagnostic on x86_64.
@@ -39,10 +41,16 @@ void* isr80h_command2_getkey(struct trap_frame* frame){
 // Int getkey_block(void): like getkey, but a task with no key
 // waiting blocks until keyboard_push hands its process one.
 // The user library polled getkey with a 1 ms udelay instead.
+// Pop and block under the process lock, which keyboard_push
+// holds to push and wake, so a key cannot slip in between.
 void* isr80h_command32_getkey_block(struct trap_frame* frame){
+    process_lock();
     char c = keyboard_pop();
     if(c == 0){
         task_block(task_current(), TASK_BLOCK_KEY);
+    }
+    process_unlock();
+    if(c == 0){
         task_next();
     }
     return (void*)((intptr_t)c);

@@ -22,7 +22,9 @@
 # bin/os.img and guest writes are discarded.
 #
 # Knobs (environment): E2E_MACHINE (pc|q35, default pc), E2E_MEM
-# (default 512M), E2E_EXTRA_QEMU_ARGS, E2E_KEEP=1 to keep E2E_TMP.
+# (default 512M), E2E_SMP (CPUs, default 1; above 1 QEMU runs one
+# host thread per vCPU, -accel tcg,thread=multi), E2E_EXTRA_QEMU_ARGS,
+# E2E_KEEP=1 to keep E2E_TMP.
 #
 # Magic layout (see src/bootmarker.h):
 #   bits 63..32 : 0xB007C0DE (BOOT_MARKER_MAGIC_PREFIX)
@@ -46,8 +48,8 @@ E2E_DUMP="$E2E_TMP/markers.bin"
 E2E_SERIAL="$E2E_TMP/serial.log"
 E2E_QEMU_LOG="$E2E_TMP/qemu.log"
 
-# Marker region is BM_STAGE_MAX (188) * 8 = 1504 bytes; round to 1536.
-E2E_MARKER_REGION_SIZE=1536
+# Marker region is BM_STAGE_MAX (196) * 8 = 1568 bytes; round to 1600.
+E2E_MARKER_REGION_SIZE=1600
 
 e2e_log() { echo "[e2e] $*" >&2; }
 e2e_fail() {
@@ -71,11 +73,14 @@ e2e_select_image() {
 # Build the standard QEMU command line into the E2E_QEMU_ARGS array.
 e2e_qemu_args() {
     e2e_select_image
+    local smp=${E2E_SMP:-1} accel=tcg
+    [ "$smp" -gt 1 ] && accel=tcg,thread=multi
     E2E_QEMU_ARGS=(
         -machine "${E2E_MACHINE:-pc}"
         -cpu Skylake-Server
         -m "${E2E_MEM:-512M}"
-        -accel tcg
+        -smp "$smp"
+        -accel "$accel"
         -bios "$E2E_OVMF"
         -display none
         -monitor stdio
@@ -219,7 +224,7 @@ expected_stage_byte() { printf '%02x' "$1"; }
 # "yes/no" but a trace of how far boot got.
 dump_marker_summary() {
     local s hi
-    for ((s=1; s<188; s++)); do
+    for ((s=1; s<196; s++)); do
         hi=$(marker_high "$s")
         if [ "$hi" = "$(expected_high)" ]; then
             local v

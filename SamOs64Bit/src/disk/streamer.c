@@ -148,7 +148,26 @@ int diskstreamer_seek(struct disk_stream* stream, int64_t pos){
     return 0;
 }
 
+// The stream calls below run under the disk lock,
+// which also guards the sector caches.
+static int diskstreamer_read_locked(struct disk_stream* stream, void* out, int total);
+static int diskstreamer_write_locked(struct disk_stream* stream, const void* in, int total);
+
 int diskstreamer_read(struct disk_stream* stream, void* out, int total){
+    spin_lock(&disk_lock);
+    int res = diskstreamer_read_locked(stream, out, total);
+    spin_unlock(&disk_lock);
+    return res;
+}
+
+int diskstreamer_write(struct disk_stream* stream, const void* in, int total){
+    spin_lock(&disk_lock);
+    int res = diskstreamer_write_locked(stream, in, total);
+    spin_unlock(&disk_lock);
+    return res;
+}
+
+static int diskstreamer_read_locked(struct disk_stream* stream, void* out, int total){
     char* dst = out;
     int64_t ss = stream->sector_size;
     if(total < 0){
@@ -193,7 +212,7 @@ int diskstreamer_read(struct disk_stream* stream, void* out, int total){
     return 0;
 }
 
-int diskstreamer_write(struct disk_stream* stream, const void* in, int total){
+static int diskstreamer_write_locked(struct disk_stream* stream, const void* in, int total){
     const char* src = in;
     int64_t ss = stream->sector_size;
     if(total < 0){
