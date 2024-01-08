@@ -16,10 +16,12 @@ struct filesystem* fat_init(void);
 // has no FAT filesystem.
 int  fat_type(struct disk* disk);
 
-// Timestamps written into new and modified entries, in DOS
-// format. There is no RTC driver yet, so this defaults to
-// a fixed date; the RTC code should call this once at boot.
+// Timestamps written into new and modified entries. Each one asks
+// the time source (seconds since 1970, or -1; the kernel passes
+// rtc_unix_time at boot) and falls back to the fixed DOS date and
+// time set here, a built-in date by default.
 void fat_set_clock(uint16_t dos_date, uint16_t dos_time);
+void fat_set_time_source(int64_t (*now)(void));
 
 // Checks the packed on-disk struct sizes; 1 when all match.
 int  fat_check_sizes(void);

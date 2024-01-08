@@ -1,14 +1,12 @@
-// Lecture 137 - PS/2 mouse driver init path (SOURCE-ONLY).
+// Lecture 137 - PS/2 mouse driver init path.
 //
 // Wires the PS/2 controller's second port, registers an IRQ12
 // callback, runs the standard reset/self-test/enable streaming
 // handshake, and binds the per-mouse private struct.
 //
-// Forward-decl `ps2_mouse_handle_interrupt` because L138 lands
-// it. Source-only at L137 since:
-//   - the interrupt handler is missing;
-//   - mouse.o (its caller of mouse_register) is not yet in
-//     FILES.
+// Forward-decl `ps2_mouse_handle_interrupt`, defined below (L138).
+// Source-only at L137 (no interrupt handler, and mouse.o was not
+// in FILES); both landed, ps2mouse.o is linked.
 
 #include "mouse/ps2mouse.h"
 #include "idt/irq.h"

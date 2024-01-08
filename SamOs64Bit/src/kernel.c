@@ -50,6 +50,7 @@
 #include "cpu/cpu.h"              // CPUID checks, CR0/CR4/EFER
 #include "acpi/acpi.h"            // ACPI tables, shutdown, reboot
 #include "io/rtc.h"               // Wall-clock time
+#include "fs/fat/fat.h"           // RTC time for FAT timestamps
 #include "io/apic.h"              // LAPIC, IOAPIC, LAPIC timer
 #include "cpu/percpu.h"           // Per-CPU data
 #include "cpu/smp.h"              // APs, IPIs, panic stop
@@ -385,6 +386,7 @@ void kernel_main(void)
     // interrupt controllers; the RTC needs the FADT century register.
     acpi_init(samos_boot_info_ptr->acpi_rsdp);
     rtc_init();
+    fat_set_time_source(rtc_unix_time);   // File timestamps
 
     // Lecture 87 - bring up the graphics subsystem. The struct
     // was filled in by long-mode entry from the UEFI handoff

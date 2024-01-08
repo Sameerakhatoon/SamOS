@@ -204,8 +204,10 @@ struct fat_file {
     struct fat_scan* scan;           // directories opened for readdir
 };
 
+// Fallback timestamp, used when no time source is set or it fails.
 static uint16_t fat_clock_date = ((2026 - 1980) << 9) | (10 << 5) | 16;
 static uint16_t fat_clock_time = (12 << 11);
+static int64_t (*fat_time_source)(void);
 
 static int   fat_resolve(struct disk* disk);
 static void* fat_open(struct disk* disk, struct path_part* path, FILE_MODE mode);
@@ -245,6 +247,40 @@ struct filesystem* fat_init(void){
 void fat_set_clock(uint16_t dos_date, uint16_t dos_time){
     fat_clock_date = dos_date;
     fat_clock_time = dos_time;
+}
+
+void fat_set_time_source(int64_t (*now)(void)){
+    fat_time_source = now;
+}
+
+// The time now in DOS format. FAT stores local time with
+// 2-second resolution and no zone; SamOS takes the clock's time as
+// local. Years outside DOS's 1980-2107 fall back to the fixed clock.
+static void fat_now(uint16_t* dos_date, uint16_t* dos_time){
+    *dos_date = fat_clock_date;
+    *dos_time = fat_clock_time;
+    int64_t t = fat_time_source ? fat_time_source() : -1;
+    if(t < 0){
+        return;
+    }
+    int64_t days = t / 86400;
+    int64_t secs = t % 86400;
+    // Civil date of a day count since 1970-01-01 (Howard Hinnant's
+    // civil_from_days, the inverse of rtc_to_unix).
+    int64_t z   = days + 719468;
+    int64_t era = z / 146097;
+    int64_t doe = z - era * 146097;
+    int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    int64_t mp  = (5 * doy + 2) / 153;
+    int64_t day = doy - (153 * mp + 2) / 5 + 1;
+    int64_t mon = mp < 10 ? mp + 3 : mp - 9;
+    int64_t yr  = yoe + era * 400 + (mon <= 2);
+    if(yr < 1980 || yr > 2107){
+        return;
+    }
+    *dos_date = (uint16_t)(((yr - 1980) << 9) | (mon << 5) | day);
+    *dos_time = (uint16_t)(((secs / 3600) << 11) | (((secs / 60) % 60) << 5) | ((secs % 60) / 2));
 }
 
 int fat_check_sizes(void){
@@ -1029,11 +1065,13 @@ static int fat_add_entry(struct fat_fs* fs, uint32_t dir, const char* name, uint
     memcpy(item.ext, short11 + 8, 3);
     item.attribute     = attr;
     item.nt_case       = nt_case;
-    item.creation_time = fat_clock_time;
-    item.creation_date = fat_clock_date;
-    item.last_access   = fat_clock_date;
-    item.last_mod_time = fat_clock_time;
-    item.last_mod_date = fat_clock_date;
+    uint16_t now_date, now_time;
+    fat_now(&now_date, &now_time);
+    item.creation_time = now_time;
+    item.creation_date = now_date;
+    item.last_access   = now_date;
+    item.last_mod_time = now_time;
+    item.last_mod_date = now_date;
     fat_item_set_cluster(&item, cluster);
     res = fat_dir_entry_rw(fs, dir, run_start + lfn_entries, &item, true);
     if(res == 0){
@@ -1276,9 +1314,11 @@ static int fat_file_sync_entry(struct fat_file* f){
     }
     fat_item_set_cluster(&item, f->first_cluster);
     item.filesize      = f->size;
-    item.last_mod_date = fat_clock_date;
-    item.last_mod_time = fat_clock_time;
-    item.last_access   = fat_clock_date;
+    uint16_t now_date, now_time;
+    fat_now(&now_date, &now_time);
+    item.last_mod_date = now_date;
+    item.last_mod_time = now_time;
+    item.last_access   = now_date;
     item.attribute    |= FAT_ATTR_ARCHIVE;
     return fat_dir_entry_rw(f->fs, f->parent, f->index, &item, true);
 }
@@ -1778,13 +1818,15 @@ static int fat_mkdir(struct disk* disk, struct path_part* path){
     dots[0].filename[0] = '.';
     dots[1].filename[0] = '.';
     dots[1].filename[1] = '.';
+    uint16_t now_date, now_time;
+    fat_now(&now_date, &now_time);
     for(int i = 0; i < 2; i++){
         dots[i].attribute     = FAT_ATTR_DIRECTORY;
-        dots[i].creation_time = fat_clock_time;
-        dots[i].creation_date = fat_clock_date;
-        dots[i].last_access   = fat_clock_date;
-        dots[i].last_mod_time = fat_clock_time;
-        dots[i].last_mod_date = fat_clock_date;
+        dots[i].creation_time = now_time;
+        dots[i].creation_date = now_date;
+        dots[i].last_access   = now_date;
+        dots[i].last_mod_time = now_time;
+        dots[i].last_mod_date = now_date;
     }
     fat_item_set_cluster(&dots[0], cluster);
     fat_item_set_cluster(&dots[1], parent == fs->root_id ? 0 : parent);

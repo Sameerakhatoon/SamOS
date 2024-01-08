@@ -1,4 +1,4 @@
-// Lecture 119 - Window source part 1 (NOT YET LINKED).
+// Lecture 119 - Window source part 1.
 //
 // First slice of the window subsystem. Lands the module
 // globals (windows vector, close-icon image, focus + drag
@@ -6,12 +6,10 @@
 // window_system_initialize_stage2, and the first half of
 // window_create.
 //
-// Source-only at this lecture because:
-//   - window_create falls off the end without a return; L120
-//     finishes the body and adds `return window;`.
-//   - L120-L123 add more code that this file references.
-//
-// We mirror upstream by NOT putting window.o in FILES yet.
+// Source-only at L119 (window_create fell off the end without a
+// return, and L120-L123 add code this file references), as
+// upstream. Both landed: window_create returns its window and
+// window.o is in FILES.
 
 #include "graphics/window.h"
 #include "graphics/graphics.h"
@@ -626,12 +624,9 @@ int window_position_set(struct window* window, size_t new_x, size_t new_y){
 
 // Lecture 119 (part 1 of window_create).
 //
-// Upstream bug preserved verbatim: this function returns
-// struct window* but falls off the end without ever returning
-// it. The L120 commit appends the remaining layout work and a
-// `return window;` at the bottom. We keep the open shape so the
-// per-commit diff against upstream stays linear; the file is
-// not yet in FILES so the missing return is inert.
+// At L119 upstream this fell off the end without returning the
+// window; L120 appended the remaining layout work and the
+// `return window;` at the bottom.
 struct window* window_create(struct graphics_info* graphics_info,
                              struct font* font,
                              const char* title,

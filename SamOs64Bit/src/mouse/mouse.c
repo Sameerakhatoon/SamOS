@@ -1,4 +1,4 @@
-// Lecture 132 - mouse abstraction (SOURCE-ONLY).
+// Lecture 132 - mouse abstraction.
 //
 // Hosts the loaded mouse drivers in a vector, drives the
 // per-mouse register / position_set / click / moved walks.
@@ -6,8 +6,8 @@
 // Source-only at L132 because mouse_register references:
 //   - window_terminal(window)         (lands in L145)
 //   - window_position_set(window,...) (lands in L134)
-// The PS/2 driver registration is also a TODO. Until those
-// land mouse.o would not link, so the Makefile is unchanged.
+// and the PS/2 driver registration was a TODO. All of it has
+// landed (the usability work registers the PS/2 driver); mouse.o is in FILES.
 
 #include "mouse/mouse.h"
 #include "lib/vector/vector.h"

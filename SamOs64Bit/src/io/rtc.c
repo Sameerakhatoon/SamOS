@@ -12,7 +12,13 @@
 #include "io/io.h"
 #include "io/serial.h"
 #include "acpi/acpi.h"
+#include "lib/spinlock/spinlock.h"
 #include "status.h"
+
+// The index/data port pair is one register window: two CPUs reading
+// at once (time() and a FAT timestamp) would read each
+// other's registers.
+static struct spinlock rtc_lock = SPINLOCK_INIT("rtc", LOCK_LEVEL_RTC, 0);
 
 #define CMOS_INDEX   0x70
 #define CMOS_DATA    0x71
@@ -59,7 +65,7 @@ static int bcd(uint8_t v){
     return (v & 0x0F) + (v >> 4) * 10;
 }
 
-int rtc_read(struct rtc_time* t){
+static int rtc_read_locked(struct rtc_time* t){
     uint8_t century_reg = acpi_info()->century_reg;
     struct rtc_raw a, b;
     if(rtc_read_raw(&a, century_reg) < 0){
@@ -111,6 +117,13 @@ int rtc_read(struct rtc_time* t){
         return -EIO;
     }
     return 0;
+}
+
+int rtc_read(struct rtc_time* t){
+    spin_lock(&rtc_lock);
+    int res = rtc_read_locked(t);
+    spin_unlock(&rtc_lock);
+    return res;
 }
 
 // Days since 1970-01-01 of a civil date (Howard Hinnant's algorithm,

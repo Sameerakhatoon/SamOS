@@ -36,6 +36,7 @@ enum lock_level {
     LOCK_LEVEL_KMEM    = 60,   // PFA, multiheap, slabs, kernel-half page tables
     LOCK_LEVEL_IOAPIC  = 65,   // IOAPIC register pair
     LOCK_LEVEL_SMP     = 70,   // TLB shootdown and cross-CPU calls, one at a time
+    LOCK_LEVEL_RTC     = 75,   // CMOS RTC index/data port pair
     LOCK_LEVEL_SERIAL  = 80,   // COM1
 };
 

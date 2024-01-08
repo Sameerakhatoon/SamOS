@@ -161,7 +161,7 @@ void* isr80h_command42_unlink(struct trap_frame* frame){
     return file_remove(frame, 0);
 }
 
-// rdi = path. -EEXIST, -ENOTDIR, or -ENOENT for a missing parent.
+// rdi = path. -EEXIST, -ENOTDIR, or -EBADPATH for a missing parent.
 void* isr80h_command43_mkdir(struct trap_frame* frame){
     char path[SAMOS_MAX_PATH];
     long res = file_user_path(task_current()->process, path, isr80h_arg(frame, 0));

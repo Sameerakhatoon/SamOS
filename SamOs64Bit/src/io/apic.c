@@ -1,14 +1,19 @@
 // LAPIC, IOAPIC and the LAPIC timer. Not in the book.
 //
 // Bring-up order (apic_init, BSP, interrupts off):
-//   1. 8259s re-initialised to vectors 0x30-0x3F and fully masked, so
+//   1. Every IOAPIC entry masked as each IOAPIC is mapped.
+//   2. 8259s re-initialised to vectors 0x30-0x3F and fully masked, so
 //      a spurious 8259 IRQ cannot alias an IOAPIC vector (0x20-0x2F).
-//   2. LAPIC: global enable in IA32_APIC_BASE, spurious vector 0xFF
-//      with the software-enable bit, TPR 0, LINT0 masked (no ExtINT
-//      once the 8259 is gone), LINT1 as the MADT's LAPIC NMI says.
-//   3. Every IOAPIC entry masked, then ISA IRQs 0-15 routed to vector
-//      0x20 + irq on this CPU with the override's polarity and
-//      trigger, still masked: IRQ_enable unmasks one.
+//   3. LAPIC (lapic_init_cpu, also run by each AP): global enable in
+//      IA32_APIC_BASE, spurious vector 0xFF with the software-enable
+//      bit, TPR 0, timer, LINT0, LINT1 and error LVTs masked (no
+//      ExtINT once the 8259 is gone). Then each MADT LAPIC NMI entry
+//      for this CPU's UID (or 0xFF, all CPUs) sets its LINT pin to NMI
+//      delivery with the entry's polarity and trigger; a pin with no
+//      entry stays masked.
+//   4. ISA IRQs 0-15 routed to vector 0x20 + irq on this CPU with the
+//      override's polarity and trigger, still masked: IRQ_enable
+//      unmasks one.
 // MMIO goes through the direct map (paging_map_mmio, uncached).
 
 #include "io/apic.h"
