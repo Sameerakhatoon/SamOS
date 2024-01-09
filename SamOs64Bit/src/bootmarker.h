@@ -78,8 +78,13 @@ typedef enum {
     BM_FEATURE_VECTOR_OPS     = 26,  // vector_new + push + at + free works
     BM_FEATURE_PAGING_LOOKUP  = 27,  // paging_get_physical_address roundtrips a known mapping
     BM_FEATURE_KZALLOC_ZERO   = 28,  // kzalloc returns memory that reads as zero
+    BM_FEATURE_CPUID_VENDOR   = 29,  // cpuid leaf 0 returns a non-zero vendor signature
+    // slot 30 reserved (disk_streamer probe; folded into fs_io)
+    BM_FEATURE_KREALLOC_RT    = 31,  // krealloc(p, larger) preserves prefix bytes
+    BM_FEATURE_STREAMER_CACHE = 32,  // diskstreamer_cache_new returns non-NULL
+    BM_FEATURE_FS_PARSE_PATH  = 33,  // pathparser_parse("@:/X") returns root + first part
 
-    BM_STAGE_MAX              = 29,
+    BM_STAGE_MAX              = 34,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.
