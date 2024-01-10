@@ -19,6 +19,7 @@
 #include "io/cpuid.h"
 #include "fs/pparser.h"
 #include "disk/streamer.h"
+#include "graphics/graphics.h"
 #include "lib/vector/vector.h"
 #include "kernel.h"
 
@@ -201,6 +202,42 @@ static void selftest_streamer_cache(void) {
     // owns the only one. Leak here is intentional and bounded.
 }
 
+// E820 memory map must have at least one entry (UEFI / BIOS
+// always returns at least one usable region).
+static void selftest_e820_entries(void) {
+    size_t n = e820_total_entries();
+    if (n > 0) mark_pass(BM_FEATURE_E820_ENTRIES);
+    else        mark_fail(BM_FEATURE_E820_ENTRIES);
+}
+
+// And total accessible memory must be > 1 MiB.
+static void selftest_e820_accessible(void) {
+    size_t total = e820_total_accessible_memory();
+    if (total > (1024 * 1024)) mark_pass(BM_FEATURE_E820_ACCESS);
+    else                        mark_fail(BM_FEATURE_E820_ACCESS);
+}
+
+// disk_get(0) must return a non-NULL disk.
+static void selftest_disk_enum(void) {
+    struct disk* d = disk_get(0);
+    if (d) mark_pass(BM_FEATURE_DISK_ENUM);
+    else   mark_fail(BM_FEATURE_DISK_ENUM);
+}
+
+// graphics_screen_info() returns the root graphics_info.
+static void selftest_graphics_fb(void) {
+    struct graphics_info* g = graphics_screen_info();
+    if (g) mark_pass(BM_FEATURE_GRAPHICS_FB);
+    else   mark_fail(BM_FEATURE_GRAPHICS_FB);
+}
+
+// And its width / height must be sane.
+static void selftest_graphics_size(void) {
+    struct graphics_info* g = graphics_screen_info();
+    if (g && g->width > 0 && g->height > 0) mark_pass(BM_FEATURE_GRAPHICS_SIZE);
+    else                                      mark_fail(BM_FEATURE_GRAPHICS_SIZE);
+}
+
 // Path parser splits "@:/BLANK.ELF" into a root + a single part.
 static void selftest_fs_parse_path(void) {
     struct path_root* r = pathparser_parse("@:/BLANK.ELF", 0);
@@ -225,5 +262,10 @@ int kernel_selftest(void) {
     selftest_krealloc();
     selftest_streamer_cache();
     selftest_fs_parse_path();
+    selftest_e820_entries();
+    selftest_e820_accessible();
+    selftest_disk_enum();
+    selftest_graphics_fb();
+    selftest_graphics_size();
     return 0;
 }
