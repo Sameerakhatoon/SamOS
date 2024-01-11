@@ -31,6 +31,7 @@ global samos_fread:function    ; L107
 global samos_fseek:function    ; L111
 global samos_fstat:function    ; L112
 global samos_realloc:function  ; L115
+global samos_e2e_mark:function ; SamOs e2e: marker write
 
 ; void print(const char* msg)
 print:
@@ -172,6 +173,17 @@ samos_realloc:
     mov  rax, 15           ; SYSTEM_COMMAND15_REALLOC
     push qword rsi         ; new_size (item 1)
     push qword rdi         ; old_ptr  (item 0)
+    int  0x80
+    add  rsp, 16
+    ret
+
+; SamOs e2e: int samos_e2e_mark(uint32_t slot, uint32_t value)
+;   rdi = slot, rsi = value
+; Stack item 0 = value, item 1 = slot.
+samos_e2e_mark:
+    mov  rax, 26           ; SYSTEM_COMMAND26_E2E_MARK
+    push qword rdi         ; slot  (item 1)
+    push qword rsi         ; value (item 0)
     int  0x80
     add  rsp, 16
     ret

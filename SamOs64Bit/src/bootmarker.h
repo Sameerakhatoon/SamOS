@@ -89,7 +89,24 @@ typedef enum {
     BM_FEATURE_GRAPHICS_FB    = 37,  // graphics_screen_info() returns non-NULL
     BM_FEATURE_GRAPHICS_SIZE  = 38,  // screen info has width>0 + height>0
 
-    BM_STAGE_MAX              = 39,
+    // User-side feature slots written by the selftest ELF via
+    // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
+    // BM_USER_FEATURE_BASE; entries below are kernel-only and
+    // user writes are rejected by the syscall handler.
+    BM_USER_FEATURE_BASE      = 40,
+    BM_USER_FOPEN             = 40,  // user fopen("@:/BLANK.ELF") > 0
+    BM_USER_FREAD_ELF         = 41,  // user fread(4) returns ELF magic
+    BM_USER_FSTAT_SIZE        = 42,  // user fstat reports size > 0
+    BM_USER_FSEEK_ZERO        = 43,  // user fseek(0) succeeds
+    BM_USER_FCLOSE_OK         = 44,  // user fclose returns 0
+    BM_USER_MALLOC_FREE       = 45,  // user malloc/free round trip
+    BM_USER_REALLOC_GROW      = 46,  // user realloc preserves prefix
+    BM_USER_GETPID_OR_SELF    = 47,  // reserved
+    BM_USER_INT80_REACHABLE   = 48,  // first slot the user ELF writes
+    BM_USER_TSC_UDELAY        = 49,  // udelay(1000) advances TSC
+    BM_USER_TSC_MONOTONIC     = 50,  // two TSC reads with gap differ
+
+    BM_STAGE_MAX              = 64,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.

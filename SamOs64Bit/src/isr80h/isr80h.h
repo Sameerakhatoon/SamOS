@@ -28,6 +28,17 @@ enum SystemCommands {
     SYSTEM_COMMAND23_WINDOW_REDRAW_REGION, // L172 - userspace body-region redraw
     SYSTEM_COMMAND24_UPDATE_WINDOW, // L173 - userspace update window field
     SYSTEM_COMMAND25_UDELAY, // L198 - userspace udelay / task sleep
+
+    // SamOs e2e (Phase 2): userspace -> kernel marker write so
+    // a user-side selftest ELF can report feature pass/fail back
+    // into the boot-marker region at 0x6000. Stack arg layout:
+    //   item 0 = value (uint32_t)
+    //   item 1 = slot  (uint32_t, must be >= 40, < BM_STAGE_MAX)
+    // Returns 0 on success, -1 if slot is out of the user-write
+    // window. The kernel deliberately restricts user writes to
+    // slots 40..BM_STAGE_MAX-1 so a userspace bug cannot stomp
+    // on kernel-side checkpoints (1..28).
+    SYSTEM_COMMAND26_E2E_MARK,
 };
 
 void isr80h_register_commands();
