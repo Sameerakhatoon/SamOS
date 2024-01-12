@@ -101,9 +101,9 @@ sudo cp ./SamOs64Bit/programs/blank/blank.elf /tmp/samos-mnt/BLANK.ELF || true
 sudo cp ./SamOs64Bit/programs/shell/shell.elf /tmp/samos-mnt/SHELL.ELF || true
 sudo umount /tmp/samos-mnt
 
-# Also stage BLANK.ELF and SHELL.ELF onto the SAMOS partition (p2)
-# so kernel-side `fopen("@:/BLANK.ELF")` resolves regardless of
-# which FAT partition the kernel's disk driver picks as primary.
+# Also stage the ELF programs onto the SAMOS partition (p2) so
+# kernel-side `fopen("@:/BLANK.ELF")` resolves regardless of which
+# FAT partition the kernel's disk driver picks as primary.
 sudo mount -t vfat "${LOOPDEV}p2" /tmp/samos-mnt
 sudo cp ./SamOs64Bit/programs/blank/blank.elf /tmp/samos-mnt/BLANK.ELF || true
 sudo cp ./SamOs64Bit/programs/shell/shell.elf /tmp/samos-mnt/SHELL.ELF || true
