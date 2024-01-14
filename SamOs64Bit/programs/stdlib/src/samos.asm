@@ -32,6 +32,7 @@ global samos_fseek:function    ; L111
 global samos_fstat:function    ; L112
 global samos_realloc:function  ; L115
 global samos_e2e_mark:function ; SamOs e2e: marker write
+global samos_udelay:function   ; L198 - userspace udelay / task sleep
 
 ; void print(const char* msg)
 print:
@@ -186,4 +187,16 @@ samos_e2e_mark:
     push qword rsi         ; value (item 0)
     int  0x80
     add  rsp, 16
+    ret
+
+; Lecture 198 - void samos_udelay(uint64_t microseconds)
+;   rdi = microseconds
+; Marks the current task asleep for `microseconds` and yields.
+; The kernel's task_next never returns here directly; the IRQ
+; timer wakes us up later and execution resumes after int 0x80.
+samos_udelay:
+    mov  rax, 25           ; SYSTEM_COMMAND25_UDELAY
+    push qword rdi         ; microseconds (item 0)
+    int  0x80
+    add  rsp, 8
     ret

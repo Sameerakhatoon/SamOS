@@ -22,6 +22,7 @@ enum {
     USER_MALLOC_FREE  = 45,
     USER_REALLOC_GROW = 46,
     USER_INT80_REACH  = 48,
+    USER_UDELAY_RETURNS = 49,  // udelay returns control to userland
 };
 
 int main(int argc, char** argv){
@@ -104,6 +105,14 @@ int main(int argc, char** argv){
         samos_e2e_mark(USER_FCLOSE_OK,  0);
         printf("File blank.elf opened failed\n");
     }
+
+    // L198 userspace udelay: ask the kernel to put us to sleep
+    // briefly, then mark on resume. If the IRQ timer + scheduler
+    // never wakes us, the marker never lands and the e2e harness
+    // sees the slot stay zero. 100 us is short enough to not eat
+    // wallclock and long enough that the scheduler must run.
+    samos_udelay(100);
+    samos_e2e_mark(USER_UDELAY_RETURNS, 1);
 
     while(1){
     }
