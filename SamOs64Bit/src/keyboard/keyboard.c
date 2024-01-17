@@ -1,5 +1,6 @@
 #include "keyboard.h"
 #include "classic.h"
+#include "virtio_input.h"
 #include "status.h"
 #include "kernel.h"
 #include "task/process.h"
@@ -33,6 +34,9 @@ unsigned int keyboard_dropped_count(void){
 
 void keyboard_init(){
     keyboard_insert(classic_init());
+    // virtio-input keyboards feed the same translator and
+    // keyboard_push; PS/2 stays the default keyboard.
+    virtio_input_init();
 }
 
 int keyboard_insert(struct keyboard* keyboard){

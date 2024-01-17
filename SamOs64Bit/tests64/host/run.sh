@@ -42,3 +42,20 @@ fi
 gcc -O1 -g -std=gnu99 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all \
     -I"$root/src" -o "$out/fdt_test" "$here/fdt_test.c" "$root/src/firmware/fdt.c"
 "$out/fdt_test" "$here/fixtures"
+
+# virtio core and virtio-mmio transport against a fake MMIO block
+# device (x86 QEMU has no virtio-mmio), plus the virtio-input key map.
+vflags="-std=gnu99 -fno-builtin -Wall -Wextra -Werror -Wno-unused-parameter -DVIRTIO_HOST_TEST -I$root/src"
+gcc -O1 -g $vflags -fsanitize=address,undefined -fno-sanitize-recover=all -o "$out/virtio_test" \
+    "$here/virtio_test.c" "$root/src/virtio/virtio.c" "$root/src/virtio/virtio_mmio.c" \
+    "$root/src/keyboard/virtio_input.c"
+"$out/virtio_test"
+# The transport-independent part builds freestanding for the two other
+# ports (no x86 instruction, no port I/O).
+for cc in aarch64-linux-gnu-gcc riscv64-linux-gnu-gcc; do
+    command -v "$cc" >/dev/null 2>&1 || continue
+    for f in virtio virtio_mmio; do
+        "$cc" -ffreestanding -O2 $vflags -c "$root/src/virtio/$f.c" -o "$out/$f-$cc.o"
+    done
+    echo "virtio: core and mmio transport build with $cc"
+done

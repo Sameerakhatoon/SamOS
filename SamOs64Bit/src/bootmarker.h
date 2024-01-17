@@ -253,6 +253,10 @@ typedef enum {
     BM_FEATURE_DISK_IRQ_AP    = 190, // disk completions an AP waited for and took itself
     BM_FEATURE_DISK_IRQ_OTHER_CPU = 191, // completions whose interrupt another CPU took
 
+    // virtio (src/virtio/, virtio_blk.c, virtio_input.c): running counts.
+    BM_FEATURE_DISK_IRQ_VIRTIO = 192, // virtio-blk completions taken at the interrupt
+    BM_FEATURE_VIRTIO_INPUT_KEYS = 193, // key events that came in through virtio-input
+
     BM_STAGE_MAX              = 196,
 } boot_marker_stage_t;
 

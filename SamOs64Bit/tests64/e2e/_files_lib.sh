@@ -53,7 +53,12 @@ files_make_disks() {
         printf 'written by linux on fat%s\n' "$v" > "$E2E_TMP/host.txt"
         mcopy -i "$E2E_TMP/fat$v.img" "$E2E_TMP/host.txt" "::HOSTF$v.TXT" || e2e_fail "mcopy host file"
     done
-    if [ "${E2E_MACHINE:-pc}" = q35 ]; then
+    if [ "${FILES_BUS:-}" = virtio ]; then
+        # virtio-blk-pci; its driver registers after PATA and
+        # AHCI, so the drive numbers stay 1: and 2:.
+        E2E_EXTRA_QEMU_ARGS="-drive file=$E2E_TMP/fat16.img,format=raw,if=none,id=f16 -device virtio-blk-pci,drive=f16"
+        E2E_EXTRA_QEMU_ARGS+=" -drive file=$E2E_TMP/fat32.img,format=raw,if=none,id=f32 -device virtio-blk-pci,drive=f32"
+    elif [ "${E2E_MACHINE:-pc}" = q35 ]; then
         E2E_EXTRA_QEMU_ARGS="-drive file=$E2E_TMP/fat16.img,format=raw,if=none,id=f16 -device ide-hd,drive=f16,bus=ide.1"
         E2E_EXTRA_QEMU_ARGS+=" -drive file=$E2E_TMP/fat32.img,format=raw,if=none,id=f32 -device ide-hd,drive=f32,bus=ide.2"
     else

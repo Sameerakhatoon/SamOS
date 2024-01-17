@@ -23,6 +23,7 @@ shell_key_for() {
         '/')  echo slash ;;        '_')  echo shift-minus ;;
         ':')  echo shift-semicolon ;;  '>') echo shift-dot ;;   # Files
         '"')  echo shift-apostrophe ;; '=') echo equal ;;
+        '@')  echo shift-2 ;;      # The hardware layer virtio-input
         *) echo "unmapped key '$c'" >&2; return 1 ;;
     esac
 }

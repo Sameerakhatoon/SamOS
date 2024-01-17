@@ -55,6 +55,8 @@ The driver waits under `disk`, so with interrupts off; `disk_irq_wait` opens the
 
 The IOAPIC sends each line to one CPU, the BSP at boot. A wait on an AP would then rely on the BSP taking the interrupt, and the BSP may be spinning on `disk` (or any lock) with interrupts off: the wait would run into its grace period and, after three in a row, drop to polling for good. So `disk_irq_arm` points the line at the CPU that is about to issue the command (`ioapic_set_dest`, only when it changes). With one `disk` lock there is one waiter per line at a time. `e2e/194` checks this on q35 (AHCI) and pc (PATA) with four CPUs reading at once: APs take their own completions (marker 190), none is taken by another CPU (191) and none is polled (187).
 
+Virtio: virtio-blk is one more driver under `disk` with no lock of its own; virtio-blk disks on one GSI share one wait, like AHCI ports (`e2e/197`, four CPUs). A virtio-input device can share that GSI, so its handler can run inside a disk wait: it only reads its ISR and sends vector 0x48 to the BSP, which the wait's TPR holds off; `keyboard_push` runs there, outside any disk wait.
+
 ## Adding a lock
 
 Pick a level from the table so that everything it is held around comes after it, add a row here, and run the suite once: rule 4 panics at the first acquire in the wrong order.

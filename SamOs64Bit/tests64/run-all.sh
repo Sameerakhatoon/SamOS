@@ -13,7 +13,8 @@
 #   bash tests64/run-all.sh 01- 31-    # a subset by name (host tests still run)
 #   bash tests64/run-all.sh --storage -j 3
 #                                      # also tests64/storage/run.sh
-#                                      # (pc and q35, about 10 min)
+#                                      # (pc, q35 and q35 on virtio-blk,
+#                                      # about 15 min)
 #
 # Build first with ./build.sh at the repo root.
 set -u
@@ -65,7 +66,7 @@ fi
 storage=0
 if [ $storage_wanted -eq 1 ]; then
     echo
-    bash "$here/storage/run.sh" pc q35 2>&1 | tee "$log/storage"
+    bash "$here/storage/run.sh" pc q35 q35-virtio 2>&1 | tee "$log/storage"
     storage=${PIPESTATUS[0]}
     storage_line=$(grep -E '^storage: ' "$log/storage" | tail -n 1 | sed 's/^storage: //')
 fi

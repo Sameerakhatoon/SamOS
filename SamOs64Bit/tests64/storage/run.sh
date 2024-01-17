@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # tests64/storage/run.sh - storage end-to-end test.
 #
-# Usage: bash tests64/storage/run.sh [pc|q35 ...]   (default: pc q35)
+# Usage: bash tests64/storage/run.sh [pc|q35|pc-virtio|q35-virtio ...]
+#        (default: pc q35 q35-virtio)
 #
 # For each machine type it builds fresh scratch images, boots
 # SamOS twice under OVMF, and checks the result:
@@ -26,7 +27,9 @@
 #   5. Host: RESULT2 has no FAIL, fsck.fat is clean again.
 #
 # On pc the four disks are IDE (primary/secondary, master/slave);
-# on q35 they are AHCI ports 0-3.
+# on q35 they are AHCI ports 0-3. A machine written
+# <pc|q35>-virtio (e.g. q35-virtio) puts all four on virtio-blk-pci,
+# booting from the first.
 #
 # Needs: qemu-system-x86_64, OVMF, mtools, dosfstools, gdisk
 # (sgdisk), fdisk (sfdisk), python3; plus a built kernel.bin and
@@ -134,6 +137,12 @@ result_done() {
 
 run_qemu() {
     local machine=$1 tag=$2 result=$3
+    # "<machine>-virtio": the same four disks on virtio-blk-pci.
+    local bus=native
+    if [ "${machine%-virtio}" != "$machine" ]; then
+        bus=virtio
+        machine=${machine%-virtio}
+    fi
     # STORAGE_SMP CPUs (default 1), one host thread each.
     local smp=${STORAGE_SMP:-1} accel=tcg
     [ "$smp" -gt 1 ] && accel=tcg,thread=multi
@@ -144,7 +153,9 @@ run_qemu() {
     local i=0
     for d in boot fat16 fat32 fat12; do
         args+=(-drive "file=$WORK/$d.img,format=raw,if=none,id=d$i")
-        if [ "$machine" = pc ]; then
+        if [ "$bus" = virtio ]; then
+            args+=(-device "virtio-blk-pci,drive=d$i$([ $i -eq 0 ] && echo ,bootindex=0)")
+        elif [ "$machine" = pc ]; then
             args+=(-device "ide-hd,drive=d$i,bus=ide.$((i / 2)),unit=$((i % 2))")
         else
             args+=(-device "ide-hd,drive=d$i,bus=ide.$i")
@@ -181,6 +192,10 @@ check_result() {
     if grep -q '^FAIL' <<<"$out" || ! grep -q 'fail=0$' <<<"$out"; then
         bad "$tag $v: $file reports failures:"
         grep '^FAIL' <<<"$out" | sed 's/^/    /'
+    fi
+    # On a -virtio machine the volume must have gone through virtio-blk.
+    if [ "${tag%%-virtio *}" != "$tag" ] && ! grep -q 'driver=VIRTIO-BLK' <<<"$out"; then
+        bad "$tag $v: not read through virtio-blk"
     fi
     log "$tag $v: $(grep '^INFO' <<<"$out") $(grep '^DONE' <<<"$out")"
 }
@@ -243,7 +258,7 @@ run_machine() {
 
 mkdir -p "$WORK"
 machines=("$@")
-[ ${#machines[@]} -eq 0 ] && machines=(pc q35)
+[ ${#machines[@]} -eq 0 ] && machines=(pc q35 q35-virtio)
 for m in "${machines[@]}"; do
     run_machine "$m"
 done

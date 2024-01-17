@@ -544,18 +544,43 @@ void bus_enable_bus_master(struct pci_device* device){
 // active high: QEMU models PCI INTx as an active-high level, and KVM's
 // in-kernel IOAPIC honours the polarity bit, so active low would
 // storm there. Anything else returns -ENOENT and the driver polls.
+// Two more cases, for the slots QEMU puts -device on:
+//   q35, bus 0 slot n < 25: QEMU's ich9_cc_init sets the D<n>IR default
+//   to INTA-D -> PIRQ E-H rotated by the slot, the same as its _PRT,
+//   so pin p (1-4) is GSI 20 + ((n + p - 1) & 3);
+//   pc (i440FX 8086:1237), bus 0: the PIIX3 swizzle sends pin p of
+//   slot n to PIRQ (n - 1 + p - 1) & 3, and the firmware put the ISA
+//   IRQ for it in PIRQRC A-D (00:01.0, 0x60-0x63); QEMU's MADT has a
+//   level, active-high override for those IRQs (5, 9, 10, 11).
 int pci_intx_gsi(struct pci_device* d, uint16_t* inti_flags){
     uint8_t pin = pci_cfg_read_byte(d->addr.bus, d->addr.slot, d->addr.func,
                                     PCI_HEADER_INTERRUPT_PIN_OFFSET);
-    if(pin < 1 || pin > 4 || d->addr.bus != 0 || d->addr.slot != 0x1F){
+    if(pin < 1 || pin > 4 || d->addr.bus != 0 ||
+       pci_cfg_read_word(0, 0, 0, PCI_HEADER_VENDOR_OFFSET) != 0x8086){
         return -ENOENT;
     }
-    if(pci_cfg_read_word(0, 0, 0, PCI_HEADER_VENDOR_OFFSET) != 0x8086 ||
-       pci_cfg_read_word(0, 0, 0, PCI_HEADER_DEVICE_OFFSET) != 0x29C0){
-        return -ENOENT;
+    uint16_t host = pci_cfg_read_word(0, 0, 0, PCI_HEADER_DEVICE_OFFSET);
+    if(host == 0x29C0){
+        *inti_flags = ACPI_INTI_POLARITY_HIGH | ACPI_INTI_TRIGGER_LEVEL;
+        if(d->addr.slot == 0x1F){
+            return 16 + pin - 1;
+        }
+        return d->addr.slot < 25 ? 20 + ((d->addr.slot + pin - 1) & 3) : -ENOENT;
     }
-    *inti_flags = ACPI_INTI_POLARITY_HIGH | ACPI_INTI_TRIGGER_LEVEL;
-    return 16 + pin - 1;
+    if(host == 0x1237 && d->addr.slot > 1){
+        uint8_t irq = pci_cfg_read_byte(0, 1, 0, 0x60 + ((d->addr.slot - 1 + pin - 1) & 3));
+        if((irq & 0x80) || irq > 15){
+            return -ENOENT;
+        }
+        uint16_t flags = 0;
+        uint32_t gsi = acpi_isa_irq_to_gsi(irq, &flags);
+        if((flags & ACPI_INTI_TRIGGER_MASK) != ACPI_INTI_TRIGGER_LEVEL){
+            return -ENOENT;
+        }
+        *inti_flags = flags;
+        return (int)gsi;
+    }
+    return -ENOENT;
 }
 
 // Clear the command register's INTx Disable bit (10).

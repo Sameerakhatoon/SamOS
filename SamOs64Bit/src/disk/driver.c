@@ -10,6 +10,7 @@
 #include "drivers/pata.h"      // L188 - pata_driver_init
 #include "drivers/nvme.h"      // L195 - nvme_driver_init
 #include "drivers/ahci.h"      // ahci_driver_init
+#include "drivers/virtio_blk.h" // virtio_blk_driver_init
 #include "status.h"
 
 struct vector* disk_driver_vec = NULL;
@@ -28,6 +29,12 @@ int disk_driver_system_load_drivers(){
     }
     // Register the AHCI (SATA) driver for q35 / real PCs.
     res = disk_driver_register(ahci_driver_init());
+    if(res < 0){
+        goto out;
+    }
+    // virtio-blk, after the native controllers so their disk
+    // ids do not move.
+    res = disk_driver_register(virtio_blk_driver_init());
 out:
     return res;
 }

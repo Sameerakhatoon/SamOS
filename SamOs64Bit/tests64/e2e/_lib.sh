@@ -24,7 +24,8 @@
 # Knobs (environment): E2E_MACHINE (pc|q35, default pc), E2E_MEM
 # (default 512M), E2E_SMP (CPUs, default 1; above 1 QEMU runs one
 # host thread per vCPU, -accel tcg,thread=multi), E2E_EXTRA_QEMU_ARGS,
-# E2E_KEEP=1 to keep E2E_TMP.
+# E2E_BOOT_BUS=virtio (boot disk on virtio-blk-pci), E2E_KEEP=1 to keep
+# E2E_TMP.
 #
 # Magic layout (see src/bootmarker.h):
 #   bits 63..32 : 0xB007C0DE (BOOT_MARKER_MAGIC_PREFIX)
@@ -87,7 +88,12 @@ e2e_qemu_args() {
         -serial "file:$E2E_SERIAL"
         -no-reboot
     )
-    if [ "${E2E_MACHINE:-pc}" = q35 ]; then
+    if [ "${E2E_BOOT_BUS:-}" = virtio ]; then
+        # Boot from virtio-blk (OVMF's VirtioBlkDxe); the kernel
+        # then reads everything through virtio_blk.c.
+        E2E_QEMU_ARGS+=(-drive "file=$E2E_IMAGE,format=raw,if=none,id=os,snapshot=on"
+                        -device virtio-blk-pci,drive=os,bootindex=0)
+    elif [ "${E2E_MACHINE:-pc}" = q35 ]; then
         # q35 has AHCI, not IDE: attach the image to the ICH9 AHCI port.
         E2E_QEMU_ARGS+=(-drive "file=$E2E_IMAGE,format=raw,if=none,id=os,snapshot=on"
                         -device ide-hd,drive=os,bus=ide.0)

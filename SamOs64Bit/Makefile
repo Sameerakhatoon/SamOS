@@ -52,6 +52,10 @@ user_programs_clean:
 	$(MAKE) -C ./programs/simple clean
 	$(MAKE) -C ./programs/ktest  clean
 
+# virtio core and transports, virtio-blk, virtio-input. Before
+# the kernel.bin rule: make expands a rule's prerequisites as it reads it.
+FILES += ./build/virtio/virtio.o ./build/virtio/virtio_pci.o ./build/virtio/virtio_mmio.o ./build/disk/drivers/virtio_blk.o ./build/keyboard/virtio_input.o
+
 ./bin/kernel.bin: $(FILES)
 	x86_64-elf-ld -g -relocatable $(FILES) -o ./build/kernelfull.o
 	x86_64-elf-gcc $(FLAGS) -T ./src/linker.ld -o ./bin/kernel.bin -ffreestanding -O0 -nostdlib ./build/kernelfull.o
@@ -322,3 +326,15 @@ clean:
 ./build/cpu/ap_trampoline.asm.o: ./src/cpu/ap_trampoline.asm
 	mkdir -p ./build/cpu
 	nasm -f elf64 -g ./src/cpu/ap_trampoline.asm -o ./build/cpu/ap_trampoline.asm.o
+
+# virtio.
+./build/virtio/%.o: ./src/virtio/%.c
+	mkdir -p ./build/virtio
+	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c $< -o $@
+
+./build/disk/drivers/virtio_blk.o: ./src/disk/drivers/virtio_blk.c
+	mkdir -p ./build/disk/drivers
+	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c ./src/disk/drivers/virtio_blk.c -o ./build/disk/drivers/virtio_blk.o
+
+./build/keyboard/virtio_input.o: ./src/keyboard/virtio_input.c
+	x86_64-elf-gcc $(INCLUDES) -I./src/keyboard $(FLAGS) -std=gnu99 -c ./src/keyboard/virtio_input.c -o ./build/keyboard/virtio_input.o
