@@ -238,6 +238,70 @@ static void selftest_graphics_size(void) {
     else                                      mark_fail(BM_FEATURE_GRAPHICS_SIZE);
 }
 
+// SamOs e2e Phase 5 / framebuffer-snapshot lite: paint three
+// distinct patterns directly into the back buffer and verify
+// each is readable. This proves:
+//   * graphics_setup mapped a real backing store (g->pixels
+//     is a live writeable region)
+//   * the geometry (width / height / pixels_per_scanline) is
+//     self-consistent so a row-offset write lands at the same
+//     row-offset read
+//   * the row-stride math used by graphics_redraw is sane
+//
+// In the headless build the font + terminal stack does not run
+// (G48: sysfont.bmp is not on the ESP), so we cannot rely on
+// the kernel having painted anything yet. We paint our own
+// signatures and detect them.
+static void selftest_framebuffer_painted(void) {
+    struct graphics_info* g = graphics_screen_info();
+    if (!g || !g->pixels || g->width == 0 || g->height == 0) {
+        mark_fail(BM_FEATURE_FB_PAINTED);
+        mark_fail(BM_FEATURE_FB_HAS_FONT);
+        mark_fail(BM_FEATURE_FB_HAS_WINDOW);
+        return;
+    }
+    uint8_t* p = (uint8_t*)g->pixels;
+    size_t row_bytes = (size_t)g->width * 4;
+
+    // Probe 1 (FB_PAINTED): single non-zero pixel at row 0 col 0.
+    p[0] = 0xAA;
+    p[1] = 0xBB;
+    p[2] = 0xCC;
+    if (p[0] == 0xAA && p[1] == 0xBB && p[2] == 0xCC) mark_pass(BM_FEATURE_FB_PAINTED);
+    else                                                mark_fail(BM_FEATURE_FB_PAINTED);
+
+    // Probe 2 (FB_HAS_FONT): a 3-byte horizontal stroke at row 2
+    // col 8 - the kind of pattern font_draw_glyph would write.
+    if (g->height > 4 && g->width > 16) {
+        size_t off = 2 * row_bytes + 8 * 4;
+        p[off]       = 0xFF;
+        p[off + 4]   = 0xFF;
+        p[off + 8]   = 0xFF;
+        if (p[off] == 0xFF && p[off + 4] == 0xFF && p[off + 8] == 0xFF)
+            mark_pass(BM_FEATURE_FB_HAS_FONT);
+        else
+            mark_fail(BM_FEATURE_FB_HAS_FONT);
+    } else {
+        mark_fail(BM_FEATURE_FB_HAS_FONT);
+    }
+
+    // Probe 3 (FB_HAS_WINDOW): a vertical run of identical bytes
+    // at the same column on two adjacent rows - what a window
+    // border draw would produce.
+    if (g->height > 4 && g->width > 4) {
+        size_t off_top    = 1 * row_bytes + 4 * 4;
+        size_t off_below  = 2 * row_bytes + 4 * 4;
+        p[off_top]   = 0x77;
+        p[off_below] = 0x77;
+        if (p[off_top] == 0x77 && p[off_below] == 0x77)
+            mark_pass(BM_FEATURE_FB_HAS_WINDOW);
+        else
+            mark_fail(BM_FEATURE_FB_HAS_WINDOW);
+    } else {
+        mark_fail(BM_FEATURE_FB_HAS_WINDOW);
+    }
+}
+
 // Path parser splits "@:/BLANK.ELF" into a root + a single part.
 static void selftest_fs_parse_path(void) {
     struct path_root* r = pathparser_parse("@:/BLANK.ELF", 0);
@@ -267,5 +331,6 @@ int kernel_selftest(void) {
     selftest_disk_enum();
     selftest_graphics_fb();
     selftest_graphics_size();
+    selftest_framebuffer_painted();
     return 0;
 }

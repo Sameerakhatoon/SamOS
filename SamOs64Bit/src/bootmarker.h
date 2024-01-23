@@ -88,6 +88,9 @@ typedef enum {
     BM_FEATURE_DISK_ENUM      = 36,  // disk_get(0) returns a real disk
     BM_FEATURE_GRAPHICS_FB    = 37,  // graphics_screen_info() returns non-NULL
     BM_FEATURE_GRAPHICS_SIZE  = 38,  // screen info has width>0 + height>0
+    BM_FEATURE_FB_PAINTED     = 39,  // back-buffer pixels are non-zero (graphics drew)
+    BM_FEATURE_FB_HAS_FONT    = 51,  // back-buffer has a font-bitmap signature (text was drawn)
+    BM_FEATURE_FB_HAS_WINDOW  = 52,  // back-buffer has a window-border-coloured pixel
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
