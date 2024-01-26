@@ -91,6 +91,12 @@ typedef enum {
     BM_FEATURE_FB_PAINTED     = 39,  // back-buffer pixels are non-zero (graphics drew)
     BM_FEATURE_FB_HAS_FONT    = 51,  // back-buffer has a font-bitmap signature (text was drawn)
     BM_FEATURE_FB_HAS_WINDOW  = 52,  // back-buffer has a window-border-coloured pixel
+    BM_FEATURE_IRQ_API        = 56,  // IRQ_enable/IRQ_disable round trip on mask
+    BM_FEATURE_DISK_MULTIPLE  = 57,  // disk_get(1) returns non-NULL (GPT virtual disks)
+    BM_FEATURE_SYSTEM_FONT_RC = 58,  // font_get_system_font: NULL OK (no sysfont.bmp on ESP)
+    BM_FEATURE_FAT16_LABEL    = 59,  // primary FS reports a non-empty volume label
+    BM_FEATURE_PCI_BARS       = 60,  // at least one PCI device has a non-zero BAR
+    BM_FEATURE_TASK_SLEEP     = 61,  // kernel-side task_sleep call does not crash
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
