@@ -8,7 +8,6 @@
 #define PS2_STATUS_OUTPUT_FULL           0x01   // status bit 0: a byte waits at 0x60
 #define PS2_STATUS_AUX_DATA              0x20   // status bit 5: that byte is from the mouse
 #define CLASSIC_KEYBOARD_KEY_RELEASED    0x80
-#define ISR_KEYBOARD_INTERRUPT           0x21
 #define KEYBOARD_INPUT_PORT              0x60
 #define CLASSIC_KEYBOARD_CAPSLOCK        0x3A
 

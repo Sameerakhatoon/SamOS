@@ -34,8 +34,6 @@
 #define PCI_HEADER_INTERRUPT_LINE_OFFSET    0x3C
 #define PCI_HEADER_INTERRUPT_PIN_OFFSET     0x3D
 
-#define PCI_CFG_ADDRESS                     0xCF8
-#define PCI_DATA_ADDRESS                    0xCFC
 
 // Lecture 177 - upstream macros. PCI_BASE_CLASS forgets the
 // `func` arg in the cfg-read call. PCI_BASE_SUBCLASS supplies

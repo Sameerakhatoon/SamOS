@@ -2,7 +2,7 @@
 
 #include "multiheap.h"
 #include "kernel.h"
-#include "memory/paging/paging.h"
+#include "arch/arch.h"
 #include "status.h"
 #include "memory/memory.h"
 #include "config.h"

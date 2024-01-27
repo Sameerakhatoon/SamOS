@@ -1,5 +1,5 @@
 #include "misc.h"
-#include "idt/idt.h"
+#include "isr80h/isr80h.h"
 #include "task/task.h"
 #include "bootmarker.h"
 #include "task/process.h"
@@ -56,7 +56,7 @@ void* isr80h_command51_cpu_stats(struct trap_frame* frame){
             continue;
         }
         struct cpu_stat s = {
-            c->index, c->apic_id, c->ticks_busy, c->ticks_idle,
+            c->index, c->hw_id, c->ticks_busy, c->ticks_idle,
             c->tasks_entered, c->steals, c->ipi_resched, c->ipi_tlb,
         };
         if(copy_to_user(process, &out[n], &s, sizeof(s)) < 0){

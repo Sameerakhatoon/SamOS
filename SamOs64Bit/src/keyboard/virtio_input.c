@@ -12,13 +12,13 @@
 // vector range and may be shared with a virtio-blk, so its handler can
 // run inside a disk wait, under disk_lock, where keyboard_push (gfx,
 // process locks) must not be taken (docs/locking.md). The line handler
-// therefore only sends VINPUT_VECTOR as an IPI to the BSP; that vector
-// is in priority class 4, so a disk wait (TPR 0x40) holds it off, and
-// it runs once the CPU leaves the wait and opens interrupts. Running
-// every key on the BSP also keeps the PS/2 handler (IRQ1, BSP) and this
-// one from racing on the translator state.
+// therefore only sends ARCH_IPI_INPUT to the BSP; a disk wait holds
+// that IPI off (x86: vector 0x48, priority class 4, under TPR 0x40),
+// and it runs once the CPU leaves the wait and opens interrupts.
+// Running every key on the BSP also keeps the PS/2 handler (IRQ1, BSP)
+// and this one from racing on the translator state.
 //
-// Without an IOAPIC route (samos.legacy_pic, another chipset) the
+// Without a routable line (samos.legacy_pic, another chipset) the
 // device is set up but no key arrives; PS/2 still works.
 
 #include "virtio_input.h"
@@ -27,8 +27,9 @@
 #include "virtio/virtio.h"
 #include "virtio/virtio_pci.h"
 #include "virtio/virtio_io.h"
-#include "idt/idt.h"
-#include "io/apic.h"
+#ifndef VIRTIO_HOST_TEST
+#include "cpu/smp.h"
+#endif
 #include "io/serial.h"
 #include "memory/heap/kheap.h"
 #include "string/string.h"
@@ -46,7 +47,6 @@
 #define KEY_A                     30
 
 #define VINPUT_QUEUE_SIZE         64
-#define VINPUT_VECTOR             0x48     // class 4: held off by APIC_TPR_DISK_WAIT
 #define VINPUT_MAX_DEVICES        4
 
 struct virtio_input_event {
@@ -98,7 +98,7 @@ struct vinput {
 
 static struct vinput* vinput_devices[VINPUT_MAX_DEVICES];
 static int vinput_device_count;
-static uint32_t vinput_bsp_apic;
+static struct cpu* vinput_bsp;
 static uint32_t vinput_key_events;
 
 static void vinput_feed(uint8_t scancode){
@@ -137,8 +137,8 @@ static void vinput_post(struct vinput* v, uint64_t phys){
     virtq_add(&v->q, &buf, 1);
 }
 
-// VINPUT_VECTOR, on the BSP: take every event, give its buffer back.
-static void vinput_handler(struct trap_frame* frame){
+// ARCH_IPI_INPUT, on the BSP: take every event, give its buffer back.
+static void vinput_service(void){
     for(int i = 0; i < vinput_device_count; i++){
         struct vinput* v = vinput_devices[i];
         uint32_t head;
@@ -160,7 +160,7 @@ static void vinput_handler(struct trap_frame* frame){
 
 // The line's handler, possibly inside a disk wait: hand over to the BSP.
 static void vinput_irq(void* ctx){
-    lapic_send_ipi(vinput_bsp_apic, VINPUT_VECTOR);
+    arch_send_ipi(vinput_bsp, ARCH_IPI_INPUT);
 }
 
 static uint8_t vinput_cfg_select(struct virtio_dev* d, uint8_t select, uint8_t subsel){
@@ -221,9 +221,7 @@ static int vinput_attach(struct virtio_dev* d, void* ctx){
         serial_write(itoa((int)line->gsi));
         serial_write(", vector ");
         serial_write(itoa(line->vector));
-        serial_write(", keys on vector ");
-        serial_write(itoa(VINPUT_VECTOR));
-        serial_write("\n");
+        serial_write(", keys by IPI to the BSP\n");
     } else {
         serial_write(", no interrupt route, keys not delivered\n");
     }
@@ -231,8 +229,8 @@ static int vinput_attach(struct virtio_dev* d, void* ctx){
 }
 
 void virtio_input_init(void){
-    vinput_bsp_apic = apic_active() ? lapic_id() : 0;
-    idt_register_interrupt_callback(VINPUT_VECTOR, vinput_handler);
+    vinput_bsp = this_cpu();
+    smp_input_register(vinput_service);
     virtio_pci_probe(VIRTIO_ID_INPUT, vinput_attach, NULL);
 }
 

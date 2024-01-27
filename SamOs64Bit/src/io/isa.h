@@ -1,16 +1,12 @@
-#ifndef KERNEL_IRQ
-#define KERNEL_IRQ
+#ifndef IO_ISA_H
+#define IO_ISA_H
 
-// Lecture 67 - IRQ enable/disable C API.
+#include <stdint.h>
+#include "io/ioregion.h"
+// ISA interrupt lines of the PC platform: what the drivers of
+// PC devices (PS/2, legacy ATA, CMOS clock) pass to arch_irq_register
+// and arch_irq_unmask. Moved out of the 8259 header, irq.h.
 //
-// The 8259 master PIC handles IRQ0..IRQ7; the slave PIC handles
-// IRQ8..IRQ15 and cascades through master IRQ2. The mask bit
-// for an IRQ lives in:
-//   master: port 0x21, bit IRQ
-//   slave:  port 0xA1, bit (IRQ - 8)
-// where bit set = masked (disabled), bit clear = unmasked
-// (enabled).
-
 // SamOS divergence: the book's enum skips IRQ 9, so
 // every slave line from there up is one low (the mouse came out as
 // 11 instead of 12). The numbers are now explicit.
@@ -33,15 +29,14 @@ enum {
     IRQ_SECONDARY_ATA_HDD = 15,
 };
 
-#define PIC_MASTER_ENDING_IRQ   7
-#define PIC_SLAVE_STARTING_IRQ  8
-#define PIC_SLAVE_ENDING_IRQ    15
-#define IRQ_MASTER_PORT         0x21    // master data port
-#define IRQ_SLAVE_PORT          0xA1    // slave data port
+// One register of a PC platform device (PS/2 controller, CMOS
+// clock) at a fixed ISA I/O port, through io/ioregion.h.
+static inline uint8_t isa_read8(uint16_t port){
+    return io_read8(io_region_port(port), 0);
+}
 
-typedef int IRQ;
-
-void IRQ_enable(IRQ irq);
-void IRQ_disable(IRQ irq);
+static inline void isa_write8(uint16_t port, uint8_t v){
+    io_write8(io_region_port(port), 0, v);
+}
 
 #endif

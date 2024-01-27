@@ -4,7 +4,7 @@
 #include "memory/memory.h"
 #include "memory/heap/kheap.h"
 #include "string/string.h"
-#include "memory/paging/paging.h"
+#include "arch/arch.h"
 #include "kernel.h"
 #include "config.h"
 #include <stdbool.h>
@@ -34,7 +34,7 @@ static bool elf_valid_encoding(struct elf_header* header){
 // Called now (the book defined it and never used it).
 static bool elf_is_executable(struct elf_header* header){
     return header->e_type == ET_EXEC
-        && header->e_machine == EM_X86_64
+        && header->e_machine == ARCH_ELF_MACHINE     // This arch's
         && header->e_version == EV_CURRENT
         && header->e_ident[EI_VERSION] == EV_CURRENT;
 }

@@ -6,7 +6,7 @@
 //   2. TLB shootdown: a kernel-half page is mapped to frame A, each AP
 //      reads it (its TLB now holds A), the page is remapped to frame
 //      B, and each AP must read B. Without the shootdown IPI an idle
-//      AP keeps the old translation: it never reloads CR3 in its idle
+//      AP keeps the old translation: it never switches tables in its idle
 //      loop;
 //   3. locks and atomics: every CPU at once adds to one counter under
 //      a spinlock and to another with atomic_inc; neither may lose a
@@ -16,11 +16,11 @@
 #include "smp_selftest.h"
 #include "smp.h"
 #include "percpu.h"
-#include "arch/x86_64/atomic.h"
+#include "arch/arch.h"
 #include "lib/spinlock/spinlock.h"
 #include "memory/heap/kheap.h"
 #include "memory/memory.h"
-#include "memory/paging/paging.h"
+#include "arch/arch.h"
 #include "bootmarker.h"
 #include "string/string.h"
 #include "kernel.h"

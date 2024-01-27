@@ -1,10 +1,5 @@
 # Lecture 7 - 64-bit long-mode bootloader.
 #
-# Only kernel.asm is in the build right now. Every C and other-asm
-# file from the 32-bit kernel is sitting on disk under src/ but
-# disabled; the FILES list will grow back as the 32-bit subsystems
-# get ported lecture by lecture (Lecture 8 onward).
-#
 # Toolchain: x86_64-elf-gcc + x86_64-elf-ld (at ~/opt/cross/bin)
 # Assembler: nasm with -f elf64
 #
@@ -13,24 +8,94 @@
 # parked under /mnt/d-style mount commands in PeachOS64's Makefile -
 # we substitute the mformat/mcopy pipeline used by SamOs since it
 # does not need sudo or a real mount point.
+#
+# One Makefile for every architecture :
+#
+#   make                  x86_64 (the default): bin/kernel.bin and the
+#                         user programs, objects in build/
+#   make ARCH=aarch64     bin/aarch64/kernel.img, objects in build/aarch64/
+#   make ARCH=riscv64     bin/riscv64/kernel.img, objects in build/riscv64/
+#
+# The shared kernel code is everything under src/ outside src/arch/
+# (SHARED_OBJS). x86_64 links all of it with its src/arch/x86_64/
+# objects. aarch64 and riscv64 compile all of it too, into
+# build/<arch>/libsamos.a, which proves it builds for them through
+# arch/arch.h alone; their kernels are still the aarch64 MMU work / the riscv64 MMU work test
+# mains (PORT_OBJS) and take from the archive only what those
+# reference (the aarch64 user-mode work / the riscv64 user-mode work switch them to kernel_main). Their user-mode
+# syscall stubs (programs/stdlib/arch/<arch>/) are assembled as well.
+#
+# Pattern rules: an object's include path is src/, its own directory
+# and the one above it (what the per-file rules used to spell out).
 
-FILES = ./build/kernel.asm.o ./build/kernel.o ./build/early_fault.o ./build/cpu/cpu.o ./build/kernel_selftest.o ./build/string/string.o ./build/memory/memory.o ./build/memory/heap/heap.o ./build/memory/heap/kheap.o ./build/memory/heap/multiheap.o ./build/memory/pfa.o ./build/memory/heap/slab.o ./build/memory/heap/memtest.o ./build/memory/paging/paging.o ./build/memory/paging/paging.asm.o ./build/io/io.asm.o ./build/io/cpuid.o ./build/io/tsc.o ./build/io/tsc.asm.o ./build/io/pit.o ./build/io/serial.o ./build/io/pci.o ./build/io/rtc.o ./build/io/apic.o ./build/acpi/acpi.o ./build/idt/idt.o ./build/idt/idt.asm.o ./build/idt/irq.o ./build/task/task.o ./build/task/task.asm.o ./build/task/process.o ./build/task/userlandptr.o ./build/task/uaccess.o ./build/task/tss.asm.o ./build/fs/file.o ./build/fs/pparser.o ./build/fs/fat/fat.o ./build/fs/storage_selftest.o ./build/disk/disk.o ./build/disk/driver.o ./build/disk/drivers/pata.o ./build/disk/drivers/nvme.o ./build/disk/drivers/ahci.o ./build/disk/mbr.o ./build/disk/streamer.o ./build/disk/gpt.o ./build/graphics/graphics.o ./build/graphics/font.o ./build/graphics/font_builtin.o ./build/graphics/terminal.o ./build/graphics/window.o ./build/graphics/image/image.o ./build/graphics/image/bmp.o ./build/mouse/mouse.o ./build/mouse/ps2mouse.o ./build/gdt/gdt.o ./build/keyboard/keyboard.o ./build/keyboard/classic.o ./build/isr80h/isr80h.o ./build/isr80h/io.o ./build/isr80h/heap.o ./build/isr80h/misc.o ./build/isr80h/window.o ./build/isr80h/graphics.o ./build/isr80h/time.o ./build/isr80h/platform.o ./build/isr80h/file.o ./build/isr80h/process.o ./build/loader/formats/elf.o ./build/loader/formats/elfloader.o ./build/lib/vector/vector.o ./build/lib/spinlock/spinlock.o ./build/cpu/smp.o ./build/cpu/smp_selftest.o ./build/cpu/ap_trampoline.asm.o
-INCLUDES = -I./src
+ARCH ?= x86_64
+
+.PHONY: all clean user_programs user_programs_clean shared_check
+
+# ------------------------------------------------------------------
+# Shared kernel code (every arch).
+# ------------------------------------------------------------------
+SHARED_OBJS = kernel.o kernel_selftest.o string/string.o \
+    memory/memory.o memory/heap/heap.o memory/heap/kheap.o memory/heap/multiheap.o \
+    memory/pfa.o memory/heap/slab.o memory/heap/memtest.o \
+    io/serial.o io/pci.o io/rtc.o acpi/acpi.o \
+    task/task.o task/process.o task/userlandptr.o task/uaccess.o \
+    fs/file.o fs/pparser.o fs/fat/fat.o fs/storage_selftest.o \
+    disk/disk.o disk/driver.o disk/drivers/pata.o disk/drivers/nvme.o disk/drivers/ahci.o \
+    disk/mbr.o disk/streamer.o disk/gpt.o \
+    graphics/graphics.o graphics/font.o graphics/font_builtin.o graphics/terminal.o \
+    graphics/window.o graphics/image/image.o graphics/image/bmp.o \
+    mouse/mouse.o mouse/ps2mouse.o keyboard/keyboard.o keyboard/classic.o \
+    isr80h/isr80h.o isr80h/io.o isr80h/heap.o isr80h/misc.o isr80h/window.o \
+    isr80h/graphics.o isr80h/time.o isr80h/platform.o isr80h/file.o isr80h/process.o \
+    loader/formats/elf.o loader/formats/elfloader.o \
+    lib/vector/vector.o lib/spinlock/spinlock.o cpu/smp.o cpu/smp_selftest.o \
+    virtio/virtio.o virtio/virtio_pci.o virtio/virtio_mmio.o disk/drivers/virtio_blk.o \
+    keyboard/virtio_input.o
+
+# Freestanding, warnings are errors, no unused-parameter noise.
+COMMON_FLAGS = -g -ffreestanding -fno-builtin -nostdlib -nostartfiles -nodefaultlibs \
+    -Werror -Wall -Wno-unused-function -Wno-unused-label -Wno-cpp -Wno-unused-parameter
+# Extra defines from the command line, e.g.
+#   make EXTRA_CFLAGS=-DSAMOS_STORAGE_WRITE_REAL_HW=1
+COMMON_FLAGS += $(EXTRA_CFLAGS)
+
+ifeq ($(ARCH),x86_64)
+# ------------------------------------------------------------------
+# x86_64
+# ------------------------------------------------------------------
+BUILD = ./build
+CC    = x86_64-elf-gcc
+LD    = x86_64-elf-ld
 # No red zone (an interrupt pushes its frame right
 # below the interrupted rsp), no SSE/x87 code in the kernel (user FPU
 # state is saved only at the trap boundary), and the kernel code model
 # for the higher-half move in the isolation work.
-FLAGS = -g -ffreestanding -mno-red-zone -mgeneral-regs-only -mcmodel=kernel -falign-jumps -falign-functions -falign-labels -falign-loops -fstrength-reduce -fomit-frame-pointer -finline-functions -Wno-unused-function -fno-builtin -Werror -Wno-unused-label -Wno-cpp -Wno-unused-parameter -nostdlib -nostartfiles -nodefaultlibs -Wall -O0 -Iinc
-# Extra defines from the command line, e.g.
-#   make EXTRA_CFLAGS=-DSAMOS_STORAGE_WRITE_REAL_HW=1
-FLAGS += $(EXTRA_CFLAGS)
-# Lecture 200 - declare phony targets so the recursive-make
-# invocations do not get short-circuited by the filesystem.
-.PHONY: all clean user_programs user_programs_clean
+FLAGS = $(COMMON_FLAGS) -mno-red-zone -mgeneral-regs-only -mcmodel=kernel -falign-jumps \
+    -falign-functions -falign-labels -falign-loops -fstrength-reduce -fomit-frame-pointer \
+    -finline-functions -O0 -Iinc
+
+# kernel.asm.o first: the entry point starts the image.
+ARCH_OBJS = arch/x86_64/kernel.asm.o arch/x86_64/early_fault.o arch/x86_64/cpu.o \
+    arch/x86_64/arch.o arch/x86_64/paging.o arch/x86_64/paging.asm.o \
+    arch/x86_64/io.asm.o arch/x86_64/cpuid.o arch/x86_64/tsc.o arch/x86_64/tsc.asm.o \
+    arch/x86_64/pit.o arch/x86_64/apic.o arch/x86_64/idt.o arch/x86_64/idt.asm.o \
+    arch/x86_64/irq.o arch/x86_64/task.asm.o arch/x86_64/tss.asm.o arch/x86_64/gdt.o \
+    arch/x86_64/smp.o arch/x86_64/ap_trampoline.asm.o
+
+FILES = $(addprefix $(BUILD)/,$(ARCH_OBJS) $(SHARED_OBJS))
 
 # The BIOS boot path (boot.asm + a flat FAT16 os.bin) is gone.
 # ../build.sh puts kernel.bin and the programs into bin/os.img.
 all: ./bin/kernel.bin user_programs
+
+./bin/kernel.bin: $(FILES)
+	$(LD) -g -relocatable $(FILES) -o $(BUILD)/kernelfull.o
+	$(CC) $(FLAGS) -T ./src/arch/x86_64/linker.ld -o ./bin/kernel.bin -ffreestanding -O0 -nostdlib $(BUILD)/kernelfull.o
+
+$(BUILD)/%.asm.o: ./src/%.asm
+	@mkdir -p $(@D)
+	nasm -f elf64 -g $< -o $@
 
 # Lecture 200 - the recursive-make calls use `$(MAKE) -C` so
 # the parent's make-flags + jobserver propagate cleanly. Order
@@ -52,289 +117,110 @@ user_programs_clean:
 	$(MAKE) -C ./programs/simple clean
 	$(MAKE) -C ./programs/ktest  clean
 
-# virtio core and transports, virtio-blk, virtio-input. Before
-# the kernel.bin rule: make expands a rule's prerequisites as it reads it.
-FILES += ./build/virtio/virtio.o ./build/virtio/virtio_pci.o ./build/virtio/virtio_mmio.o ./build/disk/drivers/virtio_blk.o ./build/keyboard/virtio_input.o
-
-./bin/kernel.bin: $(FILES)
-	x86_64-elf-ld -g -relocatable $(FILES) -o ./build/kernelfull.o
-	x86_64-elf-gcc $(FLAGS) -T ./src/linker.ld -o ./bin/kernel.bin -ffreestanding -O0 -nostdlib ./build/kernelfull.o
-
-./build/kernel.asm.o: ./src/kernel.asm
-	nasm -f elf64 -g ./src/kernel.asm -o ./build/kernel.asm.o
-
-./build/kernel.o: ./src/kernel.c
-	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c ./src/kernel.c -o ./build/kernel.o
-
-./build/kernel_selftest.o: ./src/kernel_selftest.c
-	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c ./src/kernel_selftest.c -o ./build/kernel_selftest.o
-
-./build/string/string.o: ./src/string/string.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/string $(FLAGS) -std=gnu99 -c ./src/string/string.c -o ./build/string/string.o
-
-./build/memory/memory.o: ./src/memory/memory.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/memory $(FLAGS) -std=gnu99 -c ./src/memory/memory.c -o ./build/memory/memory.o
-
-./build/memory/heap/heap.o: ./src/memory/heap/heap.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/memory/heap $(FLAGS) -std=gnu99 -c ./src/memory/heap/heap.c -o ./build/memory/heap/heap.o
-
-./build/memory/heap/kheap.o: ./src/memory/heap/kheap.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/memory/heap $(FLAGS) -std=gnu99 -c ./src/memory/heap/kheap.c -o ./build/memory/heap/kheap.o
-
-./build/memory/heap/multiheap.o: ./src/memory/heap/multiheap.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/memory/heap $(FLAGS) -std=gnu99 -c ./src/memory/heap/multiheap.c -o ./build/memory/heap/multiheap.o
-
-# Page-frame allocator, slabs, memory self-tests.
-./build/memory/pfa.o: ./src/memory/pfa.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/memory $(FLAGS) -std=gnu99 -c ./src/memory/pfa.c -o ./build/memory/pfa.o
-
-./build/memory/heap/slab.o: ./src/memory/heap/slab.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/memory/heap $(FLAGS) -std=gnu99 -c ./src/memory/heap/slab.c -o ./build/memory/heap/slab.o
-
-./build/memory/heap/memtest.o: ./src/memory/heap/memtest.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/memory/heap $(FLAGS) -std=gnu99 -c ./src/memory/heap/memtest.c -o ./build/memory/heap/memtest.o
-
-./build/io/io.asm.o: ./src/io/io.asm
-	nasm -f elf64 -g ./src/io/io.asm -o ./build/io/io.asm.o
-
-./build/io/cpuid.o: ./src/io/cpuid.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/io $(FLAGS) -std=gnu99 -c ./src/io/cpuid.c -o ./build/io/cpuid.o
-
-./build/io/tsc.o: ./src/io/tsc.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/io $(FLAGS) -std=gnu99 -c ./src/io/tsc.c -o ./build/io/tsc.o
-
-./build/io/tsc.asm.o: ./src/io/tsc.asm
-	nasm -f elf64 -g ./src/io/tsc.asm -o ./build/io/tsc.asm.o
-
-./build/io/pit.o: ./src/io/pit.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/io $(FLAGS) -std=gnu99 -c ./src/io/pit.c -o ./build/io/pit.o
-
-./build/io/pci.o: ./src/io/pci.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/io $(FLAGS) -std=gnu99 -c ./src/io/pci.c -o ./build/io/pci.o
-
-# CMOS real-time clock and the ACPI tables.
-./build/io/rtc.o: ./src/io/rtc.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/io $(FLAGS) -std=gnu99 -c ./src/io/rtc.c -o ./build/io/rtc.o
-
-./build/io/apic.o: ./src/io/apic.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/io $(FLAGS) -std=gnu99 -c ./src/io/apic.c -o ./build/io/apic.o
-
-./build/acpi/acpi.o: ./src/acpi/acpi.c
-	mkdir -p ./build/acpi
-	x86_64-elf-gcc $(INCLUDES) -I./src/acpi $(FLAGS) -std=gnu99 -c ./src/acpi/acpi.c -o ./build/acpi/acpi.o
-
-./build/idt/idt.o: ./src/idt/idt.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/idt $(FLAGS) -std=gnu99 -c ./src/idt/idt.c -o ./build/idt/idt.o
-
-./build/idt/irq.o: ./src/idt/irq.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/idt $(FLAGS) -std=gnu99 -c ./src/idt/irq.c -o ./build/idt/irq.o
-
-./build/idt/idt.asm.o: ./src/idt/idt.asm
-	nasm -f elf64 -g ./src/idt/idt.asm -o ./build/idt/idt.asm.o
-
-./build/task/task.o: ./src/task/task.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/task $(FLAGS) -std=gnu99 -c ./src/task/task.c -o ./build/task/task.o
-
-./build/task/task.asm.o: ./src/task/task.asm
-	nasm -f elf64 -g ./src/task/task.asm -o ./build/task/task.asm.o
-
-./build/task/process.o: ./src/task/process.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/task $(FLAGS) -std=gnu99 -c ./src/task/process.c -o ./build/task/process.o
-
-./build/task/userlandptr.o: ./src/task/userlandptr.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/task $(FLAGS) -std=gnu99 -c ./src/task/userlandptr.c -o ./build/task/userlandptr.o
-
-# Checked user memory access.
-./build/task/uaccess.o: ./src/task/uaccess.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/task $(FLAGS) -std=gnu99 -c ./src/task/uaccess.c -o ./build/task/uaccess.o
-
-./build/task/tss.asm.o: ./src/task/tss.asm
-	nasm -f elf64 -g ./src/task/tss.asm -o ./build/task/tss.asm.o
-
-./build/fs/file.o: ./src/fs/file.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/fs $(FLAGS) -std=gnu99 -c ./src/fs/file.c -o ./build/fs/file.o
-
-./build/fs/pparser.o: ./src/fs/pparser.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/fs $(FLAGS) -std=gnu99 -c ./src/fs/pparser.c -o ./build/fs/pparser.o
-
-./build/fs/fat/fat.o: ./src/fs/fat/fat.c
-	mkdir -p ./build/fs/fat
-	x86_64-elf-gcc $(INCLUDES) -I./src/fs -I./src/fs/fat $(FLAGS) -std=gnu99 -c ./src/fs/fat/fat.c -o ./build/fs/fat/fat.o
-
-./build/fs/storage_selftest.o: ./src/fs/storage_selftest.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/fs $(FLAGS) -std=gnu99 -c ./src/fs/storage_selftest.c -o ./build/fs/storage_selftest.o
-
-./build/disk/disk.o: ./src/disk/disk.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/disk $(FLAGS) -std=gnu99 -c ./src/disk/disk.c -o ./build/disk/disk.o
-
-./build/disk/driver.o: ./src/disk/driver.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/disk $(FLAGS) -std=gnu99 -c ./src/disk/driver.c -o ./build/disk/driver.o
-
-./build/disk/drivers/pata.o: ./src/disk/drivers/pata.c
-	mkdir -p ./build/disk/drivers
-	x86_64-elf-gcc $(INCLUDES) -I./src/disk -I./src/disk/drivers $(FLAGS) -std=gnu99 -c ./src/disk/drivers/pata.c -o ./build/disk/drivers/pata.o
-
-./build/disk/drivers/nvme.o: ./src/disk/drivers/nvme.c
-	mkdir -p ./build/disk/drivers
-	x86_64-elf-gcc $(INCLUDES) -I./src/disk -I./src/disk/drivers $(FLAGS) -std=gnu99 -c ./src/disk/drivers/nvme.c -o ./build/disk/drivers/nvme.o
-
-./build/disk/drivers/ahci.o: ./src/disk/drivers/ahci.c
-	mkdir -p ./build/disk/drivers
-	x86_64-elf-gcc $(INCLUDES) -I./src/disk -I./src/disk/drivers $(FLAGS) -std=gnu99 -c ./src/disk/drivers/ahci.c -o ./build/disk/drivers/ahci.o
-
-./build/disk/mbr.o: ./src/disk/mbr.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/disk $(FLAGS) -std=gnu99 -c ./src/disk/mbr.c -o ./build/disk/mbr.o
-
-./build/disk/streamer.o: ./src/disk/streamer.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/disk $(FLAGS) -std=gnu99 -c ./src/disk/streamer.c -o ./build/disk/streamer.o
-
-./build/disk/gpt.o: ./src/disk/gpt.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/disk $(FLAGS) -std=gnu99 -c ./src/disk/gpt.c -o ./build/disk/gpt.o
-
-./build/graphics/graphics.o: ./src/graphics/graphics.c
-	mkdir -p ./build/graphics
-	x86_64-elf-gcc $(INCLUDES) -I./src/graphics $(FLAGS) -std=gnu99 -c ./src/graphics/graphics.c -o ./build/graphics/graphics.o
-
-./build/graphics/font.o: ./src/graphics/font.c
-	mkdir -p ./build/graphics
-	x86_64-elf-gcc $(INCLUDES) -I./src/graphics $(FLAGS) -std=gnu99 -c ./src/graphics/font.c -o ./build/graphics/font.o
-
-# Compiled-in fallback font, generated by tools/gen-sysfont.py.
-./build/graphics/font_builtin.o: ./src/graphics/font_builtin.c
-	mkdir -p ./build/graphics
-	x86_64-elf-gcc $(INCLUDES) -I./src/graphics $(FLAGS) -std=gnu99 -c ./src/graphics/font_builtin.c -o ./build/graphics/font_builtin.o
-
-./build/graphics/terminal.o: ./src/graphics/terminal.c
-	mkdir -p ./build/graphics
-	x86_64-elf-gcc $(INCLUDES) -I./src/graphics $(FLAGS) -std=gnu99 -c ./src/graphics/terminal.c -o ./build/graphics/terminal.o
-
-./build/graphics/window.o: ./src/graphics/window.c
-	mkdir -p ./build/graphics
-	x86_64-elf-gcc $(INCLUDES) -I./src/graphics $(FLAGS) -std=gnu99 -c ./src/graphics/window.c -o ./build/graphics/window.o
-
-./build/mouse/mouse.o: ./src/mouse/mouse.c
-	mkdir -p ./build/mouse
-	x86_64-elf-gcc $(INCLUDES) -I./src/mouse $(FLAGS) -std=gnu99 -c ./src/mouse/mouse.c -o ./build/mouse/mouse.o
-
-./build/mouse/ps2mouse.o: ./src/mouse/ps2mouse.c
-	mkdir -p ./build/mouse
-	x86_64-elf-gcc $(INCLUDES) -I./src/mouse $(FLAGS) -std=gnu99 -c ./src/mouse/ps2mouse.c -o ./build/mouse/ps2mouse.o
-
-./build/graphics/image/image.o: ./src/graphics/image/image.c
-	mkdir -p ./build/graphics/image
-	x86_64-elf-gcc $(INCLUDES) -I./src/graphics/image $(FLAGS) -std=gnu99 -c ./src/graphics/image/image.c -o ./build/graphics/image/image.o
-
-./build/graphics/image/bmp.o: ./src/graphics/image/bmp.c
-	mkdir -p ./build/graphics/image
-	x86_64-elf-gcc $(INCLUDES) -I./src/graphics/image $(FLAGS) -std=gnu99 -c ./src/graphics/image/bmp.c -o ./build/graphics/image/bmp.o
-
-./build/gdt/gdt.o: ./src/gdt/gdt.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/gdt $(FLAGS) -std=gnu99 -c ./src/gdt/gdt.c -o ./build/gdt/gdt.o
-
-./build/keyboard/keyboard.o: ./src/keyboard/keyboard.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/keyboard $(FLAGS) -std=gnu99 -c ./src/keyboard/keyboard.c -o ./build/keyboard/keyboard.o
-
-./build/keyboard/classic.o: ./src/keyboard/classic.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/keyboard $(FLAGS) -std=gnu99 -c ./src/keyboard/classic.c -o ./build/keyboard/classic.o
-
-./build/isr80h/isr80h.o: ./src/isr80h/isr80h.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/isr80h $(FLAGS) -std=gnu99 -c ./src/isr80h/isr80h.c -o ./build/isr80h/isr80h.o
-
-./build/isr80h/io.o: ./src/isr80h/io.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/isr80h $(FLAGS) -std=gnu99 -c ./src/isr80h/io.c -o ./build/isr80h/io.o
-
-./build/isr80h/heap.o: ./src/isr80h/heap.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/isr80h $(FLAGS) -std=gnu99 -c ./src/isr80h/heap.c -o ./build/isr80h/heap.o
-
-./build/isr80h/misc.o: ./src/isr80h/misc.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/isr80h $(FLAGS) -std=gnu99 -c ./src/isr80h/misc.c -o ./build/isr80h/misc.o
-
-./build/isr80h/process.o: ./src/isr80h/process.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/isr80h $(FLAGS) -std=gnu99 -c ./src/isr80h/process.c -o ./build/isr80h/process.o
-
-./build/isr80h/file.o: ./src/isr80h/file.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/isr80h $(FLAGS) -std=gnu99 -c ./src/isr80h/file.c -o ./build/isr80h/file.o
-
-./build/isr80h/window.o: ./src/isr80h/window.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/isr80h $(FLAGS) -std=gnu99 -c ./src/isr80h/window.c -o ./build/isr80h/window.o
-
-./build/isr80h/graphics.o: ./src/isr80h/graphics.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/isr80h $(FLAGS) -std=gnu99 -c ./src/isr80h/graphics.c -o ./build/isr80h/graphics.o
-
-./build/isr80h/time.o: ./src/isr80h/time.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/isr80h $(FLAGS) -std=gnu99 -c ./src/isr80h/time.c -o ./build/isr80h/time.o
-
-./build/isr80h/platform.o: ./src/isr80h/platform.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/isr80h $(FLAGS) -std=gnu99 -c ./src/isr80h/platform.c -o ./build/isr80h/platform.o
-
-./build/loader/formats/elf.o: ./src/loader/formats/elf.c
-	mkdir -p ./build/loader/formats
-	x86_64-elf-gcc $(INCLUDES) -I./src/loader/formats $(FLAGS) -std=gnu99 -c ./src/loader/formats/elf.c -o ./build/loader/formats/elf.o
-
-./build/loader/formats/elfloader.o: ./src/loader/formats/elfloader.c
-	mkdir -p ./build/loader/formats
-	x86_64-elf-gcc $(INCLUDES) -I./src/loader/formats $(FLAGS) -std=gnu99 -c ./src/loader/formats/elfloader.c -o ./build/loader/formats/elfloader.o
-
-./build/lib/vector/vector.o: ./src/lib/vector/vector.c
-	mkdir -p ./build/lib/vector
-	x86_64-elf-gcc $(INCLUDES) -I./src/lib/vector $(FLAGS) -std=gnu99 -c ./src/lib/vector/vector.c -o ./build/lib/vector/vector.o
-
-./build/memory/paging/paging.o: ./src/memory/paging/paging.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/memory/paging $(FLAGS) -std=gnu99 -c ./src/memory/paging/paging.c -o ./build/memory/paging/paging.o
-
-./build/memory/paging/paging.asm.o: ./src/memory/paging/paging.asm
-	nasm -f elf64 -g ./src/memory/paging/paging.asm -o ./build/memory/paging/paging.asm.o
+clean:
+	rm -rf ./bin/kernel.bin
+	rm -rf ${FILES}
+	rm -rf $(BUILD)/kernelfull.o
+	# Lecture 14 safety net: wipe every .o under build/ (not the other
+	# arches' build/<arch>/). A module dropped from FILES still leaves
+	# its .o behind; the next link would happily pull stale code in if
+	# anything else dragged it in. Force them gone every clean.
+	find build -path build/aarch64 -prune -o -path build/riscv64 -prune -o -type f -name "*.o" -print -delete 2>/dev/null || true
+
+else
+# ------------------------------------------------------------------
+# aarch64 and riscv64: the Ubuntu cross compilers <arch>-linux-gnu-gcc,
+# used freestanding (no libc, no crt, own linker script). The plan
+# named the <arch>-elf-gcc ones; the Linux triplets produce the same
+# code with these flags (bootstrap.sh).
+# ------------------------------------------------------------------
+ifeq ($(ARCH),aarch64)
+CROSS ?= aarch64-linux-gnu-
+# -mgeneral-regs-only: no FP/SIMD in the kernel (no FP context to
+#   save yet, and gcc would otherwise use q registers for copies).
+# -mstrict-align: until mmu_early turns the MMU on, all memory is
+#   Device memory and an unaligned access faults.
+#   Kept for the whole kernel: fdt, the PFA, the console and the
+#   page-table code run both before and after.
+# -mcmodel=small: adrp/add, PC-relative, so the code linked high
+#   also runs at the load address before the MMU is on.
+# -fno-tree-loop-distribute-patterns: no memset calls for the
+#   table-zeroing loops, there is no libc.
+ARCH_CFLAGS = -mgeneral-regs-only -mstrict-align -mcmodel=small -fno-tree-loop-distribute-patterns
+PORT_OBJS = arch/aarch64/boot.S.o arch/aarch64/vectors.S.o arch/aarch64/main.o \
+    arch/aarch64/pl011.o firmware/fdt.o arch/aarch64/console.o arch/aarch64/trap.o \
+    arch/aarch64/gicv3.o arch/aarch64/timer.o arch/aarch64/sched.o arch/aarch64/fault_test.S.o \
+    arch/aarch64/mmu.o arch/aarch64/pfa.o arch/aarch64/memmap.o arch/aarch64/mmu_test.o
+else ifeq ($(ARCH),riscv64)
+CROSS ?= riscv64-linux-gnu-
+# rv64imac: no F/D, so the kernel has no FP state to save yet.
+# medany: the kernel sits at 0x80200000, past medlow's +-2 GiB.
+# -fno-tree-loop-distribute-patterns: the BSS-style loops must
+#   not turn into memset calls, there is no libc.
+# -mno-relax: boot.S and mmu_boot run at the load address before
+#   the MMU maps the link address, so every symbol reference must
+#   stay PC-relative; relaxation may rewrite some.
+ARCH_CFLAGS = -march=rv64imac_zicsr -mabi=lp64 -mcmodel=medany -mno-relax -fno-tree-loop-distribute-patterns
+PORT_OBJS = arch/riscv64/boot.S.o arch/riscv64/main.o arch/riscv64/sbi.o \
+    arch/riscv64/console.o arch/riscv64/trap.o arch/riscv64/uart16550.o \
+    arch/riscv64/timer.o arch/riscv64/plic.o arch/riscv64/kthread.o \
+    arch/riscv64/mmu.o arch/riscv64/pfa.o arch/riscv64/uaccess.o \
+    arch/riscv64/uaccess.S.o arch/riscv64/mmu_test.o firmware/fdt.o string/string.o
+else
+$(error ARCH must be x86_64, aarch64 or riscv64)
+endif
+
+BUILD   = ./build/$(ARCH)
+CC      = $(CROSS)gcc
+AR      = $(CROSS)ar
+OBJCOPY = $(CROSS)objcopy
+NOPIC   = -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables
+# The port's own files keep the early aarch64 / early riscv64 flags.
+PORT_CFLAGS = -ffreestanding -fno-builtin -nostdlib $(NOPIC) -O2 -g -std=gnu99 \
+    -Wall -Wextra -Werror -Wno-unused-parameter -I./src $(ARCH_CFLAGS)
+# The shared code builds as on x86: -O0, the x86 warning set.
+FLAGS = $(COMMON_FLAGS) $(NOPIC) -O0 $(ARCH_CFLAGS)
+
+PORT_FILES   = $(addprefix $(BUILD)/,$(PORT_OBJS))
+PORT_C_FILES = $(filter-out %.S.o,$(PORT_FILES))
+SHARED_FILES = $(addprefix $(BUILD)/,$(filter-out $(PORT_OBJS),$(SHARED_OBJS)))
+USER_STUBS   = $(patsubst ./programs/stdlib/arch/$(ARCH)/%.S,$(BUILD)/user/%.o,$(wildcard ./programs/stdlib/arch/$(ARCH)/*.S))
+
+all: ./bin/$(ARCH)/kernel.img $(USER_STUBS)
+
+shared_check: $(BUILD)/libsamos.a
+
+$(BUILD)/libsamos.a: $(SHARED_FILES)
+	rm -f $@
+	$(AR) rcs $@ $^
+
+$(BUILD)/kernel.elf: $(PORT_FILES) $(BUILD)/libsamos.a ./src/arch/$(ARCH)/linker.ld
+	$(CC) $(PORT_CFLAGS) -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack \
+	    -Wl,-Map,$(BUILD)/kernel.map -T ./src/arch/$(ARCH)/linker.ld -o $@ \
+	    $(PORT_FILES) $(BUILD)/libsamos.a -lgcc
+
+./bin/$(ARCH)/kernel.img: $(BUILD)/kernel.elf
+	@mkdir -p $(@D)
+	$(OBJCOPY) -O binary $< $@
+	@echo "make: $@ ($$(stat -c%s $@) bytes)"
+
+$(PORT_C_FILES): $(BUILD)/%.o: ./src/%.c
+	@mkdir -p $(@D)
+	$(CC) $(PORT_CFLAGS) -c $< -o $@
+
+$(BUILD)/%.S.o: ./src/%.S
+	@mkdir -p $(@D)
+	$(CC) $(PORT_CFLAGS) -c $< -o $@
+
+$(BUILD)/user/%.o: ./programs/stdlib/arch/$(ARCH)/%.S
+	@mkdir -p $(@D)
+	$(CC) $(PORT_CFLAGS) -I./programs/stdlib/src -c $< -o $@
 
 clean:
+	rm -rf $(BUILD) ./bin/$(ARCH)
+endif
 
-	rm -rf ./bin/kernel.bin
-
-	rm -rf ${FILES}
-	rm -rf ./build/kernelfull.o
-	# Lecture 14 safety net: wipe every .o under build/.
-	# A module dropped from FILES still leaves its .o behind; the next
-	# link would happily pull stale code in if anything else dragged
-	# it in. Force them gone every clean.
-	find build -type f -name "*.o" -print -delete 2>/dev/null || true
-
-# COM1 serial console.
-./build/io/serial.o: ./src/io/serial.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/io $(FLAGS) -std=gnu99 -c ./src/io/serial.c -o ./build/io/serial.o
-
-# CPUID checks and CR0/CR4/EFER.
-./build/cpu/cpu.o: ./src/cpu/cpu.c
-	mkdir -p ./build/cpu
-	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c ./src/cpu/cpu.c -o ./build/cpu/cpu.o
-
-# Early exception handler (minimal IDT before idt_init).
-./build/early_fault.o: ./src/early_fault.c
-	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c ./src/early_fault.c -o ./build/early_fault.o
-
-# Spinlocks, APs, IPIs, the AP trampoline.
-./build/lib/spinlock/spinlock.o: ./src/lib/spinlock/spinlock.c
-	mkdir -p ./build/lib/spinlock
-	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c ./src/lib/spinlock/spinlock.c -o ./build/lib/spinlock/spinlock.o
-
-./build/cpu/smp.o: ./src/cpu/smp.c
-	mkdir -p ./build/cpu
-	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c ./src/cpu/smp.c -o ./build/cpu/smp.o
-
-./build/cpu/smp_selftest.o: ./src/cpu/smp_selftest.c
-	mkdir -p ./build/cpu
-	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c ./src/cpu/smp_selftest.c -o ./build/cpu/smp_selftest.o
-
-./build/cpu/ap_trampoline.asm.o: ./src/cpu/ap_trampoline.asm
-	mkdir -p ./build/cpu
-	nasm -f elf64 -g ./src/cpu/ap_trampoline.asm -o ./build/cpu/ap_trampoline.asm.o
-
-# virtio.
-./build/virtio/%.o: ./src/virtio/%.c
-	mkdir -p ./build/virtio
-	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c $< -o $@
-
-./build/disk/drivers/virtio_blk.o: ./src/disk/drivers/virtio_blk.c
-	mkdir -p ./build/disk/drivers
-	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -std=gnu99 -c ./src/disk/drivers/virtio_blk.c -o ./build/disk/drivers/virtio_blk.o
-
-./build/keyboard/virtio_input.o: ./src/keyboard/virtio_input.c
-	x86_64-elf-gcc $(INCLUDES) -I./src/keyboard $(FLAGS) -std=gnu99 -c ./src/keyboard/virtio_input.c -o ./build/keyboard/virtio_input.o
+# Every C file of the kernel, shared or the arch's own.
+$(BUILD)/%.o: ./src/%.c
+	@mkdir -p $(@D)
+	$(CC) -I./src -I$(<D) -I$(<D)/.. $(FLAGS) -std=gnu99 -c $< -o $@

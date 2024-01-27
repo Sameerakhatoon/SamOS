@@ -6,7 +6,6 @@
 #include "task/process.h"
 #include "task/task.h"
 #include "graphics/window.h"         // window_focused
-#include "io/pit.h"                  // pit_ticks
 #include "memory/memory.h"           // L174 - memcpy for listener clone
 #include "memory/heap/kheap.h"       // L174 - kzalloc / kfree for listeners
 #include "graphics/graphics.h"       // gfx_lock
@@ -119,7 +118,7 @@ static void keyboard_push_locked(char c){
         // Quiet before the timer has ticked: the boot self-test
         // pushes a key with no process around.
         process_unlock();
-        if(!pit_ticks()){
+        if(!task_clock_ticks()){
             return;
         }
         print("keyboard: no process for key '");

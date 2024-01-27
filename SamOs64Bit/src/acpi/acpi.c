@@ -8,9 +8,8 @@
 // is read; a bad table is skipped, not trusted.
 
 #include "acpi/acpi.h"
-#include "memory/paging/paging.h"
+#include "arch/arch.h"
 #include "memory/memory.h"
-#include "io/io.h"
 #include "io/serial.h"
 #include "string/string.h"
 #include "status.h"
@@ -406,21 +405,22 @@ int acpi_init(uint64_t rsdp_phys){
     return 0;
 }
 
-// Short wait without the timer or a calibrated TSC: port 0x80 is
-// the POST port, a write takes about 1 us on real hardware.
+// Short wait without the timer or a calibrated counter: port 0x80 is
+// the POST port, a write takes about 1 us on real hardware. The
+// ACPI I/O space is the arch's port space (arch_pio_*).
 static void acpi_io_wait(uint32_t n){
     while(n--){
-        outb(0x80, 0);
+        arch_pio_write8(0x80, 0);
     }
 }
 
 static uint32_t acpi_gas_read(const struct acpi_gas* g){
     if(g->space_id == ACPI_GAS_IO){
-        return g->bit_width == 8 ? insb(g->address) : insw(g->address);
+        return g->bit_width == 8 ? arch_pio_read8(g->address) : arch_pio_read16(g->address);
     }
     if(g->space_id == ACPI_GAS_MEMORY){
         volatile uint16_t* p = paging_map_mmio(g->address, 2, PAGING_CACHE_DISABLED);
-        return p ? *p : 0;
+        return p ? mmio_read16(p) : 0;
     }
     return 0;
 }
@@ -428,14 +428,14 @@ static uint32_t acpi_gas_read(const struct acpi_gas* g){
 static void acpi_gas_write(const struct acpi_gas* g, uint32_t v){
     if(g->space_id == ACPI_GAS_IO){
         if(g->bit_width == 8){
-            outb(g->address, v);
+            arch_pio_write8(g->address, v);
         } else {
-            outw(g->address, v);
+            arch_pio_write16(g->address, v);
         }
     } else if(g->space_id == ACPI_GAS_MEMORY){
         volatile uint16_t* p = paging_map_mmio(g->address, 2, PAGING_CACHE_DISABLED);
         if(p){
-            *p = v;
+            mmio_write16(p, v);
         }
     }
 }
@@ -447,7 +447,7 @@ static void acpi_enable_mode(void){
        (acpi_gas_read(&info.pm1a_cnt) & PM1_SCI_EN)){
         return;
     }
-    outb(info.smi_cmd, info.acpi_enable);
+    arch_pio_write8(info.smi_cmd, info.acpi_enable);
     for(int i = 0; i < 3000 && !(acpi_gas_read(&info.pm1a_cnt) & PM1_SCI_EN); i++){
         acpi_io_wait(100);
     }
@@ -455,18 +455,16 @@ static void acpi_enable_mode(void){
 
 static void acpi_halt(void){
     acpi_log("acpi: still running, halting\n");
-    while(1){
-        __asm__ volatile("cli; hlt");
-    }
+    arch_halt();
 }
 
 // S5: SLP_TYPx | SLP_EN into PM1a (and PM1b) control. Without an _S5
 // object the type is 0, which is what QEMU's PIIX4 and ICH9 PM blocks
 // take as soft-off (and what their DSDTs say). If the machine is
-// still up after that, QEMU's fixed PM1 ports: 0x604 (ICH9 / q35 and
-// newer pc firmware) and 0xB004 (Bochs, old QEMU).
+// still up after that, the arch's own ways (x86: QEMU's fixed PM1
+// ports).
 void acpi_shutdown(void){
-    __asm__ volatile("cli");
+    arch_irq_disable();
     if(info.have_fadt && info.pm1a_cnt.address){
         uint8_t a = info.s5_found ? info.s5_slp_typ_a : 0;
         uint8_t b = info.s5_found ? info.s5_slp_typ_b : 0;
@@ -480,46 +478,28 @@ void acpi_shutdown(void){
         acpi_gas_write(&info.pm1a_cnt, v | (a << PM1_SLP_TYP_SHIFT) | PM1_SLP_EN);
         acpi_io_wait(100000);
     }
-    acpi_log("acpi: shutdown via QEMU PM ports\n");
-    outw(0x604, 0x2000);
-    outw(0xB004, 0x2000);
-    acpi_io_wait(100000);
+    arch_shutdown_fallback();
     acpi_halt();
     __builtin_unreachable();
 }
 
-// Reset: the FADT reset register, then the 0xCF9 reset control
-// register (PIIX/ICH), then the 8042 pulse, then a triple fault.
+// Reset: the FADT reset register, then the arch's own ways (x86: the
+// 0xCF9 reset control register, the 8042 pulse, a triple fault).
 void acpi_reboot(void){
-    __asm__ volatile("cli");
+    arch_irq_disable();
     if(info.have_reset_reg && info.reset_reg.space_id != ACPI_GAS_PCI){
         acpi_log("acpi: reboot via reset register\n");
         if(info.reset_reg.space_id == ACPI_GAS_IO){
-            outb(info.reset_reg.address, info.reset_value);
+            arch_pio_write8(info.reset_reg.address, info.reset_value);
         } else {
             volatile uint8_t* p = paging_map_mmio(info.reset_reg.address, 1, PAGING_CACHE_DISABLED);
             if(p){
-                *p = info.reset_value;
+                mmio_write8(p, info.reset_value);
             }
         }
         acpi_io_wait(100000);
     }
-    acpi_log("acpi: reboot via port 0xcf9\n");
-    outb(0xCF9, 0x02);
-    acpi_io_wait(10);
-    outb(0xCF9, 0x06);
-    acpi_io_wait(100000);
-
-    acpi_log("acpi: reboot via 8042\n");
-    for(int i = 0; i < 100000 && (insb(0x64) & 0x02); i++){
-        acpi_io_wait(1);
-    }
-    outb(0x64, 0xFE);
-    acpi_io_wait(100000);
-
-    acpi_log("acpi: reboot via triple fault\n");
-    struct { uint16_t limit; uint64_t base; } __attribute__((packed)) null_idt = { 0, 0 };
-    __asm__ volatile("lidt %0; int3" : : "m"(null_idt));
+    arch_reboot_fallback();
     acpi_halt();
     __builtin_unreachable();
 }

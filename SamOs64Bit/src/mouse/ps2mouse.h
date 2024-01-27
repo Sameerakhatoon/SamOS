@@ -9,7 +9,6 @@
 #include <stdint.h>
 
 #define PS2_COMMUNICATION_PORT             0x60
-#define ISR_MOUSE_INTERRUPT                0x2c
 #define PS2_STATUS_PORT                    0x64
 #define PS2_COMMAND_ENABLE_SECOND_PORT     0xA8
 #define PS2_WRITE_TO_MOUSE                 0xD4

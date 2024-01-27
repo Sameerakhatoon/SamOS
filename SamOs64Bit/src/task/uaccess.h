@@ -7,7 +7,7 @@
 // (a kernel stack overflow). Every syscall now goes through these. Each
 // page is checked against the process's own page tables (present,
 // U=1, and RW=1 for a write) and reached through the direct map,
-// so it works from any CR3 and never touches a kernel address.
+// so it works from any address space and never touches a kernel address.
 
 #ifndef UACCESS_H
 #define UACCESS_H

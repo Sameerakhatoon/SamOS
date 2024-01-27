@@ -22,18 +22,17 @@
 #include "io/pci.h"
 #include "memory/memory.h"
 #include "memory/heap/kheap.h"
-#include "memory/paging/paging.h"
+#include "arch/arch.h"
 #include "kernel.h"
 #include "disk/poll.h"
-#include "idt/idt.h"
 
 
 static inline uint32_t ahci_read(struct ahci_hba* hba, uint32_t off){
-    return *(volatile uint32_t*)(hba->abar + off);
+    return mmio_read32(hba->abar + off);
 }
 
 static inline void ahci_write(struct ahci_hba* hba, uint32_t off, uint32_t v){
-    *(volatile uint32_t*)(hba->abar + off) = v;
+    mmio_write32(hba->abar + off, v);
 }
 
 static inline uint32_t ahci_port_read(struct ahci_port_private* p, uint32_t reg){
@@ -178,7 +177,7 @@ static int ahci_command(struct ahci_port_private* p, uint8_t command, uint64_t l
     ahci_port_write(p, AHCI_PxIS, 0xFFFFFFFFu);
     p->irq_status = 0;
     disk_irq_arm(&p->hba->irq);
-    __asm__ __volatile__("" ::: "memory");
+    smp_wmb();      // the command table before the doorbell
     ahci_port_write(p, AHCI_PxCI, 1);
 
     disk_irq_wait(&p->hba->irq, ahci_port_done, p);
@@ -275,7 +274,7 @@ static void ahci_bios_handoff(struct ahci_hba* hba){
     }
 }
 
-// The HBA on DISK_VECTOR_AHCI. The line is a shared,
+// The HBA on its completion line (DISK_SLOT_AHCI). The line is a shared,
 // level-triggered PCI INTx: clear PxIS then IS (only then does the HBA
 // drop the line), and an HBA with nothing pending was not the source.
 static struct ahci_hba* ahci_irq_hba;
@@ -304,7 +303,7 @@ static void ahci_irq_handler(struct trap_frame* frame){
 // GHC.IE, INTx unmasked at the PCI and routed through the IOAPIC.
 static void ahci_irq_init(struct ahci_hba* hba){
     uint16_t inti = 0;
-    int gsi = apic_active() && !ahci_irq_hba ? pci_intx_gsi(hba->device, &inti) : -ENOENT;
+    int gsi = arch_irq_routable() && !ahci_irq_hba ? pci_intx_gsi(hba->device, &inti) : -ENOENT;
     if(gsi < 0){
         serial_write("disk: ahci has no IOAPIC route, polled\n");
         return;
@@ -319,15 +318,15 @@ static void ahci_irq_init(struct ahci_hba* hba){
     hba->irq.name   = "ahci";
     hba->irq.marker = BM_FEATURE_DISK_IRQ_AHCI;
     ahci_irq_hba = hba;
-    idt_register_interrupt_callback(DISK_VECTOR_AHCI, ahci_irq_handler);
     pci_intx_enable(hba->device);
     ahci_write(hba, AHCI_HBA_GHC, ahci_read(hba, AHCI_HBA_GHC) | AHCI_GHC_IE);
     bool masked = disk_irq_masked_by_cmdline();
-    if(ioapic_route_gsi((uint32_t)gsi, DISK_VECTOR_AHCI, inti, masked) < 0){
+    int line = arch_irq_attach_gsi((uint32_t)gsi, inti, DISK_SLOT_AHCI, masked, ahci_irq_handler);
+    if(line < 0){
         return;
     }
     hba->irq.enabled = true;
-    disk_irq_report(&hba->irq, (uint32_t)gsi, inti, DISK_VECTOR_AHCI, masked);
+    disk_irq_report(&hba->irq, (uint32_t)gsi, inti, line, masked);
 }
 
 static int ahci_mount_controller(struct disk_driver* driver, struct pci_device* dev){

@@ -2,16 +2,11 @@
 #define TASK_H
 
 #include "config.h"
-#include "idt/idt.h"          // Struct trap_frame
-#include "memory/paging/paging.h"
-#include "io/tsc.h"           // L197 - TIME_MICROSECONDS / tsc_microseconds
+#include "arch/arch.h"        // trap_frame, FPU state, TIME_MICROSECONDS
 #include <stdbool.h>
 
 struct process;
 struct cpu;
-
-// fxsave/fxrstor image: x87, MXCSR and xmm0-15.
-#define TASK_FPU_STATE_SIZE 512
 
 // Scheduler states. A READY task is on a CPU's run
 // queue, a RUNNING one is that CPU's current task, a SLEEPING one is
@@ -65,10 +60,11 @@ struct task {
     // sleep list link; a task is on at most one list.
     struct task*         run_next;
 
-    // Saved on every trap from ring 3, restored before
-    // the iretq into this task. The kernel itself is built with
-    // -mgeneral-regs-only, so it never touches these registers.
-    uint8_t              fpu_state[TASK_FPU_STATE_SIZE] __attribute__((aligned(16)));
+    // Saved on every trap from user mode, restored
+    // before the return into this task (x86: fxsave image). The
+    // kernel itself is built -mgeneral-regs-only, so it never touches
+    // these registers.
+    struct arch_fpu_state fpu_state;
 };
 
 struct task* task_new(struct process* process);
@@ -90,6 +86,10 @@ void  task_block(struct task* task, int reason);
 void  task_wake_sleepers(void);
 bool  task_run_queue_empty(void);
 void  task_tick(struct trap_frame* frame);
+// The scheduler tick every arch's timer interrupt calls, and
+// the ticks counted so far (the BSP's).
+void  task_clock(struct trap_frame* frame);
+uint64_t task_clock_ticks(void);
 
 // Multi-CPU scheduling.
 void  task_start(struct task* task);            // NEW -> a run queue
@@ -104,9 +104,5 @@ bool  task_asleep(struct task* task);
 // Lecture 40 - paging_desc accessors.
 struct paging_desc* task_paging_desc(struct task* task);
 struct paging_desc* task_current_paging_desc();
-
-// Defined in task.asm.
-void task_return(struct trap_frame* regs);
-void user_registers();
 
 #endif

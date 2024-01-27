@@ -9,10 +9,8 @@
 // in FILES); both landed, ps2mouse.o is linked.
 
 #include "mouse/ps2mouse.h"
-#include "idt/irq.h"
-#include "idt/idt.h"
-#include "io/io.h"
-#include "io/tsc.h"
+#include "io/isa.h"           // Ports and IRQ line
+#include "arch/arch.h"
 #include "kernel.h"
 #include "status.h"
 #include "graphics/graphics.h"   // gfx_lock
@@ -39,7 +37,7 @@ struct ps2_mouse ps2_mouse_private = {0};
 #define PS2_MOUSE_WAIT_STEP_US 100
 int ps2_mouse_wait(int type){
     for(int i = 0; i < PS2_MOUSE_WAIT_POLLS; i++){
-        uint8_t status = insb(PS2_STATUS_PORT);
+        uint8_t status = isa_read8(PS2_STATUS_PORT);
         if(type == PS2_WAIT_FOR_INPUT_TO_CLEAR){
             if((status & 2) == 0){
                 return 0;
@@ -57,9 +55,9 @@ int ps2_mouse_wait(int type){
 // that never arrives before a command is sent.
 void ps2_mouse_write(uint8_t byte){
     ps2_mouse_wait(PS2_WAIT_FOR_INPUT_TO_CLEAR);
-    outb(PS2_STATUS_PORT, PS2_WRITE_TO_MOUSE);
+    isa_write8(PS2_STATUS_PORT, PS2_WRITE_TO_MOUSE);
     ps2_mouse_wait(PS2_WAIT_FOR_INPUT_TO_CLEAR);
-    outb(PS2_COMMUNICATION_PORT, byte);
+    isa_write8(PS2_COMMUNICATION_PORT, byte);
 }
 
 // Read one byte from the controller, or -ETIMEOUT.
@@ -67,7 +65,7 @@ static int ps2_mouse_read(void){
     if(ps2_mouse_wait(PS2_WAIT_FOR_OUTPUT_TO_BE_SET) < 0){
         return -ETIMEOUT;
     }
-    return insb(PS2_COMMUNICATION_PORT);
+    return isa_read8(PS2_COMMUNICATION_PORT);
 }
 
 // Lecture 138 - IRQ12 packet handler. Accumulates a 3- or
@@ -89,7 +87,7 @@ static void ps2_mouse_handle_interrupt_locked(struct trap_frame* frame){
     static uint8_t packet[4];
     static int     packet_byte_count = 0;
     size_t  ps2_mouse_packet_size = ps2_mouse_private.mouse_packet_size;
-    uint8_t data                  = insb(PS2_COMMUNICATION_PORT);
+    uint8_t data                  = isa_read8(PS2_COMMUNICATION_PORT);
 
     if(packet_byte_count == 0 && !(data & 0x08)){
         return;
@@ -148,11 +146,11 @@ int ps2_mouse_init(struct mouse* mouse){
     // this function waits for. kernel_main calls us
     // with interrupts still off.
     ps2_mouse_wait(PS2_WAIT_FOR_INPUT_TO_CLEAR);
-    outb(PS2_STATUS_PORT, PS2_COMMAND_ENABLE_SECOND_PORT);
+    isa_write8(PS2_STATUS_PORT, PS2_COMMAND_ENABLE_SECOND_PORT);
 
     // Drop anything stale in the output buffer.
-    for(int i = 0; i < 16 && (insb(PS2_STATUS_PORT) & 1); i++){
-        insb(PS2_COMMUNICATION_PORT);
+    for(int i = 0; i < 16 && (isa_read8(PS2_STATUS_PORT) & 1); i++){
+        isa_read8(PS2_COMMUNICATION_PORT);
     }
 
     ps2_mouse_write(PS2_MOUSE_RESET);
@@ -185,7 +183,7 @@ int ps2_mouse_init(struct mouse* mouse){
     // Enable the aux clock + IRQ in the controller config byte, then
     // unmask at the PIC.
     ps2_mouse_wait(PS2_WAIT_FOR_INPUT_TO_CLEAR);
-    outb(PS2_STATUS_PORT, PS2_READ_CONFIG_BYTE);
+    isa_write8(PS2_STATUS_PORT, PS2_READ_CONFIG_BYTE);
     int config_val = ps2_mouse_read();
     if(config_val < 0){
         return -EIO;
@@ -193,14 +191,14 @@ int ps2_mouse_init(struct mouse* mouse){
     config_val &= ~(1 << 5); // Clear bit 5 to enable the clock.
     config_val |=  (1 << 1); // Set bit 1 to enable interrupts.
     ps2_mouse_wait(PS2_WAIT_FOR_INPUT_TO_CLEAR);
-    outb(PS2_STATUS_PORT, PS2_UPDATE_CONFIG_BYTE);
+    isa_write8(PS2_STATUS_PORT, PS2_UPDATE_CONFIG_BYTE);
     ps2_mouse_wait(PS2_WAIT_FOR_INPUT_TO_CLEAR);
-    outb(PS2_COMMUNICATION_PORT, (uint8_t)config_val);
+    isa_write8(PS2_COMMUNICATION_PORT, (uint8_t)config_val);
 
-    idt_register_interrupt_callback(ISR_MOUSE_INTERRUPT, ps2_mouse_handle_interrupt);
-    // IRQ_PS2_MOUSE is 12 (the interrupt work fixed the off-by-one enum), and
-    // IRQ_enable unmasks the master's cascade line for slave IRQs.
-    IRQ_enable(IRQ_PS2_MOUSE);
+    arch_irq_register(IRQ_PS2_MOUSE, ps2_mouse_handle_interrupt);
+    // IRQ_PS2_MOUSE is 12 (the interrupt work fixed the off-by-one enum), and on
+    // the 8259s unmasking it unmasks the master's cascade line too.
+    arch_irq_unmask(IRQ_PS2_MOUSE);
     return 0;
 }
 

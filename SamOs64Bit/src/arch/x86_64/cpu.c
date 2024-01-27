@@ -7,7 +7,7 @@
 
 #include "cpu.h"
 #include "kernel.h"
-#include "io/cpuid.h"
+#include "arch/x86_64/cpuid.h"
 #include "io/serial.h"
 #include <stdint.h>
 

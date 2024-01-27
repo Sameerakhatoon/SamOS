@@ -6,6 +6,7 @@
 // userspace mirror. The userspace mirror's virtual address is
 // the handle we hand back to userland.
 
+#include "isr80h/isr80h.h"
 #include "window.h"
 #include "graphics/window.h"
 #include "graphics/graphics.h"

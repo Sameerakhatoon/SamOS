@@ -9,7 +9,7 @@
 // two-digit year is taken as 1970-2069.
 
 #include "io/rtc.h"
-#include "io/io.h"
+#include "io/isa.h"
 #include "io/serial.h"
 #include "acpi/acpi.h"
 #include "lib/spinlock/spinlock.h"
@@ -36,8 +36,8 @@ static struct spinlock rtc_lock = SPINLOCK_INIT("rtc", LOCK_LEVEL_RTC, 0);
 
 // Bit 7 of the index port gates NMI; keep it clear (NMI enabled).
 static uint8_t cmos_read(uint8_t reg){
-    outb(CMOS_INDEX, reg & 0x7F);
-    return insb(CMOS_DATA);
+    isa_write8(CMOS_INDEX, reg & 0x7F);
+    return isa_read8(CMOS_DATA);
 }
 
 struct rtc_raw {

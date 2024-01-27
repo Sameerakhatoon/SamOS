@@ -1,7 +1,7 @@
 // Trap dump, the riscv64 analogue of x86's early_fault.
 // The C half of the trap path: decode scause, dispatch the
 // timer and the PLIC, preempt on the way out, dump and halt on a
-// kernel exception (x86's idt_exception: KERNEL FAULT plus registers).
+// kernel exception (as on x86: KERNEL FAULT plus registers).
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -108,7 +108,7 @@ static unsigned insn_length(uint64_t pc)
     return (*(volatile uint16_t*)pc & 3) == 3 ? 4 : 2;
 }
 
-// The tick, x86's idt_clock: count it, then let the scheduler switch
+// The tick, as x86's clock handler: count it, then let the scheduler switch
 // on the way out of the trap.
 static void riscv64_clock(struct trap_frame* frame)
 {

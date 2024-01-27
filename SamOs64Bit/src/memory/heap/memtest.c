@@ -15,7 +15,7 @@
 #include "bootmarker.h"
 #include "memory/memory.h"
 #include "memory/pfa.h"
-#include "memory/paging/paging.h"
+#include "arch/arch.h"
 #include "string/string.h"
 #include "task/process.h"
 
@@ -72,13 +72,14 @@ static int memtest_pfa(void){
 
     // The direct-map alias of kernel text and rodata is
     // read-only; data and the frames above stay writable.
-    struct paging_desc_entry* e;
-    e = paging_get(kernel_desc(), PAGING_PHYS_TO_VIRT((uintptr_t)memtest_pfa - SAMOS_KERNEL_VMA));
-    CHECK(e && e->present && !e->read_write && e->execute_disable);
-    e = paging_get(kernel_desc(), PAGING_PHYS_TO_VIRT((uintptr_t)"rodata" - SAMOS_KERNEL_VMA));
-    CHECK(e && e->present && !e->read_write);
-    e = paging_get(kernel_desc(), PAGING_PHYS_TO_VIRT((uintptr_t)&memtest_data_probe - SAMOS_KERNEL_VMA));
-    CHECK(e && e->present && e->read_write);
+    // Through paging_get_flags, the arch's page-table walk.
+    int fl;
+    fl = paging_get_flags(kernel_desc(), PAGING_PHYS_TO_VIRT((uintptr_t)memtest_pfa - SAMOS_KERNEL_VMA));
+    CHECK((fl & PAGING_IS_PRESENT) && !(fl & PAGING_IS_WRITEABLE) && (fl & PAGING_NO_EXECUTE));
+    fl = paging_get_flags(kernel_desc(), PAGING_PHYS_TO_VIRT((uintptr_t)"rodata" - SAMOS_KERNEL_VMA));
+    CHECK((fl & PAGING_IS_PRESENT) && !(fl & PAGING_IS_WRITEABLE));
+    fl = paging_get_flags(kernel_desc(), PAGING_PHYS_TO_VIRT((uintptr_t)&memtest_data_probe - SAMOS_KERNEL_VMA));
+    CHECK((fl & PAGING_IS_PRESENT) && (fl & PAGING_IS_WRITEABLE));
     return 1;
 }
 
@@ -279,7 +280,7 @@ static int memtest_steady_cycle(void){
 
     // Page tables take physical addresses; the descriptor
     // shares the kernel half, which paging_desc_free must leave alone.
-    struct paging_desc* d = paging_desc_new(PAGING_MAP_LEVEL_4);
+    struct paging_desc* d = paging_desc_new();
     CHECK(d);
     uint64_t phys9 = paging_kernel_virt_to_phys(p[9]);
     CHECK(paging_map(d, (void*)0x400000, (void*)phys9, PAGING_IS_PRESENT | PAGING_IS_WRITEABLE) == 0);
@@ -288,8 +289,12 @@ static int memtest_steady_cycle(void){
                      PAGING_IS_PRESENT) == 0);
     CHECK(paging_get_physical_address(d, (void*)0x401000) == (void*)(phys9 + BS));
     CHECK(paging_map(d, (void*)SAMOS_DIRECT_MAP_BASE, NULL, PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL) < 0);
-    CHECK(d->pml->entries[PAGING_KERNEL_PML4_FIRST].address ==
-          kernel_desc()->pml->entries[PAGING_KERNEL_PML4_FIRST].address);
+    // The kernel half translates in `d` as in the kernel's own tables
+    // (checked through the interface, not the x86 table layout).
+    CHECK(paging_get_physical_address(d, (void*)memtest_pfa) ==
+          paging_get_physical_address(kernel_desc(), (void*)memtest_pfa));
+    CHECK(paging_get_physical_address(d, p[9]) ==
+          paging_get_physical_address(kernel_desc(), p[9]));
     paging_desc_free(d);
 
     for(size_t i = 0; i < STEADY_SLOTS; i++){
@@ -525,7 +530,7 @@ static int memtest_process(int cycles){
         return res;
     }
     kheap_get_stats(&base);
-    TIME_MICROSECONDS start = tsc_microseconds();
+    TIME_MICROSECONDS start = arch_time_us();
     for(int c = 0; c < cycles; c++){
         res = memtest_process_cycle();
         if(res != 1){
@@ -537,7 +542,7 @@ static int memtest_process(int cycles){
     print("memtest process: ");
     print(itoa(cycles));
     print(" create/exit cycles in ");
-    print(itoa((int)((tsc_microseconds() - start) / 1000)));
+    print(itoa((int)((arch_time_us() - start) / 1000)));
     print(" ms, frames ");
     print(itoa((int)(now.frames_used - base.frames_used)));
     print(", slab objects ");

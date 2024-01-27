@@ -13,7 +13,7 @@
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"
 E2E_IMAGE="$E2E_TMP/os.img"
-printf 'samos.run=KTEST.ELF spin A 4;KTEST.ELF spin B 4;KTEST.ELF sleep 500\n' > "$E2E_TMP/CMDLINE.TXT"
+printf 'samos.run=KTEST.ELF spin A 20;KTEST.ELF spin B 20;KTEST.ELF sleep 500\n' > "$E2E_TMP/CMDLINE.TXT"
 MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.TXT" ::/CMDLINE.TXT \
     || e2e_fail "mcopy CMDLINE.TXT"
 
@@ -50,6 +50,8 @@ took=$(printf '%s\n' "$log" | sed -n 's/^SLEEP 500 ms took \([0-9]*\)$/\1/p' | h
 # 1652 ms seen with load 22 on 12 cores), but a sleeper woken by the
 # tick still wakes while both spinners run (each spins for seconds);
 # without preemption or tick wakeups it would wake after them.
+# With E2E_SMP each spinner has a CPU of its own: 4 rounds took
+# 260-560 ms there, less than the sleep, hence 20 rounds.
 [ "$took" -ge 500 ] || e2e_fail "sleep_ms(500) returned early, after $took ms"
 s=$(printf '%s\n' "$log" | grep -n '^SLEEP 500 ms took' | head -n 1 | cut -d: -f1)
 ad=$(printf '%s\n' "$log" | grep -n '^SPIN A done' | head -n 1 | cut -d: -f1)

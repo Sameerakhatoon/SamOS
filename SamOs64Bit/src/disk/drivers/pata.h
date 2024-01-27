@@ -11,6 +11,7 @@
 #include <stdbool.h>
 #include "disk.h"
 #include "driver.h"
+#include "io/ioregion.h"
 
 #define KERNEL_PATA_SECTOR_SIZE 512
 #define PATA_PCI_BASE_CLASS 0x01
@@ -68,8 +69,8 @@ struct pata_driver_private_data {
     PATA_DISK_DRIVE disk_drive;   // channel: PRIMARY or SECONDARY
     bool            slave;
     bool            lba48;
-    uint16_t        io_base;
-    uint16_t        ctrl_base;
+    struct io_region io;          // Task file registers
+    struct io_region ctrl;        // device control / alternate status
     uint64_t        total_sectors;
     char            model[41];
     struct disk*    real_disk;

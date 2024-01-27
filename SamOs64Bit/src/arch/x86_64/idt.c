@@ -2,16 +2,16 @@
 #include "config.h"
 #include "kernel.h"
 #include "memory/memory.h"
-#include "io/io.h"
+#include "arch/x86_64/io.h"
 #include "task/task.h"
 #include "task/process.h"
 #include "status.h"
-#include "io/pit.h"
-#include "io/apic.h"
+#include "arch/x86_64/pit.h"
+#include "arch/x86_64/apic.h"
+#include "arch/x86_64/smp.h"
 #include "cpu/percpu.h"
 #include "cpu/smp.h"
 #include "isr80h/isr80h.h"
-#include "graphics/graphics.h"
 
 // 256 gates; x86 has no more vectors (the book sized it 512).
 struct idt_desc  idt_descriptors[SAMOS_TOTAL_INTERRUPTS];
@@ -21,7 +21,6 @@ extern void  idt_load(struct idtr_desc* ptr);
 extern void  isr80h_wrapper();
 extern void* interrupt_pointer_table[SAMOS_TOTAL_INTERRUPTS];
 
-static ISR80H_COMMAND isr80h_commands[SAMOS_MAX_ISR80H_COMMANDS];
 static INTERRUPT_CALLBACK_FUNCTION interrupt_callbacks[SAMOS_TOTAL_INTERRUPTS];
 
 static const char* exception_names[32] = {
@@ -69,6 +68,10 @@ void idt_dump_frame(struct trap_frame* f){
     print("\n");
 }
 
+void arch_dump_frame(struct trap_frame* frame){
+    idt_dump_frame(frame);
+}
+
 // SamOS divergence: the book panics on every exception
 // (idt_handle_exception), so one bad user program halts the machine.
 // A fault in ring 3 now kills only that process; a fault in the
@@ -112,16 +115,10 @@ static void idt_exception(struct trap_frame* frame, int from_user){
 // Lecture 52 - timer IRQ: round-robin to the next task. The EOI is
 // sent by interrupt_handler before the callback runs, since
 // task_next does not return.
-// IRQ0 is unmasked now (PIT at 100 Hz). Count the tick,
-// wake sleepers, preempt a ring-3 task if another one is ready; a
-// tick in ring 0 (the idle loop) never switches here.
-void idt_clock(struct trap_frame* frame){
-    // Every CPU has its own LAPIC timer; the tick count is
-    // the BSP's.
-    if(this_cpu()->index == 0){
-        pit_tick();
-    }
-    task_tick(frame);
+// IRQ0 is unmasked now (PIT at 100 Hz). Counting
+// the tick and preempting is the shared task_clock.
+static void idt_clock(struct trap_frame* frame){
+    task_clock(frame);
 }
 
 // An IRQ7/IRQ15 with its in-service bit clear is a spurious
@@ -226,6 +223,12 @@ int idt_register_interrupt_callback(int interrupt, INTERRUPT_CALLBACK_FUNCTION i
     return 0;
 }
 
+// An ISA IRQ arrives on vector 0x20 + irq, with the 8259s and
+// with the IOAPIC alike (apic.h).
+int arch_irq_register(int irq, INTERRUPT_CALLBACK_FUNCTION handler){
+    return idt_register_interrupt_callback(IDT_IRQ_BASE + irq, handler);
+}
+
 // Lecture 37 - 64-bit gate install.
 //
 // SamOS divergence: every gate is DPL 0 (0x8E) except
@@ -242,50 +245,6 @@ static void idt_set(int interrupt_no, void* address, uint8_t type_attr, uint8_t 
     desc->offset_2  = (uint16_t)((_address >> 16) & 0xFFFF);
     desc->offset_3  = (uint32_t)((_address >> 32) & 0xFFFFFFFF);
     desc->reserved  = 0;
-}
-
-void isr80h_register_command(int command_id, ISR80H_COMMAND command){
-    if(command_id < 0 || command_id >= SAMOS_MAX_ISR80H_COMMANDS){
-        panic("The command is out of bounds\n");
-    }
-    if(isr80h_commands[command_id]){
-        panic("Your attempting to overwrite an existing command\n");
-    }
-    isr80h_commands[command_id] = command;
-}
-
-void* isr80h_handle_command(int command, struct trap_frame* frame){
-    void* result = 0;
-    if(command < 0 || command >= SAMOS_MAX_ISR80H_COMMANDS){
-        return 0;
-    }
-    ISR80H_COMMAND command_func = isr80h_commands[command];
-    if(!command_func){
-        return 0;
-    }
-    // The window and graphics syscalls run under the
-    // graphics lock as a whole; none of them blocks.
-    bool gfx = command >= SYSTEM_COMMAND16_WINDOW_CREATE &&
-               command <= SYSTEM_COMMAND24_UPDATE_WINDOW;
-    if(gfx){
-        gfx_lock();
-    }
-    result = command_func(frame);
-    if(gfx){
-        gfx_unlock();
-    }
-    return result;
-}
-
-// Lecture 52 - syscall entry: kernel_page in, dispatch, task_page
-// out. The command is the user's rax from the frame, and the
-// result goes back through frame->rax instead of a global slot.
-void isr80h_handler(struct trap_frame* frame){
-    kernel_page();
-    task_current_save_state(frame);
-    task_check_killed();
-    frame->rax = (uint64_t)isr80h_handle_command((int)frame->rax, frame);
-    task_page();
 }
 
 void idt_init(){

@@ -29,7 +29,7 @@
 %define DIRECT_MAP_BASE      0xFFFF800000000000 ; = SAMOS_DIRECT_MAP_BASE
 
 global _start
-global kernel_registers
+global arch_kernel_context
 global div_test
 global gdt
 global default_graphics_info     ; L87 - root surface struct
@@ -136,7 +136,7 @@ bsp_gs_base:
     ret
 
 ; Not gs, which would clear the per-CPU GS base.
-kernel_registers:
+arch_kernel_context:
     mov ax, LONG_MODE_DATA_SEG
     mov ds, ax
     mov es, ax

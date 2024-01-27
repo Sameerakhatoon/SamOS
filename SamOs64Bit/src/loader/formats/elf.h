@@ -51,7 +51,7 @@
 
 // e_version / e_ident[EI_VERSION], e_machine.
 #define EV_CURRENT  1
-#define EM_X86_64   62
+#define EM_X86_64   62      // The loader checks ARCH_ELF_MACHINE
 
 // ELF class (e_ident[EI_CLASS]).
 #define ELFCLASSNONE 0

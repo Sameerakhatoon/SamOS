@@ -2,10 +2,10 @@
 // See spinlock.h and docs/locking.md.
 
 #include "spinlock.h"
-#include "arch/x86_64/atomic.h"
+#include "arch/arch.h"
 #include "cpu/percpu.h"
 #include "cpu/smp.h"
-#include "io/tsc.h"
+#include "arch/arch.h"
 #include "io/serial.h"
 #include "kernel.h"
 #include "string/string.h"
@@ -63,7 +63,7 @@ bool spin_held(struct spinlock* lock){
 // Out of line so __builtin_return_address(1) is the caller of
 // spin_lock even at -O0.
 static void __attribute__((noinline)) spin_wait(struct spinlock* lock, struct cpu* c){
-    uint64_t start = read_tsc();
+    uint64_t start = arch_counter();
     uint64_t limit = tsc_freq_val ? (SAMOS_LOCK_TIMEOUT_US / 1000000) * tsc_freq_val : 0;
     uint32_t spins = 0;
     while(!atomic_cas(&lock->locked, 0, 1)){
@@ -72,7 +72,7 @@ static void __attribute__((noinline)) spin_wait(struct spinlock* lock, struct cp
             // A CPU holding this lock may be waiting for us to flush
             // our TLB (smp.c); answer while we wait.
             smp_poll(c);
-            if(SAMOS_LOCK_DEBUG && limit && ++spins % 1024 == 0 && read_tsc() - start > limit){
+            if(SAMOS_LOCK_DEBUG && limit && ++spins % 1024 == 0 && arch_counter() - start > limit){
                 spin_report("timeout waiting for", lock, 0);
             }
         }
@@ -80,7 +80,7 @@ static void __attribute__((noinline)) spin_wait(struct spinlock* lock, struct cp
 }
 
 void spin_lock(struct spinlock* lock){
-    uint64_t flags = irq_save();
+    uint64_t flags = arch_irq_save();
     struct cpu* c = this_cpu();
     if(lock->owner == c && lock->locked){
         if(!lock->recursive){
@@ -131,5 +131,5 @@ void spin_unlock(struct spinlock* lock){
     uint64_t flags = lock->flags;
     lock->owner = 0;
     atomic_store(&lock->locked, 0);
-    irq_restore(flags);
+    arch_irq_restore(flags);
 }

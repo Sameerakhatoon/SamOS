@@ -18,8 +18,6 @@
 #define PIT_CAL_ROUNDS   3
 #define PIT_CAL_MAX_POLLS 50000000u
 
-static volatile uint64_t ticks;
-
 // Channel 0, lobyte/hibyte, mode 2 (rate generator): one IRQ0 every
 // PIT_INPUT_HZ / hz input clocks.
 void pit_init(uint32_t hz){
@@ -27,14 +25,6 @@ void pit_init(uint32_t hz){
     outb(PIT_COMMAND, 0x34);
     outb(PIT_CHANNEL0, divisor & 0xFF);
     outb(PIT_CHANNEL0, (divisor >> 8) & 0xFF);
-}
-
-uint64_t pit_ticks(void){
-    return ticks;
-}
-
-void pit_tick(void){
-    ticks++;
 }
 
 // Channel 2 in mode 0 (interrupt on terminal count): OUT2, readable

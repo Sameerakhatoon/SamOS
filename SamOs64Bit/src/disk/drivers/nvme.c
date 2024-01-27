@@ -5,7 +5,7 @@
 #include "nvme.h"
 #include "status.h"
 #include "memory/heap/kheap.h"
-#include "memory/paging/paging.h"
+#include "arch/arch.h"
 #include "memory/memory.h"
 #include "io/pci.h"
 #include "io/serial.h"
@@ -18,11 +18,11 @@ static void     nvme_disk_driver_write_reg(struct disk* d, uint32_t off, uint32_
 static void     nvme_disk_driver_unmount(struct disk* disk);
 
 static inline uint32_t nvme_read32(struct nvme_disk_driver_private* p, uint32_t off){
-    return *(volatile uint32_t*)((uintptr_t)p->base_address_nvme + off);
+    return mmio_read32((uint8_t*)p->base_address_nvme + off);
 }
 
 static inline void nvme_write32(struct nvme_disk_driver_private* p, uint32_t off, uint32_t v){
-    *(volatile uint32_t*)((uintptr_t)p->base_address_nvme + off) = v;
+    mmio_write32((uint8_t*)p->base_address_nvme + off, v);
 }
 
 static inline uint64_t nvme_read64(struct nvme_disk_driver_private* p, uint32_t off){
@@ -50,7 +50,7 @@ static bool nvme_wait_phase(struct nvme_completion_queue_entry* cqe, uint32_t ph
         if(disk_poll_expired(deadline)){
             return nvme_cqe_phase_is(cqe, phase);
         }
-        __asm__ __volatile__("pause");
+        cpu_relax();
     }
     return true;
 }
@@ -62,7 +62,7 @@ static bool nvme_wait_ready(struct nvme_disk_driver_private* p, uint32_t ready){
         if(disk_poll_expired(deadline)){
             return (nvme_read32(p, NVME_BASE_REGISTER_CSTS) & 1u) == ready;
         }
-        __asm__ __volatile__("pause");
+        cpu_relax();
     }
     return true;
 }

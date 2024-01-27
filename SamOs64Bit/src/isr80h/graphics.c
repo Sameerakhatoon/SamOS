@@ -3,6 +3,7 @@
 // userland_ptr sentinel; userland keeps the sentinel and passes
 // it back to later syscalls (L166 pixel access, L167 redraw).
 
+#include "isr80h/isr80h.h"
 #include "graphics.h"
 #include "graphics/graphics.h"
 #include "task/task.h"

@@ -1,6 +1,7 @@
 #include "memory.h"
 #include "config.h"
 #include "boot/boot_info.h"
+#include "arch/arch.h"
 
 // The map is read through the direct map.
 #define E820_COUNT   ((uint16_t*)(SAMOS_DIRECT_MAP_BASE + SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION))
@@ -25,7 +26,7 @@ extern struct samos_boot_info* samos_boot_info_ptr;
 // after entry lives there: boot_info, its command line and this map
 // are in the boot data area (SAMOS_E820_TYPE_KERNEL), the
 // framebuffer is MMIO, and kernel.asm has left the firmware's stack,
-// GDT, IDT and page tables before kernel_main. The one pointer that
+// GDT, trap table and page tables before kernel_main. The one pointer that
 // can lead into it is the ACPI RSDP, so a region holding it keeps
 // its type. Every other one becomes usable RAM, for the PFA and the
 // direct map. Returns the bytes reclaimed.
@@ -83,20 +84,14 @@ struct e820_entry* e820_largest_free_entry(void){
     return chosen;
 }
 
-// rep stosq / rep movsq (plus a byte tail) instead of a byte loop. The kernel is
-// built -O0, so the loop cost several instructions per byte; under
-// TCG zeroing the pages of one process (ELF buffer, segments, stack,
-// event ring, about 150 KiB) took most of the 5 ms a process
+// The arch's block fill and copy instead of a byte loop. The
+// kernel is built -O0, so the loop cost several instructions per byte;
+// under TCG zeroing the pages of one process (ELF buffer, segments,
+// stack, event ring, about 150 KiB) took most of the 5 ms a process
 // create/exit cycle cost, and the memory manager leak test runs 1000 of them.
-// Eight bytes per iteration (TCG runs each iteration of a rep string
-// instruction separately), then the tail a byte at a time.
+// x86 uses rep stosq / rep movsq (arch_impl.h).
 void* memset(void* ptr, int c, size_t size){
-    void*    d     = ptr;
-    size_t   words = size / 8;
-    size_t   tail  = size % 8;
-    uint64_t v     = 0x0101010101010101ull * (uint8_t)c;
-    __asm__ volatile("cld; rep stosq" : "+D"(d), "+c"(words) : "a"(v) : "memory");
-    __asm__ volatile("rep stosb" : "+D"(d), "+c"(tail) : "a"(v) : "memory");
+    arch_memset(ptr, (uint8_t)c, size);
     return ptr;
 }
 
@@ -117,11 +112,6 @@ void* memcpy(void* dest, void* src, int len){
     if(len <= 0){
         return dest;
     }
-    void*  d     = dest;
-    void*  s     = src;
-    size_t words = (size_t)len / 8;
-    size_t tail  = (size_t)len % 8;
-    __asm__ volatile("cld; rep movsq" : "+D"(d), "+S"(s), "+c"(words) : : "memory");
-    __asm__ volatile("rep movsb" : "+D"(d), "+S"(s), "+c"(tail) : : "memory");
+    arch_memcpy(dest, src, (size_t)len);
     return dest;
 }

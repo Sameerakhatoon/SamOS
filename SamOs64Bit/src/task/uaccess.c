@@ -5,7 +5,7 @@
 #include "config.h"
 #include "status.h"
 #include "memory/memory.h"
-#include "memory/paging/paging.h"
+#include "arch/arch.h"
 
 // Kernel address of the user byte at `uva`, or NULL if the process
 // may not access it.

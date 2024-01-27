@@ -203,7 +203,9 @@ void paging_switch(struct paging_desc* desc)
     paging_load_directory((uintptr_t*)paging_direct_to_phys(desc->pml));
 }
 
-struct paging_desc* paging_desc_new(paging_map_level_t root_map_level)
+// The level is the arch's own business; every descriptor is
+// 4-level.
+static struct paging_desc* paging_desc_new_level(paging_map_level_t root_map_level)
 {
     if (!paging_map_level_is_valid(root_map_level))
     {
@@ -231,6 +233,45 @@ struct paging_desc* paging_desc_new(paging_map_level_t root_map_level)
         }
     }
     return desc;
+}
+
+struct paging_desc* paging_desc_new(void)
+{
+    return paging_desc_new_level(PAGING_MAP_LEVEL_4);
+}
+
+int paging_desc_levels(struct paging_desc* desc)
+{
+    return desc->level;
+}
+
+// The PAGING_* flags of a mapped page, 0 when unmapped.
+int paging_get_flags(struct paging_desc* desc, void* virt)
+{
+    struct paging_desc_entry* e = paging_get(desc, virt);
+    if (!e || !e->present)
+    {
+        return 0;
+    }
+    return PAGING_IS_PRESENT |
+           (e->read_write      ? PAGING_IS_WRITEABLE    : 0) |
+           (e->user_supervisor ? PAGING_ACCESS_FROM_ALL : 0) |
+           (e->pwt             ? PAGING_WRITE_THROUGH   : 0) |
+           (e->pcd             ? PAGING_CACHE_DISABLED  : 0) |
+           (e->execute_disable ? PAGING_NO_EXECUTE      : 0);
+}
+
+void arch_tlb_flush_local(uint64_t va)
+{
+    if (va)
+    {
+        paging_invalidate_tlb_entry((void*)va);
+    }
+    else
+    {
+        uint64_t cr3;
+        __asm__ volatile("mov %%cr3, %0; mov %0, %%cr3" : "=r"(cr3) : : "memory");
+    }
 }
 
 bool paging_is_aligned(void* addr)
@@ -415,7 +456,7 @@ struct paging_desc* paging_kernel_desc_new(void)
     {
         panic("paging_kernel_desc_new: called twice\n");
     }
-    struct paging_desc* desc = paging_desc_new(PAGING_MAP_LEVEL_4);
+    struct paging_desc* desc = paging_desc_new_level(PAGING_MAP_LEVEL_4);
     if (!desc)
     {
         return NULL;

@@ -12,8 +12,6 @@
 #define PIT_TICK_HZ    100         // 100 Hz, a 10 ms tick
 
 void     pit_init(uint32_t hz);
-uint64_t pit_ticks(void);
-void     pit_tick(void);
 
 // TSC cycles per second measured against channel 2, or 0 when the
 // channel never reached its terminal count.

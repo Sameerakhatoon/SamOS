@@ -1,3 +1,4 @@
+#include "isr80h/isr80h.h"
 #include "process.h"
 #include "task/task.h"
 #include "task/process.h"
@@ -22,7 +23,7 @@ static void* isr80h_start_child(struct process* child){
     child->parent = parent_task->process;
     process_switch(child);
     process_unlock();
-    parent_task->registers.rax = (uint64_t)child->pid;
+    trap_frame_set_ret(&parent_task->registers, (uint64_t)child->pid);
     task_ready(parent_task);
     task_enter(child->task);
     return 0;

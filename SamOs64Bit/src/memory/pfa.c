@@ -7,7 +7,7 @@
 #include "status.h"
 #include "memory/heap/heap.h"
 #include "string/string.h"
-#include "memory/paging/paging.h"
+#include "arch/arch.h"
 #include "memory/heap/kheap.h"
 
 // The frame table and every frame it hands out are direct-map

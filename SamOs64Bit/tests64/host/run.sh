@@ -43,6 +43,9 @@ gcc -O1 -g -std=gnu99 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sa
     -I"$root/src" -o "$out/fdt_test" "$here/fdt_test.c" "$root/src/firmware/fdt.c"
 "$out/fdt_test" "$here/fixtures"
 
+# The hardware layer's done line and its structural checks.
+bash "$here/hal_check.sh"
+
 # virtio core and virtio-mmio transport against a fake MMIO block
 # device (x86 QEMU has no virtio-mmio), plus the virtio-input key map.
 vflags="-std=gnu99 -fno-builtin -Wall -Wextra -Werror -Wno-unused-parameter -DVIRTIO_HOST_TEST -I$root/src"

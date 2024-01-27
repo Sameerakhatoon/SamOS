@@ -8,9 +8,9 @@
 // helpers let later code (keyboard driver, etc) selectively
 // turn IRQs on without re-doing the whole init sequence.
 
-#include "idt/irq.h"
-#include "io/io.h"
-#include "io/apic.h"
+#include "arch/x86_64/irq.h"
+#include "arch/x86_64/io.h"
+#include "arch/x86_64/apic.h"
 
 void IRQ_enable(IRQ irq){
     // With the APIC the 8259s stay masked; the line is

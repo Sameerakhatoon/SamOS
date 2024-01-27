@@ -11,19 +11,18 @@
 #include "bootmarker.h"
 #include "memory/heap/kheap.h"
 #include "memory/memory.h"
-#include "memory/paging/paging.h"
+#include "arch/arch.h"
 #include "string/string.h"
 #include "disk/disk.h"
 #include "fs/file.h"
 #include "io/pci.h"
-#include "io/tsc.h"
-#include "io/cpuid.h"
+#include "arch/arch.h"
 #include "fs/pparser.h"
 #include "disk/streamer.h"
 #include "graphics/graphics.h"
 #include "graphics/font.h"
 #include "graphics/terminal.h"
-#include "idt/irq.h"
+#include "io/isa.h"
 #include "mouse/mouse.h"
 #include "mouse/ps2mouse.h"   // ps2_mouse_get
 #include "graphics/window.h"
@@ -154,10 +153,10 @@ static void selftest_pci_classes(void) {
 
 // TSC should monotonically advance between two reads.
 static void selftest_tsc_increases(void) {
-    uint64_t a = tsc_microseconds();
+    uint64_t a = arch_time_us();
     // small busy loop so a few cycles pass
     for (volatile int i = 0; i < 100000; i++) { }
-    uint64_t b = tsc_microseconds();
+    uint64_t b = arch_time_us();
     if (b > a) mark_pass(BM_FEATURE_TSC_INCREASES);
     else        mark_fail(BM_FEATURE_TSC_INCREASES);
 }
@@ -195,13 +194,11 @@ static void selftest_paging_lookup(void) {
     else    mark_fail(BM_FEATURE_PAGING_LOOKUP);
 }
 
-// CPUID leaf 0 must return the vendor signature in ebx/edx/ecx.
-// On any real x86 (or KVM/TCG) one of those should be non-zero.
+// The CPU must identify itself (x86: the CPUID leaf 0 vendor
+// signature; the hardware layer asks the arch, arch_cpu_identified).
 static void selftest_cpuid_vendor(void) {
-    uint32_t eax = 0, ebx = 0, ecx = 0, edx = 0;
-    cpuid(0, 0, &eax, &ebx, &ecx, &edx);
-    if (ebx | ecx | edx) mark_pass(BM_FEATURE_CPUID_VENDOR);
-    else                  mark_fail(BM_FEATURE_CPUID_VENDOR);
+    if (arch_cpu_identified()) mark_pass(BM_FEATURE_CPUID_VENDOR);
+    else                       mark_fail(BM_FEATURE_CPUID_VENDOR);
 }
 
 // Note: disk_streamer end-to-end is implicitly exercised by the
@@ -364,11 +361,11 @@ int kernel_selftest(void) {
     selftest_graphics_fb();
     selftest_graphics_size();
     selftest_framebuffer_painted();
-    // L67 IRQ_enable / IRQ_disable round trip on the keyboard
-    // mask. The kernel needs IRQ1 enabled to receive PS/2
-    // keyboard events; disable+re-enable should not panic.
-    IRQ_disable(IRQ_KEYBOARD);
-    IRQ_enable(IRQ_KEYBOARD);
+    // L67 mask / unmask round trip on the keyboard line. The
+    // kernel needs IRQ1 enabled to receive PS/2 keyboard events;
+    // disable+re-enable should not panic.
+    arch_irq_mask(IRQ_KEYBOARD);
+    arch_irq_unmask(IRQ_KEYBOARD);
     mark_pass(BM_FEATURE_IRQ_API);
 
     // L77 / L78 GPT virtual disks: disk_get(1) should be the
@@ -505,9 +502,9 @@ int kernel_selftest(void) {
     // L128 TSC frequency: a 100us busy loop must register at
     // least one microsecond of TSC time.
     {
-        uint64_t a = tsc_microseconds();
+        uint64_t a = arch_time_us();
         for (volatile int i = 0; i < 1000; i++) { }
-        uint64_t b = tsc_microseconds();
+        uint64_t b = arch_time_us();
         if (b >= a) mark_pass(BM_FEATURE_TSC_FREQ);
         else        mark_fail(BM_FEATURE_TSC_FREQ);
     }

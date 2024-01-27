@@ -9,7 +9,6 @@
 // read kernel output without the framebuffer. QEMU exposes it via
 // `-serial stdio` or `-serial file:PATH`.
 
-#define SERIAL_COM1_PORT 0x3F8
 
 void serial_init(void);
 void serial_putc(char c);

@@ -1,10 +1,10 @@
 ; Lecture 41 - task.asm 64-bit rewrite.
 ;
-;   task_return(struct trap_frame* regs)
+;   arch_task_return(struct trap_frame* regs)
 ;     Build an iretq frame from the saved user state and drop to
 ;     ring 3. Args in RDI per SysV.
 ;
-;   user_registers()
+;   arch_user_context()
 ;     Load the user data selector (USER_DATA_SEGMENT = 0x33)
 ;     into ds/es/fs/gs. CS and SS come from the iretq frame.
 ;
@@ -15,8 +15,8 @@
 [BITS 64]
 section .asm
 
-global task_return
-global user_registers
+global arch_task_return
+global arch_user_context
 
 ; struct trap_frame offsets (idt/idt.h)
 %define TF_R15     0
@@ -38,8 +38,8 @@ global user_registers
 %define TF_RFLAGS  152
 %define TF_RSP     160
 
-; void task_return(struct trap_frame* regs)
-task_return:
+; void arch_task_return(struct trap_frame* regs)
+arch_task_return:
     cli                                ; until iretq reloads RFLAGS
     push qword 0x33                    ; SS = USER_DATA_SEGMENT
     push qword [rdi + TF_RSP]
@@ -66,10 +66,10 @@ task_return:
     swapgs                             ; User GS base for ring 3
     iretq
 
-; void user_registers()
+; void arch_user_context()
 ; gs is not loaded; a selector load clears the GS base,
 ; which holds this CPU's struct cpu while in the kernel.
-user_registers:
+arch_user_context:
     mov ax, 0x33                       ; USER_DATA_SEGMENT
     mov ds, ax
     mov es, ax

@@ -1,20 +1,21 @@
 // Host-side test of the PS/2 scancode-set-1 translator in
 // src/keyboard/classic.c: Shift, Caps Lock, Ctrl, Alt, AltGr, the
 // E0 prefix and the table bounds. run.sh links classic.c with the
-// stubs below.
+// stubs below (the arch/arch.h calls it makes).
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
 #include "keyboard/keyboard.h"
 #include "keyboard/classic.h"
+#include "arch/arch.h"
 
 uint8_t classic_keyboard_scancode_to_char(uint8_t scancode);
 
 // ---- stubs for what classic.c calls ----------------------------
-void outb(unsigned short port, unsigned char val){ (void)port; (void)val; }
-unsigned char insb(unsigned short port){ (void)port; return 0; }
-int idt_register_interrupt_callback(int i, void* cb){ (void)i; (void)cb; return 0; }
-void IRQ_enable(int irq){ (void)irq; }
+void arch_pio_write8(uint16_t port, uint8_t val){ (void)port; (void)val; }
+uint8_t arch_pio_read8(uint16_t port){ (void)port; return 0; }
+int arch_irq_register(int irq, INTERRUPT_CALLBACK_FUNCTION cb){ (void)irq; (void)cb; return 0; }
+void arch_irq_unmask(int irq){ (void)irq; }
 void keyboard_push(char c){ (void)c; }
 void keyboard_push_event_to_listeners(struct keyboard* k, struct keyboard_event* e){ (void)k; (void)e; }
 void keyboard_set_capslock(struct keyboard* k, KEYBOARD_CAPS_LOCK_STATE s){ k->capslock_state = s; }

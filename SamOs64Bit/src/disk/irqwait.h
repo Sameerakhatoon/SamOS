@@ -6,13 +6,15 @@
 // There is one kernel stack, so a syscall that reads the disk
 // cannot sleep and let another task run: the driver still waits in
 // place, but on the interrupt instead of the device. The handler acks
-// the device and sets `pending`; the wait opens interrupts with
-// `sti; nop; cli; pause` (the nop gives the one-instruction sti shadow
-// something to cover) and reads only that flag. The LAPIC TPR is
-// APIC_TPR_DISK_WAIT meanwhile, so only the disk vectors (0x50-0x5F)
-// are taken: the keyboard, the mouse and the scheduler tick stay
-// pending in the LAPIC as they do with IF clear, and no other handler
-// runs in the middle of a syscall.
+// the device and sets `pending`; the wait opens interrupts for one
+// instruction at a time (arch_irq_wait_window; on x86 `sti; nop; cli;
+// pause`, the nop gives the one-instruction sti shadow something to
+// cover) and reads only that flag. Between arch_irq_wait_begin
+// and _end only the completion lines are taken (x86: the LAPIC TPR is
+// APIC_TPR_DISK_WAIT, so only vectors 0x50-0x5F): the keyboard, the
+// mouse and the scheduler tick stay pending as they do with
+// interrupts off, and no other handler runs in the middle of a
+// syscall.
 //
 // Each interrupt is checked against the device (`done`), so a late
 // interrupt from an earlier command does not end a wait early, and the
@@ -20,33 +22,35 @@
 // done but no interrupt came within one grace period the wait returns
 // and counts as polled; DISK_IRQ_MAX_MISSES of those in a row and the
 // driver polls for good. A device that never finishes runs into the
-// usual disk_poll_deadline. Without the APIC (samos.legacy_pic, no
-// MADT) nothing is enabled and the drivers poll as in the storage work.
+// usual disk_poll_deadline. Without a routable controller
+// (samos.legacy_pic, no MADT) nothing is enabled and the drivers poll
+// as in the storage work.
 //
 // Header only, so no Makefile change.
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "arch/arch.h"
 #include "disk/poll.h"
-#include "io/apic.h"
 #include "io/serial.h"
 #include "acpi/acpi.h"
 #include "bootmarker.h"
 #include "boot/cmdline.h"
 #include "string/string.h"
 #include "cpu/percpu.h"
-#include "cpu/smp.h"
 
 // With several CPUs a wait runs under the disk lock
-// (interrupts off, opened only in the TPR-limited window below) on
+// (interrupts off, opened only in the limited window below) on
 // whichever CPU made the request. disk_irq_arm points the line at
 // that CPU before the command goes out, so the completion is taken
 // by the CPU that waits for it; the BSP may be spinning on the disk
 // lock with interrupts off meanwhile. The disk lock is one for all
 // disks, so one line has one waiter at a time.
 
-#define DISK_VECTOR_AHCI          (APIC_VECTOR_DISK_BASE + 0)
-#define DISK_VECTOR_PATA(channel) (APIC_VECTOR_DISK_BASE + 2 + (channel))
+// The drivers' completion line slots (arch_irq_attach_gsi).
+// Slots 4-11 are virtio_pci.c's INTx lines (VIRTIO_SLOT_BASE).
+#define DISK_SLOT_AHCI            0
+#define DISK_SLOT_PATA(channel)   (2 + (channel))
 
 // 2^24 cycles: 3 to 17 ms between 1 and 5 GHz.
 #define DISK_IRQ_GRACE_CYCLES     (1ULL << 24)
@@ -59,7 +63,7 @@ struct disk_irq {
     const char*         name;
     boot_marker_stage_t marker;     // counts completions taken at the interrupt
     uint32_t            gsi;        // The routed line
-    uint32_t            dest;       // APIC id it is sent to now
+    struct cpu*         dest;       // CPU it is sent to now
     volatile uint32_t   signal_cpu; // CPU index the handler ran on
 };
 
@@ -69,17 +73,17 @@ static inline bool disk_irq_masked_by_cmdline(void){
 }
 
 static inline void disk_irq_count(boot_marker_stage_t stage){
-    volatile uint64_t* slots = (volatile uint64_t*)(0xFFFF800000000000ULL + BOOT_MARKER_BASE);
+    volatile uint64_t* slots = (volatile uint64_t*)(SAMOS_DIRECT_MAP_BASE + BOOT_MARKER_BASE);
     uint64_t v = slots[stage];
     uint32_t n = (v >> 24) == ((BOOT_MARKER_MAGIC_PREFIX << 8) | stage) ? (uint32_t)(v & 0xFFFFFF) : 0;
     boot_marker_set(stage, n + 1);
 }
 
 // "disk: ahci completions by interrupt, GSI 16 level active-high, vector 80"
-// Called once the line is routed (to the BSP, by ioapic_route_gsi).
-static inline void disk_irq_report(struct disk_irq* q, uint32_t gsi, uint16_t inti, uint8_t vector, bool masked){
+// Called once the line is routed (to the BSP, by arch_irq_attach_gsi).
+static inline void disk_irq_report(struct disk_irq* q, uint32_t gsi, uint16_t inti, int line, bool masked){
     q->gsi  = gsi;
-    q->dest = lapic_id();
+    q->dest = this_cpu();
     serial_write("disk: ");
     serial_write(q->name);
     serial_write(" completions by interrupt, GSI ");
@@ -87,7 +91,7 @@ static inline void disk_irq_report(struct disk_irq* q, uint32_t gsi, uint16_t in
     serial_write((inti & ACPI_INTI_TRIGGER_MASK) == ACPI_INTI_TRIGGER_LEVEL ? " level" : " edge");
     serial_write((inti & ACPI_INTI_POLARITY_MASK) == ACPI_INTI_POLARITY_LOW ? " active-low" : " active-high");
     serial_write(", vector ");
-    serial_write(itoa(vector));
+    serial_write(itoa(line));
     serial_write(masked ? ", line masked (samos.disk_irq_masked)\n" : "\n");
 }
 
@@ -96,9 +100,9 @@ static inline void disk_irq_report(struct disk_irq* q, uint32_t gsi, uint16_t in
 static inline void disk_irq_arm(struct disk_irq* q){
     q->pending = 0;
     if(q->enabled && smp_active()){
-        uint32_t id = this_cpu()->apic_id;
-        if(id != q->dest && ioapic_set_dest(q->gsi, id) == 0){
-            q->dest = id;
+        struct cpu* me = this_cpu();
+        if(me != q->dest && arch_irq_set_cpu(q->gsi, me) == 0){
+            q->dest = me;
         }
     }
 }
@@ -115,14 +119,12 @@ static inline bool disk_irq_wait(struct disk_irq* q, bool (*done)(void*), void* 
     if(!q->enabled){
         return false;
     }
-    uint64_t rflags;
-    __asm__ volatile("pushfq; pop %0" : "=r"(rflags));
-    uint32_t tpr = lapic_set_tpr(APIC_TPR_DISK_WAIT);
+    uint64_t state = arch_irq_wait_begin();
     uint64_t end = disk_poll_deadline();
-    uint64_t check = read_tsc() + DISK_IRQ_GRACE_CYCLES;
+    uint64_t check = arch_counter() + DISK_IRQ_GRACE_CYCLES;
     bool seen_done = false, irq = false;
     while(!disk_poll_expired(end)){
-        __asm__ volatile("sti; nop; cli; pause" ::: "memory");
+        arch_irq_wait_window();
         if(q->pending){
             q->pending = 0;
             if(done(ctx)){
@@ -135,13 +137,10 @@ static inline bool disk_irq_wait(struct disk_irq* q, bool (*done)(void*), void* 
                 break;          // done a grace period ago, still no interrupt
             }
             seen_done = done(ctx);
-            check = read_tsc() + DISK_IRQ_GRACE_CYCLES;
+            check = arch_counter() + DISK_IRQ_GRACE_CYCLES;
         }
     }
-    lapic_set_tpr(tpr);
-    if(rflags & 0x200){
-        __asm__ volatile("sti");
-    }
+    arch_irq_wait_end(state);
     if(irq){
         q->misses = 0;
         disk_irq_count(q->marker);

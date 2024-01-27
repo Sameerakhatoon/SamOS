@@ -9,26 +9,25 @@
 //   - kernel_main banner     (Hello 64-bit!)
 //
 // Everything else from the 32-bit kernel_main (GDT/TSS, kheap, paging,
-// IDT, FAT16, processes, scheduler) is still out of the build and
-// comes back lecture by lecture.
+// interrupts, FAT16, processes, scheduler) is still out of the build
+// and comes back lecture by lecture.
+//
+// Everything that touches the CPU, the interrupt controller or
+// the timer goes through arch/arch.h; x86's half of the boot sequence
+// is in src/arch/x86_64/ (arch.c, smp.c).
 
 #include "kernel.h"
 #include <stddef.h>
 #include <stdint.h>
-#include "idt/idt.h"
+#include "arch/arch.h"
 #include "memory/heap/kheap.h"
 #include "memory/heap/heap.h"
 #include "memory/heap/memtest.h"
 #include "memory/memory.h"
-#include "memory/paging/paging.h"
 #include "string/string.h"
-#include "task/tss.h"
 #include "task/task.h"
 #include "task/process.h"
 #include "isr80h/isr80h.h"
-#include "io/tsc.h"           // L129 - udelay
-#include "io/pit.h"           // 100 Hz tick
-#include "idt/irq.h"          // Unmask IRQ0
 #include "io/pci.h"           // L180 - pci_init
 #include "bootmarker.h"       // e2e: stage markers for runtime tests
 #include "kernel_selftest.h"  // e2e: feature-level runtime self-tests
@@ -47,20 +46,17 @@
 #include "mouse/mouse.h"          // L150 - mouse_system_init / load_static_drivers
 #include "io/serial.h"            // COM1 console
 #include "boot/boot_info.h"       // Loader handoff block
-#include "cpu/cpu.h"              // CPUID checks, CR0/CR4/EFER
 #include "acpi/acpi.h"            // ACPI tables, shutdown, reboot
 #include "io/rtc.h"               // Wall-clock time
 #include "fs/fat/fat.h"           // RTC time for FAT timestamps
-#include "io/apic.h"              // LAPIC, IOAPIC, LAPIC timer
 #include "cpu/percpu.h"           // Per-CPU data
 #include "cpu/smp.h"              // APs, IPIs, panic stop
 #include "cpu/smp_selftest.h"     // IPI and shootdown checks
 
-// L87 - bss-resident default_graphics_info lives in kernel.asm;
-// the long-mode entry stashes the UEFI framebuffer params into it
-// before any C code runs. kernel_main only needs the address.
+// L87 - bss-resident default_graphics_info lives in the arch's entry
+// code (x86: kernel.asm), which stashes the UEFI framebuffer params
+// into it before any C code runs. kernel_main only needs the address.
 extern struct graphics_info default_graphics_info;
-#include "gdt/gdt.h"
 #include "config.h"
 #include "status.h"
 
@@ -105,9 +101,9 @@ void print(const char* str)
 // of silent while(1)s, so we get a visible reason on VGA.
 void panic(const char* msg)
 {
-    // Stop the other CPUs first (NMI), then write
+    // Stop the other CPUs first (x86: NMI), then write
     // without locks: their holders may be among the stopped CPUs.
-    __asm__ volatile("cli");
+    arch_irq_disable();
     smp_panic_begin();
     serial_write_unlocked("\nKERNEL PANIC: ");
     serial_write_unlocked(msg);
@@ -120,10 +116,7 @@ void panic(const char* msg)
     }
     // SamOs divergence: halt with interrupts off instead of a
     // busy spin, so a panicked kernel stops burning a host CPU.
-    while (1)
-    {
-        __asm__ volatile("cli; hlt");
-    }
+    arch_halt();
 }
 
 // Lecture 15 - the kernel's own paging descriptor. Created once in
@@ -133,26 +126,16 @@ void panic(const char* msg)
 struct paging_desc* kernel_paging_desc = 0;
 
 // Lecture 15 - restore the kernel address space + reload segregs.
-// Symmetric counterpart to a (future) user_page() that loads a
-// task's PML4 + user data selectors. Order matters: switch CR3
-// first so subsequent loads hit kernel mappings; reload segregs
-// after so any latent user-mode selector is gone before we run
-// kernel code.
+// Symmetric counterpart to task_page, which loads a task's address
+// space and user data selectors. The selectors are the arch's
+// kernel context (x86: data segments; nothing on aarch64 and riscv64).
 void kernel_page()
 {
-    kernel_registers();
+    arch_kernel_context();
     paging_switch(kernel_paging_desc);
     // No process address space on this CPU any more.
     this_cpu()->user_desc = NULL;
 }
-
-// Lecture 38 - asm-side #DE trigger (kept around for ad-hoc
-// debugging; not currently called).
-extern void div_test(void);
-
-// Lecture 50 - the static GDT lives in kernel.asm. C side
-// installs the TSS descriptor into slot 7 + 8.
-extern struct gdt_entry gdt[];
 
 // Lecture 44 - public getter for the kernel's paging_desc.
 // Anyone needing to walk the kernel address space (e.g.
@@ -162,8 +145,8 @@ struct paging_desc* kernel_desc(){
     return kernel_paging_desc;
 }
 
-// Set by kernel.asm from the loader's rdi.
-extern struct samos_boot_info* samos_boot_info_ptr;
+// samos_boot_info_ptr (arch/arch.h) is set by the arch's
+// entry code from the loader's handoff.
 
 static int cmdline_has(const char* word)
 {
@@ -177,15 +160,6 @@ static int cmdline_has(const char* word)
         }
     }
     return 0;
-}
-
-// TSS with the ring-0 stack and the IST stacks for #DF, NMI
-// and #MC. Runs before idt_init, whose gates name the IST slots.
-// The TSS and stacks are per CPU now (cpu_tss_init in
-// cpu/smp.c); this sets up the BSP's and loads its TSS.
-static void kernel_tss_init(void)
-{
-    smp_bsp_init();
 }
 
 // e2e hook: CMDLINE.TXT "samos.run=PROG.ELF arg ...;PROG2.ELF ..."
@@ -296,18 +270,16 @@ void kernel_main(void)
     serial_write(samos_boot_info_ptr->cmdline);
     serial_write("\"\n");
 
-    // Check the CPU and set CR0, CR4 and EFER before any
-    // code that depends on them.
-    cpu_init();
+    // Check the CPU and set its control registers before any
+    // code that depends on them; the cycle counter's
+    // frequency. Both are the arch's early set-up.
+    arch_early_init();
 
-    // TSC frequency, checked against PIT channel 2.
-    tsc_init();
-
-    // e2e hook: fault before idt_init so the early IDT has
-    // to catch it and dump registers on COM1.
+    // e2e hook: fault before arch_trap_init so the early trap
+    // table has to catch it and dump registers on the console.
     if (cmdline_has("samos.early_fault_test"))
     {
-        __asm__ volatile("ud2");
+        arch_fault_test(ARCH_FAULT_TEST_UNDEFINED);
     }
 
     boot_marker_set(BM_STAGE_KERNEL_MAIN, 0);
@@ -367,7 +339,7 @@ void kernel_main(void)
         panic("Failed to create kernel paging descriptor\n");
     }
 
-    // Lecture 23 - switch CR3 to it. The L21 marker print is gone;
+    // Lecture 23 - switch to it. The L21 marker print is gone;
     // if we got here without faulting, paging_switch worked.
     paging_switch(kernel_paging_desc);
     boot_marker_set(BM_STAGE_PAGING_SWITCHED, 0);
@@ -384,7 +356,8 @@ void kernel_main(void)
 
     // ACPI tables (MADT, FADT, MCFG) before PCI and the
     // interrupt controllers; the RTC needs the FADT century register.
-    acpi_init(samos_boot_info_ptr->acpi_rsdp);
+    // The arch's firmware tables (x86: ACPI).
+    arch_firmware_init();
     rtc_init();
     fat_set_time_source(rtc_unix_time);   // File timestamps
 
@@ -396,52 +369,35 @@ void kernel_main(void)
     graphics_setup(&default_graphics_info);
     screen_info = graphics_screen_info();
 
-    // Lecture 50 - bring up IDT and the TSS so ring-3 traps have a
-    // kernel-side stack to land on. The TSS goes first, since
-    // the #DF, NMI and #MC gates name its IST stacks.
-    kernel_tss_init();
-    idt_init();
-    boot_marker_set(BM_STAGE_IDT_LIVE, 0);
+    // Lecture 50 - bring up the trap vectors and the trap stacks so
+    // user-mode traps have a kernel-side stack to land on (the hardware layer:
+    // arch_trap_init; x86: the TSS first, since the #DF, NMI and #MC
+    // gates name its IST stacks).
+    arch_trap_init();
+    boot_marker_set(BM_STAGE_TRAPS_LIVE, 0);
 
-    // PIT channel 0 at 100 Hz on IRQ0,
-    // unmasked. Interrupts stay off in the kernel until the first
-    // iretq into a task (or the idle loop) sets IF.
-    // The LAPIC and IOAPIC replace the 8259s, and the
-    // LAPIC timer (calibrated against PIT channel 2) the PIT tick, at
-    // the same 100 Hz. Without a usable MADT, or with samos.legacy_pic,
-    // the 8259s and the PIT stay. If the APIC is up but the LAPIC
-    // timer measures 0, the PIT ticks through the IOAPIC instead
-    // (IRQ_enable routes IRQ0 to its GSI); samos.lapic_timer_fail
-    // forces that path for e2e/179.
-    int apic = !cmdline_has("samos.legacy_pic") && apic_init() == 0;
-    int lapic_tick = 0;
-    if (apic && !cmdline_has("samos.lapic_timer_fail") &&
-        lapic_timer_calibrate() == 0)
-    {
-        lapic_timer_start(PIT_TICK_HZ);
-        lapic_tick = 1;
-    }
-    else
-    {
-        serial_write(apic ? "apic: IOAPIC with PIT tick\n"
-                          : "apic: legacy 8259 and PIT tick\n");
-        pit_init(PIT_TICK_HZ);
-        IRQ_enable(IRQ_TIMER);
-    }
+    // The 100 Hz scheduler tick.
+    // Interrupts stay off in the kernel until the first return into a
+    // task (or the idle loop) opens them. The interrupt
+    // controller first (x86: IOAPIC + LAPIC, or the 8259s with
+    // samos.legacy_pic or without a MADT). The choice of tick
+    // source is the arch's; true when every CPU has a tick of its own.
+    arch_irq_init();
+    bool smp_tick = arch_timer_start(SAMOS_TICK_HZ);
 
     // e2e hooks: a kernel-mode fault must panic with a
     // register dump; a fault that cannot push its frame must reach
-    // the #DF handler on its IST stack.
+    // the double-fault handler on its own stack.
     if (cmdline_has("samos.kernel_fault_test"))
     {
-        __asm__ volatile("ud2");
+        arch_fault_test(ARCH_FAULT_TEST_UNDEFINED);
     }
     if (cmdline_has("samos.double_fault_test"))
     {
-        __asm__ volatile("mov %0, %%rsp; push %%rax" : : "r"(0x00007ff000000000ull));
+        arch_fault_test(ARCH_FAULT_TEST_BAD_STACK);
     }
 
-    // Lecture 180 - enumerate PCI devices once the IDT is up.
+    // Lecture 180 - enumerate PCI devices once traps are up.
     pci_init();
     boot_marker_set(BM_STAGE_PCI_SCANNED, (uint32_t)pci_device_count());
 
@@ -535,7 +491,7 @@ void kernel_main(void)
     }
 
     // Lecture 50/55 - the TSS is built and loaded by
-    // kernel_tss_init, before idt_init.
+    // arch_trap_init.
 
     // Lecture 114 - build the process slot vector before any
     // process_load can touch it.
@@ -574,12 +530,12 @@ void kernel_main(void)
     }
 
     // The other CPUs, once everything they could touch
-    // exists and before the first process. They need the LAPIC tick:
-    // on the legacy 8259/PIT path the BSP runs alone. samos.nosmp
-    // keeps one CPU on a multi-CPU machine.
-    if (lapic_tick && !cmdline_has("samos.nosmp"))
+    // exists and before the first process. They need a tick of their
+    // own (x86: the LAPIC timer): on the legacy 8259/PIT path the BSP
+    // runs alone. samos.nosmp keeps one CPU on a multi-CPU machine.
+    if (smp_tick && !cmdline_has("samos.nosmp"))
     {
-        smp_start_aps();
+        arch_start_cpus();
         smp_selftest_run(cmdline_has("samos.smp_panic_test"));
     }
 
@@ -608,7 +564,7 @@ void kernel_main(void)
         if(process_load_switch("@:/BLANK.ELF", &user_selftest_proc) == SAMOS_ALL_OK){
             print("e2e: running user-side BLANK.ELF selftest\n");
             process_start(user_selftest_proc);
-            // No sti here: task_return sets IF in the iretq
+            // No sti here: arch_task_return sets IF in the iretq
             // frame. An IRQ taken in this window (a latched IRQ1)
             // saved the kernel frame as the task's user state, and
             // the first iretq faulted on SS 0x20.
@@ -710,15 +666,14 @@ void kernel_main(void)
     print("user enter\n");
     process_start(p);
     // task_run_first_ever_task never returns. After this:
-    //   - CR3 = task's PML4
-    //   - iretq into ring 3 at SAMOS_PROGRAM_VIRTUAL_ADDRESS
+    //   - the task's address space is loaded
+    //   - the CPU drops to user mode at SAMOS_PROGRAM_VIRTUAL_ADDRESS
     //   - user code (jmp $) spins forever
     //
     // L52 enabled the timer IRQ callback. With the PIC not yet
-    // remapped (L61), IRQ0 lands at vector 0x08 - the same
-    // vector the CPU uses for #DF. Our IDT vector 8 is
-    // registered as idt_handle_exception which panics "Panic
-    // Exception" so we observe both "user enter" AND "Panic
+    // remapped (L61), IRQ0 landed at vector 0x08 - the same
+    // vector the CPU uses for #DF, whose handler panicked "Panic
+    // Exception", so the book showed both "user enter" AND "Panic
     // Exception" on screen, with the user code running between
     // them. L61 remaps the PIC to vectors 0x20+ to clear the
     // collision.

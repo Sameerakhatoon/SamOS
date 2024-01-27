@@ -46,7 +46,7 @@ typedef enum {
     BM_STAGE_KERNEL_MAIN      = 1,   // very first kernel_main statement
     BM_STAGE_PAGING_SWITCHED  = 2,   // kernel_paging_desc is live
     BM_STAGE_MULTIHEAP_READY  = 3,   // kheap_post_paging completed
-    BM_STAGE_IDT_LIVE         = 4,   // idt_init completed
+    BM_STAGE_TRAPS_LIVE       = 4,   // arch_trap_init completed
     BM_STAGE_PCI_SCANNED      = 5,   // pci_init: value = device count
     BM_STAGE_DISK_INITED      = 6,   // disk_search_and_init returned
     BM_STAGE_FS_RESOLVED      = 7,   // fs_init returned

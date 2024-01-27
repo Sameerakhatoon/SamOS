@@ -25,7 +25,7 @@
 #include "kernel.h"
 #include "memory/memory.h"
 #include "memory/pfa.h"
-#include "memory/paging/paging.h"
+#include "arch/arch.h"
 #include "lib/spinlock/spinlock.h"
 
 struct multiheap* kernel_multiheap = NULL;

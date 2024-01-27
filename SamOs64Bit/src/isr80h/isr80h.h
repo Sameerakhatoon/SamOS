@@ -70,4 +70,20 @@ enum SystemCommands {
 
 void isr80h_register_commands();
 
+// The syscall dispatch, moved here from the x86 trap code: every arch's
+// syscall entry (x86: int 0x80, aarch64: svc, riscv64: ecall) calls
+// isr80h_handler with the trap frame; the command number, arguments
+// and result go through the arch's trap_frame accessors.
+#include "arch/arch.h"
+
+typedef void* (*ISR80H_COMMAND)(struct trap_frame* frame);
+
+void  isr80h_register_command(int command_id, ISR80H_COMMAND command);
+void  isr80h_handler(struct trap_frame* frame);
+
+// Argument `n` (0-5) of the syscall in `frame`.
+static inline void* isr80h_arg(struct trap_frame* frame, int n){
+    return trap_frame_arg(frame, n);
+}
+
 #endif

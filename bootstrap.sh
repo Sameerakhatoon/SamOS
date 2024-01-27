@@ -9,6 +9,16 @@
 #   3. EDK2 + BaseTools at $HOME/edk2/, with this project symlinked
 #      under MdeModulePkg/Application/SamOs/ for the UEFI build.
 #
+# The aarch64 and riscv64 ports (`make ARCH=aarch64|riscv64`,
+# tests64/arch/) come from apt in layer 1: Ubuntu's
+# gcc-aarch64-linux-gnu and gcc-riscv64-linux-gnu, used freestanding
+# (no libc, no crt, own linker script), and qemu-system-arm /
+# qemu-system-misc with the OpenSBI firmware. The plan named
+# aarch64-elf-gcc and riscv64-elf-gcc; with these flags the Linux
+# triplets produce the same code, so no
+# bare-metal build is needed. To use one anyway, pass
+# `make ARCH=aarch64 CROSS=aarch64-elf-`.
+#
 # Layers are idempotent: each one no-ops if the artefact is already
 # present. Re-run as often as you like.
 #
@@ -62,6 +72,14 @@ else
         acpica-tools
         python3
         python3-distutils-extra
+        # The aarch64 and riscv64 ports (see the header):
+        gcc-aarch64-linux-gnu
+        binutils-aarch64-linux-gnu
+        gcc-riscv64-linux-gnu
+        binutils-riscv64-linux-gnu
+        qemu-system-arm
+        qemu-system-misc
+        opensbi
     )
     MISSING=()
     for p in "${APT_PKGS[@]}"; do
@@ -184,10 +202,12 @@ fi
 echo
 printf "${GREEN}==> bootstrap complete${RESET}\n"
 printf "    cross compiler : %s\n" "$PREFIX/bin/${TARGET}-gcc"
+printf "    port compilers : %s\n" "$(command -v aarch64-linux-gnu-gcc || echo missing) $(command -v riscv64-linux-gnu-gcc || echo missing)"
 printf "    EDK2 root      : %s\n" "$EDK2_ROOT"
 printf "    samos project  : %s\n" "$SAMOS_ROOT"
 echo
 echo "Next steps:"
 echo "    cd $SAMOS_ROOT"
 echo "    bash build.sh                                  # build kernel + UEFI + disk image"
+echo "    make -C SamOs64Bit ARCH=aarch64                # the ARM64 port (riscv64 likewise)"
 echo "    bash SamOs64Bit/tests64/e2e/run-all.sh         # run all 122 e2e tests"

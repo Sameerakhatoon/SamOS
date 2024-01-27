@@ -24,35 +24,8 @@
 #define SAMOS_BOOT_INFO_LOCATION    SAMOS_BOOT_DATA_LOCATION
 #define SAMOS_MEMORY_MAP_MAX_ENTRIES 512
 
-#define KERNEL_CODE_SELECTOR    0x08
-#define KERNEL_DATA_SELECTOR    0x10
-
-// Lecture 37 - the 64-bit code segment selector lives at GDT
-// offset 0x18 (kernel.asm's GDT entry with L=1).
-#define KERNEL_LONG_MODE_CODE_SELECTOR  0x18
-
-// Lecture 55 - TSS selector. The 64-bit TSS descriptor lives
-// in GDT slot 7 (its high half spills into slot 8). Selector
-// = slot * 8 = 0x38.
-#define KERNEL_LONG_MODE_TSS_SELECTOR   0x38
-
-// Lecture 49 - TSS descriptor access byte.
-//   bit 7 (P)     = 1  present
-//   bits 5..6 (DPL) = 00  ring 0
-//   bit 4 (S)     = 0  system descriptor (TSS lives in system class)
-//   bits 0..3 (type) = 1001 = available 64-bit TSS
-//   = 1000 1001 = 0x89
-#define TSS_DESCRIPTOR_TYPE  0x89
-
-// Lecture 50 - GDT slot indices for the C side.
-#define KERNEL_LONG_MODE_CODE_GDT_INDEX  3
-#define KERNEL_LONG_MODE_DATA_GDT_INDEX  4
-#define KERNEL_LONG_MODE_TSS_GDT_INDEX   7
-
-#define SAMOS_TOTAL_INTERRUPTS  256
-
-// Stacks the TSS IST slots switch to for #DF, NMI and #MC.
-#define KERNEL_IST_STACK_SIZE   (16 * 1024)
+// The segment selectors, GDT slots, TSS and IST sizes moved to
+// arch/x86_64/segments.h.
 
 #define SAMOS_HEAP_BLOCK_SIZE           4096
 
@@ -85,8 +58,6 @@
 #define SAMOS_MAX_FILESYSTEMS        12
 #define SAMOS_MAX_FILE_DESCRIPTORS  512
 
-#define SAMOS_TOTAL_GDT_SEGMENTS     6
-
 #define SAMOS_PROGRAM_VIRTUAL_ADDRESS                       0x400000
 #define SAMOS_USER_PROGRAM_STACK_SIZE                       (1024 * 16)
 #define SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START           0x3FF000
@@ -115,27 +86,14 @@
 #define SAMOS_KERNEL_HEAP_ARENA_BASE    0xFFFFC00000000000ULL
 #define SAMOS_KERNEL_VMA                0xFFFFFFFF80000000ULL
 
-// Lecture 40 + L41 fix - user segment selectors point at the
-// L39 user GDT entries with RPL=3 OR'd in. The L39 GDT lays out
-// the user code seg at slot 0x28 and the user data seg at
-// 0x30, so with RPL=3:
-//   USER_CODE_SEGMENT = 0x28 | 3 = 0x2B
-//   USER_DATA_SEGMENT = 0x30 | 3 = 0x33
-//
-// SamOs deviation: upstream PeachOS64 swaps these two macros
-// (#define USER_DATA_SEGMENT 0x2B / USER_CODE_SEGMENT 0x33)
-// which contradicts the GDT layout - their task.c then assigns
-// task->registers.cs = USER_CODE_SEGMENT = 0x33 (their "code"
-// macro), but 0x33 indexes the data seg descriptor. It works
-// on QEMU because long-mode SS / CS validation is loose, but
-// it's wrong. We use the correct mapping.
-#define USER_CODE_SEGMENT       0x2B
-#define USER_DATA_SEGMENT       0x33
-
 #define SAMOS_MAX_PROGRAM_ALLOCATIONS    1024
 #define SAMOS_MAX_PROCESSES              16
 
 #define SAMOS_MAX_ISR80H_COMMANDS        1024
+
+// The scheduler tick: 100 Hz, a 10 ms tick on every arch
+// (arch_timer_start).
+#define SAMOS_TICK_HZ                    100
 
 #define SAMOS_KEYBOARD_BUFFER_SIZE       1024
 

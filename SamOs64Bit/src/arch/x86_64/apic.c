@@ -16,12 +16,12 @@
 //      unmasks one.
 // MMIO goes through the direct map (paging_map_mmio, uncached).
 
-#include "io/apic.h"
-#include "io/io.h"
+#include "arch/x86_64/apic.h"
+#include "arch/x86_64/io.h"
 #include "io/serial.h"
-#include "io/pit.h"
+#include "arch/x86_64/pit.h"
 #include "acpi/acpi.h"
-#include "memory/paging/paging.h"
+#include "arch/x86_64/paging.h"
 #include "string/string.h"
 #include "lib/spinlock/spinlock.h"
 #include "status.h"

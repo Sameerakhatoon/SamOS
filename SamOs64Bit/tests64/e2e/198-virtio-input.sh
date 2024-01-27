@@ -39,7 +39,7 @@ vinput_boot() {
     rm -f "$E2E_DUMP"
     e2e_run_qemu 300 _vinput_mon
     local tag="$m/$path"
-    expect_serial '^virtio-input: QEMU Virtio Keyboard, GSI [0-9]+, vector [0-9]+, keys on vector 72$' \
+    expect_serial '^virtio-input: QEMU Virtio Keyboard, GSI [0-9]+, vector [0-9]+, keys by IPI to the BSP$' \
         "$tag: virtio-input keyboard found and routed"
     expect_serial "$SHELL_BANNER" "$tag: shell up"
     expect_serial '^typed through virtio$' "$tag: the typed command ran"

@@ -6,23 +6,24 @@
 // seconds while the guest spins through millions of status reads,
 // and the drivers gave up with -ETIMEOUT mid-write.
 //
-// The budget is raw TSC cycles because tsc_frequency() is not
+// The budget is raw counter cycles (arch_counter; the TSC on
+// x86) because the measured frequency is not
 // reliable (CPUID 0x15/0x16 are often zero under QEMU). 2^35
 // cycles is about 7 s at 5 GHz and 34 s at 1 GHz, inside the
 // 30 s the ATA spec allows a drive to spin up.
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "io/tsc.h"
+#include "arch/arch.h"
 
 #define DISK_POLL_CYCLES (1ULL << 35)
 
 static inline uint64_t disk_poll_deadline(void){
-    return read_tsc() + DISK_POLL_CYCLES;
+    return arch_counter() + DISK_POLL_CYCLES;
 }
 
 static inline bool disk_poll_expired(uint64_t deadline){
-    return (int64_t)(read_tsc() - deadline) > 0;
+    return (int64_t)(arch_counter() - deadline) > 0;
 }
 
 #endif

@@ -1,9 +1,8 @@
 #include "classic.h"
 #include "keyboard.h"
-#include "io/io.h"
+#include "io/isa.h"         // Ports and IRQ line
 #include "kernel.h"
-#include "idt/idt.h"
-#include "idt/irq.h"     // L68 - IRQ_enable
+#include "arch/arch.h"       // arch_irq_register / _unmask
 #include "task/task.h"
 #include <stdint.h>
 #include <stddef.h>
@@ -77,16 +76,16 @@ static int classic_e0_pending   = 0;
 static int classic_e1_remaining = 0;
 
 int classic_keyboard_init(){
-    idt_register_interrupt_callback(ISR_KEYBOARD_INTERRUPT, classic_keyboard_handle_interrupt);
+    arch_irq_register(IRQ_KEYBOARD, classic_keyboard_handle_interrupt);
     keyboard_set_capslock(&classic_keyboard, KEYBOARD_CAPS_LOCK_OFF);
     classic_keyboard_reset_state();
 
-    // Lecture 68 - unmask IRQ1 (keyboard) at the PIC. After
-    // this the PIC will deliver scancode interrupts to the
-    // IDT vector we wired up in idt_init.
-    IRQ_enable(IRQ_KEYBOARD);
+    // Lecture 68 - unmask IRQ1 (keyboard) at the interrupt
+    // controller. After this scancode interrupts reach the handler
+    // registered above.
+    arch_irq_unmask(IRQ_KEYBOARD);
 
-    outb(PS2_PORT, PS2_COMMAND_ENABLE_FIRST_PORT);
+    isa_write8(PS2_PORT, PS2_COMMAND_ENABLE_FIRST_PORT);
     return 0;
 }
 
@@ -232,11 +231,11 @@ void classic_keyboard_handle_interrupt(){
     // An IRQ1 can be latched with no keyboard byte waiting (QEMU
     // raises it for the mouse handshake's config-byte reply), and
     // an aux byte belongs to the mouse: read 0x60 only for a key.
-    uint8_t status = insb(PS2_PORT);
+    uint8_t status = isa_read8(PS2_PORT);
     if(!(status & PS2_STATUS_OUTPUT_FULL) || (status & PS2_STATUS_AUX_DATA)){
         return;
     }
-    uint8_t scancode = insb(KEYBOARD_INPUT_PORT);
+    uint8_t scancode = isa_read8(KEYBOARD_INPUT_PORT);
 
     KEYBOARD_CAPS_LOCK_STATE caps_before = keyboard_get_capslock(&classic_keyboard);
     char sequence[CLASSIC_KEYBOARD_MAX_SEQUENCE];

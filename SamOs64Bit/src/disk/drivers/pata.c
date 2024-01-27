@@ -21,15 +21,13 @@
 #include "pata.h"
 #include "status.h"
 #include "disk/disk.h"
-#include "io/io.h"
 #include "io/pci.h"
+#include "io/isa.h"
 #include "memory/memory.h"
 #include "memory/heap/kheap.h"
 #include "kernel.h"
 #include "disk/poll.h"
 #include "disk/irqwait.h"
-#include "idt/idt.h"
-#include "idt/irq.h"
 
 
 int pata_address(int base, int offset){
@@ -37,7 +35,7 @@ int pata_address(int base, int offset){
 }
 
 static uint8_t pata_status(struct pata_driver_private_data* d){
-    return insb(d->io_base + PATA_REG_STATUS);
+    return io_read8(d->io, PATA_REG_STATUS);
 }
 
 // Reading the alternate status register four times takes the
@@ -45,7 +43,7 @@ static uint8_t pata_status(struct pata_driver_private_data* d){
 // command, and does not clear a pending interrupt.
 static void pata_delay400(struct pata_driver_private_data* d){
     for(int i = 0; i < 4; i++){
-        insb(d->ctrl_base);
+        io_read8(d->ctrl, 0);
     }
 }
 
@@ -81,21 +79,28 @@ static int pata_wait_drq(struct pata_driver_private_data* d){
 
 // One interrupt line per channel, shared by its two drives.
 static struct {
-    struct disk_irq irq;
-    uint16_t        io_base;
+    struct disk_irq  irq;
+    struct io_region io;
 } pata_channels[2];
 
 // Reading the status register acks INTRQ.
-static void pata_irq_handler(struct trap_frame* frame){
-    int channel = (int)frame->vector - DISK_VECTOR_PATA(0);
-    insb(pata_channels[channel].io_base + PATA_REG_STATUS);
+static void pata_irq_channel(int channel){
+    io_read8(pata_channels[channel].io, PATA_REG_STATUS);
     disk_irq_signal(&pata_channels[channel].irq);
+}
+
+static void pata_irq_primary(struct trap_frame* frame){
+    pata_irq_channel(0);
+}
+
+static void pata_irq_secondary(struct trap_frame* frame){
+    pata_irq_channel(1);
 }
 
 // Alternate status: does not ack the interrupt.
 static bool pata_done(void* ctx){
     struct pata_driver_private_data* d = ctx;
-    return !(insb(d->ctrl_base) & PATA_SR_BSY);
+    return !(io_read8(d->ctrl, 0) & PATA_SR_BSY);
 }
 
 static void pata_irq_wait(struct pata_driver_private_data* d){
@@ -103,7 +108,7 @@ static void pata_irq_wait(struct pata_driver_private_data* d){
 }
 
 static void pata_select(struct pata_driver_private_data* d, uint8_t head_bits){
-    outb(d->io_base + PATA_REG_DRIVE, head_bits | (d->slave ? 0x10 : 0x00));
+    io_write8(d->io, PATA_REG_DRIVE, head_bits | (d->slave ? 0x10 : 0x00));
     pata_delay400(d);
 }
 
@@ -124,16 +129,16 @@ static void pata_ident_string(const uint16_t* id, int first_word, int words, cha
 static int pata_identify(struct pata_driver_private_data* d){
     uint16_t id[256];
 
-    if(insb(d->io_base + PATA_REG_STATUS) == 0xFF){
+    if(io_read8(d->io, PATA_REG_STATUS) == 0xFF){
         return -ENOENT;
     }
-    outb(d->ctrl_base, 0x02);        // nIEN: no interrupts, we poll
+    io_write8(d->ctrl, 0, 0x02);        // nIEN: no interrupts, we poll
     pata_select(d, 0xA0);
-    outb(d->io_base + PATA_REG_SECCOUNT, 0);
-    outb(d->io_base + PATA_REG_LBA0, 0);
-    outb(d->io_base + PATA_REG_LBA1, 0);
-    outb(d->io_base + PATA_REG_LBA2, 0);
-    outb(d->io_base + PATA_REG_COMMAND, PATA_CMD_IDENTIFY);
+    io_write8(d->io, PATA_REG_SECCOUNT, 0);
+    io_write8(d->io, PATA_REG_LBA0, 0);
+    io_write8(d->io, PATA_REG_LBA1, 0);
+    io_write8(d->io, PATA_REG_LBA2, 0);
+    io_write8(d->io, PATA_REG_COMMAND, PATA_CMD_IDENTIFY);
     pata_delay400(d);
 
     if(pata_status(d) == 0){
@@ -142,14 +147,14 @@ static int pata_identify(struct pata_driver_private_data* d){
     if(pata_wait_not_busy(d) < 0){
         return -ENOENT;
     }
-    if(insb(d->io_base + PATA_REG_LBA1) != 0 || insb(d->io_base + PATA_REG_LBA2) != 0){
+    if(io_read8(d->io, PATA_REG_LBA1) != 0 || io_read8(d->io, PATA_REG_LBA2) != 0){
         return -ENOENT;              // ATAPI (CD-ROM) or SATA signature
     }
     if(pata_wait_drq(d) < 0){
         return -ENOENT;
     }
     for(int i = 0; i < 256; i++){
-        id[i] = insw(d->io_base + PATA_REG_DATA);
+        id[i] = io_read16(d->io, PATA_REG_DATA);
     }
 
     if(!(id[49] & (1 << 9))){
@@ -178,15 +183,15 @@ static int pata_setup(struct pata_driver_private_data* d, uint64_t lba, int coun
         return res;
     }
     if(ext){
-        outb(d->io_base + PATA_REG_SECCOUNT, (uint8_t)(count >> 8));
-        outb(d->io_base + PATA_REG_LBA0, (uint8_t)(lba >> 24));
-        outb(d->io_base + PATA_REG_LBA1, (uint8_t)(lba >> 32));
-        outb(d->io_base + PATA_REG_LBA2, (uint8_t)(lba >> 40));
+        io_write8(d->io, PATA_REG_SECCOUNT, (uint8_t)(count >> 8));
+        io_write8(d->io, PATA_REG_LBA0, (uint8_t)(lba >> 24));
+        io_write8(d->io, PATA_REG_LBA1, (uint8_t)(lba >> 32));
+        io_write8(d->io, PATA_REG_LBA2, (uint8_t)(lba >> 40));
     }
-    outb(d->io_base + PATA_REG_SECCOUNT, (uint8_t)count);
-    outb(d->io_base + PATA_REG_LBA0, (uint8_t)lba);
-    outb(d->io_base + PATA_REG_LBA1, (uint8_t)(lba >> 8));
-    outb(d->io_base + PATA_REG_LBA2, (uint8_t)(lba >> 16));
+    io_write8(d->io, PATA_REG_SECCOUNT, (uint8_t)count);
+    io_write8(d->io, PATA_REG_LBA0, (uint8_t)lba);
+    io_write8(d->io, PATA_REG_LBA1, (uint8_t)(lba >> 8));
+    io_write8(d->io, PATA_REG_LBA2, (uint8_t)(lba >> 16));
     *ext_out = ext;
     return 0;
 }
@@ -201,7 +206,7 @@ static int pata_transfer(struct pata_driver_private_data* d, uint64_t lba, int c
     uint8_t cmd = write ? (ext ? PATA_CMD_WRITE_PIO_EXT : PATA_CMD_WRITE_PIO)
                         : (ext ? PATA_CMD_READ_PIO_EXT  : PATA_CMD_READ_PIO);
     disk_irq_arm(&pata_channels[d->disk_drive].irq);
-    outb(d->io_base + PATA_REG_COMMAND, cmd);
+    io_write8(d->io, PATA_REG_COMMAND, cmd);
 
     // INTRQ comes before each sector of a read, and after each
     // sector of a write (the first DRQ of a write has none).
@@ -217,11 +222,11 @@ static int pata_transfer(struct pata_driver_private_data* d, uint64_t lba, int c
         }
         if(write){
             for(int w = 0; w < 256; w++){
-                outw(d->io_base + PATA_REG_DATA, *ptr++);
+                io_write16(d->io, PATA_REG_DATA, *ptr++);
             }
         } else {
             for(int w = 0; w < 256; w++){
-                *ptr++ = insw(d->io_base + PATA_REG_DATA);
+                *ptr++ = io_read16(d->io, PATA_REG_DATA);
             }
         }
     }
@@ -234,7 +239,7 @@ static int pata_transfer(struct pata_driver_private_data* d, uint64_t lba, int c
             return res;
         }
         disk_irq_arm(&pata_channels[d->disk_drive].irq);
-        outb(d->io_base + PATA_REG_COMMAND, ext ? PATA_CMD_CACHE_FLUSH_EXT : PATA_CMD_CACHE_FLUSH);
+        io_write8(d->io, PATA_REG_COMMAND, ext ? PATA_CMD_CACHE_FLUSH_EXT : PATA_CMD_CACHE_FLUSH);
         pata_irq_wait(d);
         pata_delay400(d);
         res = pata_wait_not_busy(d);
@@ -320,7 +325,7 @@ static void pata_irq_init(int channel, uint16_t io, uint16_t ctrl){
     struct disk_irq* q = &pata_channels[channel].irq;
     q->name   = channel ? "pata secondary" : "pata primary";
     q->marker = BM_FEATURE_DISK_IRQ_PATA;
-    if(!apic_active() || io != legacy_io[channel]){
+    if(!arch_irq_routable() || io != legacy_io[channel]){
         serial_write("disk: ");
         serial_write(q->name);
         serial_write(" has no IOAPIC route, polled\n");
@@ -328,17 +333,17 @@ static void pata_irq_init(int channel, uint16_t io, uint16_t ctrl){
     }
     uint16_t inti;
     uint32_t gsi = acpi_isa_irq_to_gsi(channel ? IRQ_SECONDARY_ATA_HDD : IRQ_PRIMARY_ATA_HDD, &inti);
-    uint8_t vector = DISK_VECTOR_PATA(channel);
-    pata_channels[channel].io_base = io;
-    idt_register_interrupt_callback(vector, pata_irq_handler);
+    pata_channels[channel].io = io_region_port(io);
     bool masked = disk_irq_masked_by_cmdline();
-    if(ioapic_route_gsi(gsi, vector, inti, masked) < 0){
+    int line = arch_irq_attach_gsi(gsi, inti, DISK_SLOT_PATA(channel), masked,
+                                   channel ? pata_irq_secondary : pata_irq_primary);
+    if(line < 0){
         return;
     }
-    insb(io + PATA_REG_STATUS);      // drop an INTRQ left from the probe
-    outb(ctrl, 0x00);                // nIEN clear: the drives interrupt
+    io_read8(io_region_port(io), PATA_REG_STATUS);   // drop an INTRQ left from the probe
+    io_write8(io_region_port(ctrl), 0, 0x00);        // nIEN clear: the drives interrupt
     q->enabled = true;
-    disk_irq_report(q, gsi, inti, vector, masked);
+    disk_irq_report(q, gsi, inti, line, masked);
 }
 
 int pata_driver_mount(struct disk_driver* driver){
@@ -356,8 +361,8 @@ int pata_driver_mount(struct disk_driver* driver){
             }
             d->disk_drive = channel == 0 ? PATA_PRIMARY_DRIVE : PATA_SECONDARY_DRIVE;
             d->slave      = slave;
-            d->io_base    = io[channel];
-            d->ctrl_base  = ctrl[channel];
+            d->io         = io_region_port(io[channel]);
+            d->ctrl       = io_region_port(ctrl[channel]);
             if(pata_identify(d) < 0){
                 kfree(d);
                 continue;

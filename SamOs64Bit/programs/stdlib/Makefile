@@ -5,17 +5,17 @@ FLAGS=-g -ffreestanding
 all: $(FILES)
 	x86_64-elf-ld -m elf_x86_64 -relocatable $(FILES) -o ./stdlib.elf
 
-./build/start.asm.o: ./src/start.asm
+./build/start.asm.o: ./arch/x86_64/start.asm
 	mkdir -p build
-	nasm -f elf64 ./src/start.asm -o ./build/start.asm.o
+	nasm -f elf64 ./arch/x86_64/start.asm -o ./build/start.asm.o
 
 ./build/start.o: ./src/start.c
 	mkdir -p build
 	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/start.c -o ./build/start.o
 
-./build/samos.asm.o: ./src/samos.asm
+./build/samos.asm.o: ./arch/x86_64/samos.asm
 	mkdir -p build
-	nasm -f elf64 ./src/samos.asm -o ./build/samos.asm.o
+	nasm -f elf64 ./arch/x86_64/samos.asm -o ./build/samos.asm.o
 
 ./build/samos.o: ./src/samos.c
 	mkdir -p build

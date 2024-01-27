@@ -2,15 +2,15 @@
 //
 // What changed vs the 32-bit version:
 //   - the saved register file is a struct trap_frame
-//     (idt/idt.h) with all 15 general registers, plus the task's
-//     FPU/SSE state.
+//     (the arch's, arch/arch.h) with all 15 general registers,
+//     plus the task's FPU/SSE state.
 //   - struct task uses paging_desc (4-level walk) instead of
 //     paging_4gb_chunk (which built a 2-level 4 GiB identity
-//     map). task_init calls paging_desc_new(PAGING_MAP_LEVEL_4).
+//     map). task_init calls paging_desc_new().
 //   - task_free uses paging_desc_free (lands in L43).
 //   - copy_string_from_task (remap a kernel scratch page
-//     into the task, switch CR3, strncpy) is gone; syscalls use
-//     uaccess.c.
+//     into the task, switch address space, strncpy) is gone; syscalls
+//     use uaccess.c.
 //   - a run queue with ready, blocked and sleeping states, an
 //     idle loop that halts, and preemption from the 100 Hz tick.
 //     The book's task_next rotated through every task and
@@ -23,14 +23,14 @@
 //     lock over all of them, work stealing, a per-CPU idle loop, and
 //     kills carried out by the victim's own CPU.
 //
-// Kernel stacks: one per CPU (its TSS rsp0), not one per task.
-// The kernel never keeps a task's state on a stack across a switch:
-// everything is in task->registers by the time a trap handler calls
-// task_next, and task_enter leaves the stack behind with an iretq.
-// So a task can resume on any CPU. A syscall that must wait marks
-// its task BLOCKED with the saved rip moved back onto its int 0x80,
-// calls task_next, and runs the whole syscall again when it is
-// woken, as on one CPU.
+// Kernel stacks: one per CPU (x86: its TSS rsp0), not one per
+// task. The kernel never keeps a task's state on a stack across a
+// switch: everything is in task->registers by the time a trap handler
+// calls task_next, and task_enter leaves the stack behind with the
+// return to user mode (arch_task_return). So a task can resume on any
+// CPU. A syscall that must wait marks its task BLOCKED with the saved
+// pc moved back onto its syscall instruction, calls task_next, and
+// runs the whole syscall again when it is woken, as on one CPU.
 
 #include "task.h"
 #include "process.h"
@@ -38,13 +38,11 @@
 #include "status.h"
 #include "memory/heap/kheap.h"
 #include "memory/memory.h"
-#include "memory/paging/paging.h"
+#include "arch/arch.h"
 #include "string/string.h"
-#include "idt/idt.h"
 #include "cpu/percpu.h"
 #include "cpu/smp.h"
 #include "lib/spinlock/spinlock.h"
-#include "arch/x86_64/atomic.h"
 #include "io/serial.h"
 #include "loader/formats/elfloader.h"  // L65 - elf loader back
 
@@ -59,9 +57,6 @@ static bool         task_ever = false;   // a task was ever started
 static volatile uint32_t idle_announced = 0;
 
 static struct spinlock sched_lock = SPINLOCK_INIT("sched", LOCK_LEVEL_SCHED, 0);
-
-// int 0x80 is CD 80: moving rip back by its length runs it again.
-#define TASK_INT80_LENGTH 2
 
 struct task* task_current(){
     return this_cpu()->current;
@@ -271,7 +266,7 @@ int task_free(struct task* task){
     return 0;
 }
 
-// user_desc is set before CR3 changes: a CPU that edits this
+// user_desc is set before the switch: a CPU that edits this
 // process's mappings either sees it here and sends a shootdown, or
 // edited them before this CPU's TLB could hold them.
 int task_switch(struct task* task){
@@ -302,14 +297,14 @@ void task_run_first_ever_task(){
     task_next();
 }
 
-// Iretq into `task` with its own FPU/SSE state. Nothing
-// between the fxrstor and the iretq may touch an x87 or SSE register;
-// the kernel is built -mgeneral-regs-only.
+// Return into `task` with its own FPU/SSE state. Nothing
+// between the restore and the return may touch an FP register; the
+// kernel is built -mgeneral-regs-only.
 static void task_enter_now(struct task* task){
     task_switch(task);
     serial_flush();
-    __asm__ volatile("fxrstor64 %0" : : "m"(task->fpu_state));
-    task_return(&task->registers);
+    arch_fpu_restore(&task->fpu_state);
+    arch_task_return(&task->registers);
 }
 
 // The task becomes this CPU's current one. False when it had been
@@ -341,7 +336,7 @@ void task_enter(struct task* task){
 }
 
 int task_page(){
-    user_registers();
+    arch_user_context();
     task_switch(task_current());
     serial_flush();
     return 0;
@@ -351,7 +346,7 @@ int task_page(){
 // which still hold the user's values: the trap path is integer-only.
 void task_save_state(struct task* task, struct trap_frame* frame){
     task->registers = *frame;
-    __asm__ volatile("fxsave64 %0" : "=m"(task->fpu_state));
+    arch_fpu_save(&task->fpu_state);
 }
 
 void task_current_save_state(struct trap_frame* frame){
@@ -425,12 +420,12 @@ void task_wake(struct task* task){
 }
 
 // Called from a syscall on the current task: it leaves the CPU until
-// task_wake, then executes the same int 0x80 again (the saved rax is
-// still the syscall number, the arguments are still in place). A task
+// task_wake, then executes the same syscall again (the saved syscall
+// number and arguments are still in place). A task
 // another CPU has killed meanwhile stays runnable, so it dies.
 void task_block(struct task* task, int reason){
     spin_lock(&sched_lock);
-    task->registers.rip -= TASK_INT80_LENGTH;
+    trap_frame_syscall_restart(&task->registers);
     if(task->kill_pending){
         task->state = TASK_READY;
         rq_push_back(this_cpu(), task);
@@ -444,18 +439,18 @@ void task_block(struct task* task, int reason){
 // Lecture 197 - sleeping if the deadline TSC hasn't been reached.
 bool task_asleep(struct task* task){
     return task->state == TASK_SLEEPING &&
-           task->sleeping.sleep_until_microseconds > tsc_microseconds();
+           task->sleeping.sleep_until_microseconds > arch_time_us();
 }
 
-// Lecture 197 / 198 - park the task until tsc_microseconds()
+// Lecture 197 / 198 - park the task until arch_time_us()
 // exceeds the deadline. L197 shipped the deadline as
-// `tsc_microseconds() * microseconds` (multiplication, bug).
+// `arch_time_us() * microseconds` (multiplication, bug).
 // L198 part 2 fixes it to `+ microseconds`. SamOs follows.
 // On this CPU's sleep list; its tick wakes it.
 void task_sleep(struct task* task, TIME_MICROSECONDS microseconds){
     struct cpu* me = this_cpu();
     spin_lock(&sched_lock);
-    task->sleeping.sleep_until_microseconds = tsc_microseconds() + microseconds;
+    task->sleeping.sleep_until_microseconds = arch_time_us() + microseconds;
     if(task->kill_pending){
         task->state = TASK_READY;
         rq_push_back(me, task);
@@ -473,7 +468,7 @@ void task_wake_sleepers(void){
     if(!me->sleep_head){
         return;
     }
-    TIME_MICROSECONDS now = tsc_microseconds();
+    TIME_MICROSECONDS now = arch_time_us();
     spin_lock(&sched_lock);
     struct task** link = &me->sleep_head;
     while(*link){
@@ -522,8 +517,9 @@ void task_check_killed(void){
 
 // The idle loop of one CPU: the kernel on this CPU's stack, halting
 // with interrupts on until an IRQ or IPI makes a task ready. An IRQ
-// taken here is a ring-0 trap, so interrupt_handler saves no task
-// state and no callback switches tasks; task_next picks the next one.
+// taken here is a kernel-mode trap, so the arch's dispatcher saves no
+// task state and no callback switches tasks; task_next picks the next
+// one.
 static void task_idle_once(bool none_left){
     this_cpu()->current = NULL;
     kernel_page();
@@ -534,7 +530,7 @@ static void task_idle_once(bool none_left){
         idle_announced = 0;
     }
     serial_flush();
-    __asm__ volatile("sti; hlt; cli" ::: "memory");
+    arch_wait_for_interrupt();
     task_wake_sleepers();
 }
 
@@ -565,18 +561,18 @@ void task_next(){
     }
 }
 
-// Preempt the current ring-3 task if this CPU has another one ready.
+// Preempt the current user task if this CPU has another one ready.
 static void task_preempt(struct trap_frame* frame){
     struct cpu* me = this_cpu();
-    if((frame->cs & 3) != 3 || !me->current || !me->run_count){
+    if(!trap_frame_from_user(frame) || !me->current || !me->run_count){
         return;
     }
     task_ready(me->current);
     task_next();
 }
 
-// The 100 Hz tick of this CPU (idt_clock). Wakes this CPU's
-// sleepers; from ring 3 the running task goes to the back of the
+// The 100 Hz tick of this CPU (task_clock). Wakes this CPU's
+// sleepers; from user mode the running task goes to the back of the
 // queue if anything else is ready. Counts busy and idle ticks,
 // and pulls a task from a CPU that has two more queued than this one.
 void task_tick(struct trap_frame* frame){
@@ -601,10 +597,26 @@ void task_tick(struct trap_frame* frame){
 }
 
 // The reschedule IPI: a task was started or woken for this
-// CPU. Idle, the halt returns and task_next looks; in ring 3 the
+// CPU. Idle, the halt returns and task_next looks; in user mode the
 // woken task runs now instead of at the next tick.
 void task_resched(struct trap_frame* frame){
     task_preempt(frame);
+}
+
+// Every arch's timer interrupt ends here (x86: the clock handler on
+// the PIT or LAPIC timer vector). Every CPU has its own timer;
+// the tick count is the BSP's.
+static volatile uint64_t clock_ticks;
+
+void task_clock(struct trap_frame* frame){
+    if(this_cpu()->index == 0){
+        clock_ticks++;
+    }
+    task_tick(frame);
+}
+
+uint64_t task_clock_ticks(void){
+    return clock_ticks;
 }
 
 static int task_init(struct task* task, struct process* process){
@@ -616,23 +628,20 @@ static int task_init(struct task* task, struct process* process){
     // descriptor through process->paging_desc.
 
 
-    task->registers.rip = SAMOS_PROGRAM_VIRTUAL_ADDRESS;
+    uint64_t entry = SAMOS_PROGRAM_VIRTUAL_ADDRESS;
     if(process->filetype == PROCESS_FILETYPE_ELF){
         // L65 - the ELF64 loader is in. Pull the entry point
         // out of the ELF header.
-        task->registers.rip = elf_header(process->elf_file)->e_entry;
+        entry = elf_header(process->elf_file)->e_entry;
     }
 
-    task->registers.ss  = USER_DATA_SEGMENT;
-    task->registers.cs  = USER_CODE_SEGMENT;
-    task->registers.rsp = SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START;
+    trap_frame_init_user(&task->registers, entry, SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_START);
     task->process       = process;
     task->state         = TASK_NEW;   // task_start queues it
 
-    // Power-on FPU/SSE state: x87 control word 0x37F
-    // and MXCSR 0x1F80 (all exceptions masked), registers zero.
-    *(uint16_t*)&task->fpu_state[0]  = 0x037F;
-    *(uint32_t*)&task->fpu_state[24] = 0x1F80;
+    // Power-on FPU state (x86: x87 control word 0x37F
+    // and MXCSR 0x1F80, all exceptions masked; registers zero).
+    arch_fpu_init(&task->fpu_state);
 
     return 0;
 }

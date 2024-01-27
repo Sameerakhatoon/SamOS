@@ -9,11 +9,9 @@
 // once both are in.
 
 #include <stdint.h>
+#include "arch/arch.h"   // TIME_MICROSECONDS and friends
 
 typedef uint64_t TIME_TSC;
-typedef uint64_t TIME_MICROSECONDS;
-typedef uint64_t TIME_MILISECONDS;     // sic - upstream spelling
-typedef uint64_t TIME_SECONDS;
 
 // Measure the frequency (CPUID checked against PIT channel
 // 2) and record the boot TSC. tsc_frequency calls it on first use.

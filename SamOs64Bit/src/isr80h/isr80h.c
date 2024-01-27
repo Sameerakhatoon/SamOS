@@ -1,5 +1,8 @@
 #include "isr80h.h"
-#include "idt/idt.h"
+#include "config.h"
+#include "kernel.h"
+#include "task/task.h"
+#include "graphics/graphics.h"
 #include "misc.h"
 #include "io.h"
 #include "heap.h"
@@ -9,6 +12,54 @@
 #include "graphics.h" // L166 - command 20 graphics pixels
 #include "time.h"     // L198 - command 25 udelay
 #include "platform.h" // Commands 48-50
+
+static ISR80H_COMMAND isr80h_commands[SAMOS_MAX_ISR80H_COMMANDS];
+
+void isr80h_register_command(int command_id, ISR80H_COMMAND command){
+    if(command_id < 0 || command_id >= SAMOS_MAX_ISR80H_COMMANDS){
+        panic("The command is out of bounds\n");
+    }
+    if(isr80h_commands[command_id]){
+        panic("Your attempting to overwrite an existing command\n");
+    }
+    isr80h_commands[command_id] = command;
+}
+
+static void* isr80h_handle_command(int command, struct trap_frame* frame){
+    void* result = 0;
+    if(command < 0 || command >= SAMOS_MAX_ISR80H_COMMANDS){
+        return 0;
+    }
+    ISR80H_COMMAND command_func = isr80h_commands[command];
+    if(!command_func){
+        return 0;
+    }
+    // The window and graphics syscalls run under the
+    // graphics lock as a whole; none of them blocks.
+    bool gfx = command >= SYSTEM_COMMAND16_WINDOW_CREATE &&
+               command <= SYSTEM_COMMAND24_UPDATE_WINDOW;
+    if(gfx){
+        gfx_lock();
+    }
+    result = command_func(frame);
+    if(gfx){
+        gfx_unlock();
+    }
+    return result;
+}
+
+// Lecture 52 - syscall entry: kernel_page in, dispatch, task_page
+// out. The command comes from the frame and the result goes back
+// through it instead of a global slot. Moved here from the x86
+// trap code.
+void isr80h_handler(struct trap_frame* frame){
+    kernel_page();
+    task_current_save_state(frame);
+    task_check_killed();
+    int command = (int)trap_frame_syscall_nr(frame);
+    trap_frame_set_ret(frame, (uint64_t)isr80h_handle_command(command, frame));
+    task_page();
+}
 
 void isr80h_register_commands(){
     isr80h_register_command(SYSTEM_COMMAND0_SUM,    isr80h_command0_sum);

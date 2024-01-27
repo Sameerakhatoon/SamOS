@@ -8,7 +8,7 @@
 #include "graphics/image/image.h"
 #include "graphics/window.h"   // L141 - struct window for click hit-test
 #include "kernel.h"
-#include "memory/paging/paging.h"
+#include "arch/arch.h"
 #include "memory/heap/kheap.h"
 #include "memory/memory.h"
 #include "lib/vector/vector.h"

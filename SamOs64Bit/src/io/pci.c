@@ -10,7 +10,6 @@
 // L179 will add bus enumeration; L180/L181 round it out.
 
 #include "io/pci.h"
-#include "io/io.h"
 #include "memory/heap/kheap.h"
 #include "lib/vector/vector.h"
 #include "status.h"
@@ -18,7 +17,7 @@
 #include "acpi/acpi.h"
 #include "io/serial.h"
 #include "memory/memory.h"
-#include "memory/paging/paging.h"
+#include "arch/arch.h"
 #include "string/string.h"
 #include <stdbool.h>
 
@@ -36,15 +35,6 @@ static void pci_scan_bus(uint8_t bus, struct pci_device* parent_bridge);
 static void pci_size_bar(uint8_t bus, uint8_t dev, uint8_t func, struct pci_device* device);
 
 struct vector* pci_device_vector = NULL;
-
-static inline uint32_t pci_cfg_addr_legacy(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset){
-    uint16_t offset_aligned = offset & ~0x3u; // dword aligned
-    return 0x80000000 |
-           ((uint32_t)bus  << 16) |
-           ((uint32_t)slot << 11) |
-           ((uint32_t)func << 8)  |
-           offset_aligned;
-}
 
 static pci_ecam_map_fn_t g_ecam_mapper;
 
@@ -191,9 +181,8 @@ uint32_t pci_cfg_read_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t off
     if(p){
         return *(volatile uint32_t*)p;
     }
-    uint32_t address = pci_cfg_addr_legacy(bus, slot, func, off);
-    outdw(PCI_CFG_ADDRESS, address);
-    return insdw(PCI_DATA_ADDRESS);
+    // The legacy mechanism is the arch's (x86: 0xCF8/0xCFC).
+    return arch_pci_cfg_read32(bus, slot, func, off);
 }
 
 uint16_t pci_cfg_read_word(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset){
@@ -203,9 +192,7 @@ uint16_t pci_cfg_read_word(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offs
         uint32_t v = *(volatile uint32_t*)p;
         return (uint16_t)((v >> ((offset & 2u) * 8)) & 0xFFFFu);
     }
-    uint32_t address = pci_cfg_addr_legacy(bus, slot, func, off);
-    outdw(PCI_CFG_ADDRESS, address);
-    uint32_t v = insdw(PCI_DATA_ADDRESS);
+    uint32_t v = arch_pci_cfg_read32(bus, slot, func, off);
     return (uint16_t)((v >> ((offset & 2u) * 8)) & 0xFFFFu);
 }
 
@@ -222,9 +209,7 @@ void pci_cfg_write_dword(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset
         *(volatile uint32_t*)p = value;
         return;
     }
-    uint32_t address = pci_cfg_addr_legacy(bus, slot, func, off);
-    outdw(PCI_CFG_ADDRESS, address);
-    outdw(PCI_DATA_ADDRESS, value);
+    arch_pci_cfg_write32(bus, slot, func, off, value);
 }
 
 // Lecture 179 - word write. Reads the surrounding dword, masks
@@ -245,16 +230,13 @@ void pci_cfg_write_word(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset,
         return;
     }
     // Legacy PCI.
-    uint32_t address = pci_cfg_addr_legacy(bus, slot, func, off);
-    outdw(PCI_CFG_ADDRESS, address);
-    uint32_t tmp = insdw(PCI_DATA_ADDRESS);
+    uint32_t tmp = arch_pci_cfg_read32(bus, slot, func, off);
     if((offset & 2u) == 0){
         tmp = (tmp & 0xFFFF0000u) | (uint32_t)value;
     } else {
         tmp = (tmp & 0x0000FFFFu) | ((uint32_t)value << 16);
     }
-    outdw(PCI_CFG_ADDRESS, address);
-    outdw(PCI_DATA_ADDRESS, tmp);
+    arch_pci_cfg_write32(bus, slot, func, off, tmp);
 }
 
 // Lecture 180 - upstream L179 had a `pci_cfg_reaD_dword` typo.

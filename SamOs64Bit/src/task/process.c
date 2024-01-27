@@ -4,7 +4,7 @@
 #include "task/task.h"
 #include "memory/memory.h"
 #include "memory/heap/kheap.h"
-#include "memory/paging/paging.h"
+#include "arch/arch.h"
 #include "string/string.h"
 #include "graphics/graphics.h"   // L166 - struct framebuffer_pixel + graphics_info
 // L48 - FAT16 / VFS came back. L63 - elfloader.h back too now
@@ -966,7 +966,7 @@ int process_load_for_slot(const char* filename, struct process** process, int pr
     // process. Create it BEFORE task_new so process_map_memory
     // (which now hangs off process->paging_desc, and which is
     // also called BEFORE task_new) sees a live descriptor.
-    _process->paging_desc = paging_desc_new(PAGING_MAP_LEVEL_4);
+    _process->paging_desc = paging_desc_new();
     if(!_process->paging_desc){
         res = -ENOMEM;
         goto out;

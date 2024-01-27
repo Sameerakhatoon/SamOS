@@ -8,9 +8,10 @@
 // the BAR they name, mapped uncached; the legacy I/O BAR of a
 // transitional device is never touched, so there is no in/out here.
 //
-// Interrupts: PCI INTx through the IOAPIC (pci_intx_gsi). Each GSI a
-// virtio function arrives on is a "line" with one vector in the disk
-// range (0x54-0x5F); its handler reads every client's ISR (which
+// Interrupts: PCI INTx (pci_intx_gsi). Each GSI a virtio function
+// arrives on is a "line", one completion slot of arch_irq_attach_gsi
+// (x86: an IOAPIC route to a vector in 0x54-0x5B); its handler reads
+// every client's ISR (which
 // acknowledges it and lets the line drop) and calls the client back.
 // MSI-X is not used: QEMU offers it, but INTx is what AHCI and PATA
 // already do, and the disk wait steers a line by its GSI. A
@@ -32,7 +33,7 @@ int virtio_pci_probe(uint32_t device_id, int (*attach)(struct virtio_dev* d, voi
 struct virtio_line {
     uint32_t gsi;
     uint16_t inti;               // MPS INTI flags (polarity, trigger)
-    uint8_t  vector;
+    uint8_t  vector;             // arch_irq_attach_gsi's line number, for the log
     bool     masked;             // routed masked (samos.disk_irq_masked)
     int      clients;
     struct {

@@ -23,8 +23,7 @@
 #include "gpt.h"
 #include "mbr.h"
 #include "storage_policy.h"
-#include "io/io.h"
-#include "io/cpuid.h"
+#include "arch/arch.h"
 #include "config.h"
 #include "status.h"
 #include "kernel.h"
@@ -54,9 +53,7 @@ struct disk* primary_fs_disk = NULL;
 static struct disk* first_fs_disk = NULL;
 
 bool disk_running_on_hypervisor(void){
-    uint32_t eax, ebx, ecx, edx;
-    cpuid(1, 0, &eax, &ebx, &ecx, &edx);
-    return (ecx >> 31) & 1;
+    return arch_on_hypervisor();
 }
 
 // The read-only policy for a new REAL disk. See
