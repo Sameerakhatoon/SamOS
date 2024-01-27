@@ -23,6 +23,7 @@
 #include "graphics/font.h"
 #include "idt/irq.h"
 #include "task/task.h"
+#include "loader/formats/elfloader.h"
 #include "lib/vector/vector.h"
 #include "kernel.h"
 
@@ -381,6 +382,31 @@ int kernel_selftest(void) {
         }
         if (bar_seen) mark_pass(BM_FEATURE_PCI_BARS);
         else          mark_fail(BM_FEATURE_PCI_BARS);
+    }
+
+    // L65 ELF loader: elf_load + elf_validate_loaded + elf_close
+    // on the user-program ELF. Same file the kernel itself runs
+    // immediately after, so any regression here is a fatal user-
+    // boot blocker.
+    {
+        struct elf_file* ef = NULL;
+        int rc = elf_load("@:/BLANK.ELF", &ef);
+        if (rc == 0 && ef && elf_validate_loaded(elf_header(ef)) == 0) {
+            mark_pass(BM_FEATURE_ELF_LOAD);
+        } else {
+            mark_fail(BM_FEATURE_ELF_LOAD);
+        }
+        if (ef) elf_close(ef);
+    }
+
+    // L43 path parser: multi-part splits return more than one
+    // part for "@:/dir/file.elf".
+    {
+        struct path_root* r = pathparser_parse("@:/dir/file.elf", 0);
+        int ok = (r && r->first && r->first->next);
+        if (r) pathparser_free(r);
+        if (ok) mark_pass(BM_FEATURE_PARSE_MULTIPART);
+        else    mark_fail(BM_FEATURE_PARSE_MULTIPART);
     }
 
     // L93/L197 task_sleep: the scheduler entry-point exists. We
