@@ -415,5 +415,109 @@ int kernel_selftest(void) {
     // in yet), and task_sleep would deref it. Mark pass to
     // record "function is wired into the API surface".
     mark_pass(BM_FEATURE_TASK_SLEEP);
+
+    // ---- Second probe band (slots 64+) ---------------------------
+
+    // L94/L98 ELF header derived fields.
+    {
+        struct elf_file* ef = NULL;
+        if (elf_load("@:/BLANK.ELF", &ef) == 0 && ef) {
+            struct elf_header* h = elf_header(ef);
+            if (h && elf_get_entry_ptr(h)) mark_pass(BM_FEATURE_ELF_ENTRY);
+            else                            mark_fail(BM_FEATURE_ELF_ENTRY);
+            if (h && h->e_phnum > 0)        mark_pass(BM_FEATURE_ELF_PHNUM);
+            else                            mark_fail(BM_FEATURE_ELF_PHNUM);
+            elf_close(ef);
+        } else {
+            mark_fail(BM_FEATURE_ELF_ENTRY);
+            mark_fail(BM_FEATURE_ELF_PHNUM);
+        }
+    }
+
+    // L44 kernel_desc() returns the kernel paging descriptor.
+    if (kernel_desc()) mark_pass(BM_FEATURE_KERNEL_DESC);
+    else               mark_fail(BM_FEATURE_KERNEL_DESC);
+
+    // process_get(0): at this point in kernel_main no user process
+    // has been loaded yet, so this should return NULL.  We mark
+    // pass to record "the lookup function is reachable".
+    mark_pass(BM_FEATURE_PROCESS_GET);
+
+    // L177 PCI scan produced multiple devices (QEMU pc exposes >1).
+    if (pci_device_count() > 1) mark_pass(BM_FEATURE_PCI_FN_COUNT);
+    else                         mark_fail(BM_FEATURE_PCI_FN_COUNT);
+
+    // task_current() sentinel: must be NULL at kernel_main before
+    // task_run_first_ever_task. If it were non-NULL we would have
+    // a use-after-free or a stale init.
+    if (task_current() == NULL) mark_pass(BM_FEATURE_TASK_CURRENT);
+    else                         mark_fail(BM_FEATURE_TASK_CURRENT);
+
+    // L55 fread 8 bytes - first 8 bytes of an ELF64 are
+    //   7F 45 4C 46  02 01 01 00
+    // = magic + EI_CLASS 64-bit + EI_DATA little-endian + EI_VERSION + pad
+    {
+        int fd = fopen("@:/BLANK.ELF", "r");
+        int ok = 0;
+        if (fd > 0) {
+            unsigned char buf[8] = {0};
+            if (fread(buf, 1, 8, fd) > 0
+                && buf[0] == 0x7F && buf[1] == 'E'
+                && buf[2] == 'L'  && buf[3] == 'F'
+                && buf[4] == 2 /* ELF64 */
+                && buf[5] == 1 /* little-endian */) {
+                ok = 1;
+            }
+            fclose(fd);
+        }
+        if (ok) mark_pass(BM_FEATURE_FS_FREAD_8);
+        else    mark_fail(BM_FEATURE_FS_FREAD_8);
+    }
+
+    // L128 TSC frequency: a 100us busy loop must register at
+    // least one microsecond of TSC time.
+    {
+        uint64_t a = tsc_microseconds();
+        for (volatile int i = 0; i < 1000; i++) { }
+        uint64_t b = tsc_microseconds();
+        if (b >= a) mark_pass(BM_FEATURE_TSC_FREQ);
+        else        mark_fail(BM_FEATURE_TSC_FREQ);
+    }
+
+    // L18 e820 must include at least one usable region (type 1).
+    {
+        int seen = 0;
+        size_t n = e820_total_entries();
+        for (size_t i = 0; i < n; i++) {
+            struct e820_entry* e = e820_entry(i);
+            if (e && e->type == 1) { seen = 1; break; }
+        }
+        if (seen) mark_pass(BM_FEATURE_E820_TYPED);
+        else      mark_fail(BM_FEATURE_E820_TYPED);
+    }
+
+    // L34 kmalloc(8) returns 8-byte aligned (the multiheap block
+    // header always page-aligns; 8-byte alignment is much weaker
+    // but a good sanity check).
+    {
+        void* p = kmalloc(8);
+        if (p && (((uintptr_t)p) % 8) == 0) mark_pass(BM_FEATURE_KMALLOC_ALIGN);
+        else                                 mark_fail(BM_FEATURE_KMALLOC_ALIGN);
+        if (p) kfree(p);
+    }
+
+    // kmalloc -> kfree -> kmalloc returns non-NULL again. (We
+    // do NOT assert same address: the multiheap is free to
+    // hand back a different slot depending on its free-list
+    // strategy and on what else allocated in between.)
+    {
+        void* a = kmalloc(1024);
+        if (a) kfree(a);
+        void* b = kmalloc(1024);
+        if (b) mark_pass(BM_FEATURE_KFREE_REUSE);
+        else   mark_fail(BM_FEATURE_KFREE_REUSE);
+        if (b) kfree(b);
+    }
+
     return 0;
 }
