@@ -112,6 +112,11 @@ typedef enum {
     BM_FEATURE_E820_TYPED     = 72,  // at least one e820 entry has type == 1
     BM_FEATURE_KMALLOC_ALIGN  = 73,  // kmalloc(8) returns 8-byte aligned pointer
     BM_FEATURE_KFREE_REUSE    = 74,  // kmalloc / kfree / kmalloc returns same address
+    BM_FEATURE_STRLEN         = 75,  // strlen("hello") == 5
+    BM_FEATURE_STRNCPY        = 76,  // strncpy copies expected bytes
+    BM_FEATURE_MEMSET         = 77,  // memset writes the fill byte
+    BM_FEATURE_MEMCPY         = 78,  // memcpy roundtrips
+    BM_FEATURE_MEMCMP         = 79,  // memcmp returns 0 on equal, non-zero on differ
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
