@@ -569,5 +569,76 @@ int kernel_selftest(void) {
         if (b) kfree(b);
     }
 
+    // itoa(123) returns "123". Probe by checking the three
+    // returned bytes.
+    {
+        char* s = itoa(123);
+        if (s && s[0] == '1' && s[1] == '2' && s[2] == '3' && s[3] == 0)
+            mark_pass(BM_FEATURE_ITOA);
+        else
+            mark_fail(BM_FEATURE_ITOA);
+    }
+
+    // strncmp returns non-zero on differing strings.
+    {
+        if (strncmp("abc", "abc", 3) == 0 && strncmp("abc", "abd", 3) != 0)
+            mark_pass(BM_FEATURE_STRCMP_DIFF);
+        else
+            mark_fail(BM_FEATURE_STRCMP_DIFF);
+    }
+
+    // kmalloc(1 MiB).
+    {
+        void* p = kmalloc(1024 * 1024);
+        if (p) { mark_pass(BM_FEATURE_KMALLOC_LARGE); kfree(p); }
+        else   { mark_fail(BM_FEATURE_KMALLOC_LARGE); }
+    }
+
+    // ELF entry pointer for BLANK.ELF should fall in the user
+    // virtual address range (>= 0x400000, the SamOs user load
+    // address per L71).
+    {
+        struct elf_file* ef = NULL;
+        if (elf_load("@:/BLANK.ELF", &ef) == 0 && ef) {
+            struct elf_header* h = elf_header(ef);
+            void* entry = h ? elf_get_entry_ptr(h) : NULL;
+            if ((uintptr_t)entry >= 0x400000ULL)
+                mark_pass(BM_FEATURE_ELF_BLANK_ENTRY);
+            else
+                mark_fail(BM_FEATURE_ELF_BLANK_ENTRY);
+            elf_close(ef);
+        } else {
+            mark_fail(BM_FEATURE_ELF_BLANK_ENTRY);
+        }
+    }
+
+    // Primary disk sector size for UEFI virtual disk + PATA both
+    // report 512.
+    {
+        struct disk* d = disk_primary();
+        if (d && d->sector_size == 512) mark_pass(BM_FEATURE_DISK_SECTOR_512);
+        else                             mark_fail(BM_FEATURE_DISK_SECTOR_512);
+    }
+
+    // paging_align_address rounds up to the next 4K boundary.
+    {
+        if (paging_align_address((void*)0x1234) == (void*)0x2000)
+            mark_pass(BM_FEATURE_ROUND_KP_PAGE);
+        else
+            mark_fail(BM_FEATURE_ROUND_KP_PAGE);
+    }
+
+    // elf_load + close + load again returns success twice.
+    {
+        struct elf_file* ef1 = NULL;
+        struct elf_file* ef2 = NULL;
+        int rc1 = elf_load("@:/BLANK.ELF", &ef1);
+        if (ef1) elf_close(ef1);
+        int rc2 = elf_load("@:/BLANK.ELF", &ef2);
+        if (ef2) elf_close(ef2);
+        if (rc1 == 0 && rc2 == 0) mark_pass(BM_FEATURE_ELF_LOAD_RECLOSE);
+        else                       mark_fail(BM_FEATURE_ELF_LOAD_RECLOSE);
+    }
+
     return 0;
 }
