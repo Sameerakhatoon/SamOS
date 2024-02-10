@@ -22,6 +22,7 @@
 #include "memory/memory.h"
 #include "arch/arch.h"
 #include "bootmarker.h"
+#include "boot/cmdline.h"
 #include "string/string.h"
 #include "kernel.h"
 
@@ -131,6 +132,11 @@ static int smp_selftest(void){
 void smp_selftest_run(bool panic_test){
     if(cpu_online_count < 2){
         return;
+    }
+    // (e2e/200): the first call to CPU 1 times out and panics.
+    if(boot_cmdline_has("samos.smp_call_ignore")){
+        print("smp: cpu 1 ignores cross-CPU calls (samos.smp_call_ignore)\n");
+        smp_call_ignore(1);
     }
     int res = smp_selftest();
     boot_marker_set(BM_FEATURE_SMP_SELFTEST, (uint32_t)res);

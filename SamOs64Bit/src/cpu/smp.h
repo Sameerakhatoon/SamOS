@@ -16,7 +16,10 @@ void smp_call(struct cpu* target, void (*fn)(void*), void* arg);
 // Without the call lock or the wait: one caller per target at a time
 // (the self-test starts every AP at once this way).
 void smp_call_async(struct cpu* target, void (*fn)(void*), void* arg);
+// Panics after SAMOS_LOCK_TIMEOUT_US (30 s) without an answer.
 void smp_call_wait(struct cpu* target);
+// Test only (samos.smp_call_ignore): CPU `index` drops its calls.
+void smp_call_ignore(int index);
 // Flush `va` on every CPU that may cache it: all CPUs for a
 // kernel-half address, else the CPUs running `desc` in user mode.
 void smp_tlb_shootdown(struct paging_desc* desc, uint64_t va);

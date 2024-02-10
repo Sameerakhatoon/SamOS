@@ -117,7 +117,7 @@ struct virtio_dev {
     const char*              transport;    // "pci" or "mmio"
     uint32_t                 device_id;    // VIRTIO_ID_*
     uint64_t                 features;     // negotiated
-    void*                    bus;          // transport private (struct pci_device*, MMIO base)
+    void*                    bus;          // transport private (pci: its struct virtio_pci*, mmio: the register base)
 };
 
 // Reset, ACKNOWLEDGE, DRIVER, then accept `wanted` & offered plus

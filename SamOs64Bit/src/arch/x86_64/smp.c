@@ -10,7 +10,9 @@
 //      with a temporary PML4 below 4 GiB that identity-maps that page
 //      and shares the kernel half, and the AP's stack and cpu pointer;
 //   3. INIT, 10 ms, STARTUP, 200 us, STARTUP (the Intel sequence);
-//   4. wait for the AP to say it is online.
+//   4. wait up to 5 s for the AP to say it is online; else give up
+//      on it so a late answer cannot share the next one's slot
+//      (smp_give_up).
 // The AP loads its own GDT copy with its TSS, the kernel CR3, GS
 // base, the shared IDT, CR0/CR4, its LAPIC and LAPIC timer, and
 // enters the scheduler (smp_ap_main); with nothing to run it idles.
@@ -30,6 +32,7 @@
 #include "string/string.h"
 #include "kernel.h"
 #include "bootmarker.h"
+#include "boot/cmdline.h"
 
 #define MSR_GS_BASE         0xC0000101
 #define MSR_KERNEL_GS_BASE  0xC0000102
@@ -144,7 +147,28 @@ static uint64_t smp_low_pages(void){
     return best;
 }
 
+// The start-up handshake in c->arch.start. The AP claims its
+// slot (WAIT -> CLAIMED) before it touches anything outside it; the
+// BSP gives up on it (WAIT -> GAVE_UP) after its start-up window.
+// Exactly one of the two wins. An AP that arrives after the BSP gave
+// up parks with interrupts off and writes nothing but PARKED in its
+// own slot; the BSP then sends it INIT, which holds it in
+// wait-for-SIPI for good, before the trampoline and the slot are
+// reused for the next processor.
+#define AP_START_WAIT       0
+#define AP_START_CLAIMED    1
+#define AP_START_GAVE_UP    2
+#define AP_START_PARKED     3
+
+#define AP_START_WINDOW_US  5000000   // generous: TCG on a loaded host starts a vCPU slowly
+
 static void smp_ap_main(struct cpu* c){
+    if(!atomic_cas(&c->arch.start, AP_START_WAIT, AP_START_CLAIMED)){
+        atomic_store(&c->arch.start, AP_START_PARKED);
+        while(1){
+            __asm__ volatile("cli; hlt");
+        }
+    }
     struct gdtr64 gdtr = { sizeof(c->arch.gdt) - 1, (uint64_t)c->arch.gdt };
     cpu_load_gdt(&gdtr);
     wrmsr(MSR_GS_BASE, (uint64_t)c);
@@ -175,6 +199,46 @@ static bool smp_wait_online(struct cpu* c, uint64_t us){
         cpu_relax();
     }
     return c->online;
+}
+
+static bool smp_wait_parked(struct cpu* c, uint64_t us){
+    uint64_t end = arch_time_us() + us;
+    while(c->arch.start != AP_START_PARKED && arch_time_us() < end){
+        cpu_relax();
+    }
+    return c->arch.start == AP_START_PARKED;
+}
+
+// The AP did not come online in its window (`test`: the knob gave up
+// at once).
+// True when the BSP gave up and the slot is free again; false when the
+// AP claimed it meanwhile and is coming online.
+static bool smp_give_up(struct cpu* c, bool test){
+    if(!atomic_cas(&c->arch.start, AP_START_WAIT, AP_START_GAVE_UP) &&
+       c->arch.start == AP_START_CLAIMED){
+        if(smp_wait_online(c, AP_START_WINDOW_US)){
+            return false;
+        }
+        panic("smp: an AP claimed its slot but never came online\n");
+    }
+    serial_write("smp: apic ");
+    serial_write(itoa((int)c->hw_id));
+    serial_write(test ? " did not start (samos.smp_late_ap)\n" : " did not start\n");
+    // The test gave up before the AP could answer: wait for it to park.
+    if(test){
+        smp_wait_parked(c, AP_START_WINDOW_US);
+    }
+    // INIT holds it in wait-for-SIPI (no SIPI goes to it again), so it
+    // cannot run the trampoline once the next processor's stack and
+    // slot are written there.
+    lapic_send_init(c->hw_id);
+    udelay(10000);
+    if(c->arch.start == AP_START_PARKED){
+        serial_write("smp: apic ");
+        serial_write(itoa((int)c->hw_id));
+        serial_write(" answered late and parked\n");
+    }
+    return true;
 }
 
 int arch_start_cpus(void){
@@ -208,17 +272,25 @@ int arch_start_cpus(void){
     *(uint64_t*)(tramp + SMP_TR_CR3)   = low + 0x1000;
     *(uint64_t*)(tramp + SMP_TR_ENTRY) = (uint64_t)smp_ap_main;
 
+    // Test knob: give up on the first AP before it can answer.
+    bool late_test = boot_cmdline_has("samos.smp_late_ap");
     int next = 1;
     for(int i = 0; i < a->cpu_count && next < SAMOS_MAX_CPUS; i++){
         if(!a->cpus[i].enabled || a->cpus[i].apic_id == bsp->hw_id){
             continue;
         }
+        // A slot the BSP gave up on is reused: smp_give_up has sent
+        // its AP INIT, and the stacks a parked AP sits on are left
+        // allocated (not reused).
         struct cpu* c = &cpus[next];
         memset(c, 0, sizeof(*c));
         c->self  = c;
         c->index = next;
         c->hw_id = a->cpus[i].apic_id;
         cpu_tss_init(c);
+        bool give_up_now = late_test;
+        late_test = false;
+        c->arch.start = give_up_now ? AP_START_GAVE_UP : AP_START_WAIT;
         *(uint64_t*)(tramp + SMP_TR_STACK) = c->arch.tss.rsp0;
         *(uint64_t*)(tramp + SMP_TR_CPU)   = (uint64_t)c;
         smp_mb();
@@ -230,11 +302,7 @@ int arch_start_cpus(void){
         if(!c->online){
             lapic_send_startup(c->hw_id, (uint32_t)(low >> 12));
         }
-        // Generous: TCG on a loaded host starts a vCPU slowly.
-        if(!smp_wait_online(c, 5000000)){
-            serial_write("smp: apic ");
-            serial_write(itoa((int)c->hw_id));
-            serial_write(" did not start\n");
+        if(!smp_wait_online(c, give_up_now ? 0 : AP_START_WINDOW_US) && smp_give_up(c, give_up_now)){
             continue;
         }
         next++;
@@ -294,6 +362,13 @@ bool arch_stop_other_cpus(void){
     return true;
 }
 
+// An exception or NMI taken in ring 0 between a swapgs and its iretq
+// arrives with the user's GS base: swap to the kernel's. Only
+// that way, and nothing swaps back: the interrupted stub would resume
+// with the bases the wrong way round. Harmless today because no such
+// exception returns: idt_exception treats every ring-0 exception as
+// fatal (panic), and an NMI during a panic halts in smp_nmi_stop. A
+// handler that ever returns to ring 0 code here must swap back.
 void smp_fix_gs(void){
     uint64_t gs = rdmsr(MSR_GS_BASE);
     if(gs < (uint64_t)&cpus[0] || gs >= (uint64_t)&cpus[SAMOS_MAX_CPUS]){

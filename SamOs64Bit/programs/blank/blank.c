@@ -211,7 +211,11 @@ int main(int argc, char** argv){
     // L101 - samos print + putchar trampolines round-trip cleanly.
     print("e2e: hello\n");
     samos_e2e_mark(USER_PRINT_OK, 1);
+    // Close the probe's line at once. A partial line
+    // goes to the UART before the return to ring 3, so with the
+    // '!' left open the next line any CPU sent would follow it.
     samos_putchar('!');
+    samos_putchar('\n');
     samos_e2e_mark(USER_PUTCHAR_OK, 1);
 
     // L102 - non-blocking getkey: the keyboard buffer is empty at
@@ -243,9 +247,9 @@ int main(int argc, char** argv){
     // SamOs e2e: every marker except the keyboard probe
     // below is written by now. The host harness waits for this
     // serial line instead of sleeping a fixed time (tests64/e2e/
-    // _lib.sh, E2E_SENTINEL). The leading newline ends the line the
-    // samos_putchar('!') probe left open, so the sentinel's ^ matches.
-    print("\ne2e: user selftest done\n");
+    // _lib.sh, E2E_SENTINEL). It used to start with a newline to end
+    // the probe's line; the probe closes its own line now.
+    print("e2e: user selftest done\n");
 
     // L82-L88 / L122 PS/2 keyboard end to end: poll the keyboard
     // buffer for up to ~15 seconds. The host-side e2e test

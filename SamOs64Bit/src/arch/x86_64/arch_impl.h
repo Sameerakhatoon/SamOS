@@ -126,6 +126,7 @@ struct arch_cpu {
     uint8_t*   kernel_stack;    // TSS rsp0 stack, guard page at the bottom
     uint64_t   gdt[9];          // APs: own copy, TSS in slots 7 and 8
     struct tss tss;
+    volatile uint32_t start;    // AP start-up handshake (smp.c)
 };
 
 // Each CPU's GS base points at its struct cpu, whose first field

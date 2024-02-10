@@ -60,8 +60,10 @@ bool spin_held(struct spinlock* lock){
     return lock->locked && lock->owner == this_cpu();
 }
 
-// Out of line so __builtin_return_address(1) is the caller of
-// spin_lock even at -O0.
+// The contended path, out of line. The holder's return address is
+// taken in spin_lock itself (__builtin_return_address(0)), not here.
+// The limit is in counter cycles from tsc_freq_val (x86's TSC rate);
+// while that is 0, before the TSC is calibrated, there is no timeout.
 static void __attribute__((noinline)) spin_wait(struct spinlock* lock, struct cpu* c){
     uint64_t start = arch_counter();
     uint64_t limit = tsc_freq_val ? (SAMOS_LOCK_TIMEOUT_US / 1000000) * tsc_freq_val : 0;

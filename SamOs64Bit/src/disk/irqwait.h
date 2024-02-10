@@ -3,8 +3,9 @@
 
 // Disk completions by interrupt, through the IOAPIC.
 //
-// There is one kernel stack, so a syscall that reads the disk
-// cannot sleep and let another task run: the driver still waits in
+// There is one kernel stack per CPU, not one per task, so
+// a syscall that reads the disk cannot sleep and let another task run
+// on its CPU: the driver still waits in
 // place, but on the interrupt instead of the device. The handler acks
 // the device and sets `pending`; the wait opens interrupts for one
 // instruction at a time (arch_irq_wait_window; on x86 `sti; nop; cli;
@@ -13,8 +14,9 @@
 // and _end only the completion lines are taken (x86: the LAPIC TPR is
 // APIC_TPR_DISK_WAIT, so only vectors 0x50-0x5F): the keyboard, the
 // mouse and the scheduler tick stay pending as they do with
-// interrupts off, and no other handler runs in the middle of a
-// syscall.
+// interrupts off. The one other handler that can run there is a
+// virtio-input line sharing a completion vector, and it only sends
+// an IPI the wait also holds off.
 //
 // Each interrupt is checked against the device (`done`), so a late
 // interrupt from an earlier command does not end a wait early, and the

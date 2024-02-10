@@ -2,9 +2,13 @@
 #define VIRTIO_MMIO_H
 // virtio-mmio transport, version 2 (virtio 1.x, spec 4.2.2).
 //
-// QEMU `virt` (arm64, riscv64) has 32 of these slots at fixed
-// addresses, each 0x200 bytes with one interrupt line, listed in the
-// device tree as compatible = "virtio,mmio". x86 q35/pc have none, so
+// QEMU `virt` lists each slot in the device tree as compatible =
+// "virtio,mmio" with its `reg` and one interrupt. The boards differ
+// (QEMU 8.2, -machine virt,dumpdtb): arm64 has 32
+// slots of 0x200 bytes from 0x0a000000 (GIC SPIs 16-47, edge);
+// riscv64 has 8 slots of 0x1000 bytes from 0x10001000 (PLIC sources
+// 1-8). Take base and size from `reg`; the registers themselves fit
+// in VIRTIO_MMIO_SLOT_SIZE on both. x86 q35/pc have none, so
 // on x86 this is only built and checked against a fake device by
 // tests64/host/virtio_test.c. Map each slot uncached, call
 // virtio_mmio_attach, skip it when it returns -ENOENT (an empty slot
@@ -39,7 +43,7 @@
 #define VIRTIO_MMIO_CONFIG            0x100
 
 #define VIRTIO_MMIO_MAGIC             0x74726976u
-#define VIRTIO_MMIO_SLOT_SIZE         0x200
+#define VIRTIO_MMIO_SLOT_SIZE         0x200   // the register window, not the slot stride
 
 // `base` is the slot's registers, already mapped uncached. Fills `d`;
 // -ENOENT for an empty slot, -EIO for a bad magic or a legacy

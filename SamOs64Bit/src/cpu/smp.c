@@ -91,10 +91,18 @@ void smp_tlb_shootdown(struct paging_desc* desc, uint64_t va){
     spin_unlock(&smp_lock);
 }
 
+// Fault injection (samos.smp_call_ignore, e2e/200): the CPU
+// with this index drops every call, so its caller's wait times out.
+static volatile int call_ignore_cpu = -1;
+
+void smp_call_ignore(int index){
+    call_ignore_cpu = index;
+}
+
 static void smp_call_run(void){
     struct cpu* c = this_cpu();
     void (*fn)(void*) = c->call_fn;
-    if(!fn){
+    if(!fn || (int)c->index == call_ignore_cpu){
         return;
     }
     c->call_fn = 0;
@@ -110,11 +118,24 @@ void smp_call_async(struct cpu* target, void (*fn)(void*), void* arg){
     arch_send_ipi(target, ARCH_IPI_CALL);
 }
 
+// Bounded like a lock wait (docs/locking.md). A target that
+// never runs the call (interrupts off for good, or spinning on a lock
+// this CPU holds) panics naming both CPUs instead of hanging here.
 void smp_call_wait(struct cpu* target){
     struct cpu* me = this_cpu();
+    uint64_t start = arch_time_us();
     while(!atomic_load(&target->call_done)){
         cpu_relax();
         smp_poll(me);
+        if(SAMOS_LOCK_DEBUG && arch_time_us() - start > SAMOS_LOCK_TIMEOUT_US){
+            smp_panic_begin();
+            serial_write_unlocked("\nsmp: cpu ");
+            serial_write_unlocked(itoa((int)me->index));
+            serial_write_unlocked(" timed out waiting for cpu ");
+            serial_write_unlocked(itoa((int)target->index));
+            serial_write_unlocked(" to run a cross-CPU call\n");
+            panic("smp: a CPU did not answer a call\n");
+        }
     }
 }
 
