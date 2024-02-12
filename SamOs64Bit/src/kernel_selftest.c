@@ -22,6 +22,7 @@
 #include "disk/streamer.h"
 #include "graphics/graphics.h"
 #include "graphics/font.h"
+#include "graphics/terminal.h"
 #include "idt/irq.h"
 #include "task/task.h"
 #include "loader/formats/elfloader.h"
@@ -728,14 +729,53 @@ int kernel_selftest(void) {
     // L92 font load. With the stub sysfont.bmp now staged on
     // both partitions, font_load should return a non-NULL
     // struct and bits_width_per_character should equal 9.
+    struct font* loaded_font = font_load("@:/sysfont.bmp");
     {
-        struct font* f = font_load("@:/sysfont.bmp");
-        if (f) mark_pass(BM_FEATURE_FONT_LOADED);
-        else   mark_fail(BM_FEATURE_FONT_LOADED);
-        if (f && f->bits_width_per_character == 9)
+        if (loaded_font) mark_pass(BM_FEATURE_FONT_LOADED);
+        else              mark_fail(BM_FEATURE_FONT_LOADED);
+        if (loaded_font && loaded_font->bits_width_per_character == 9)
             mark_pass(BM_FEATURE_FONT_PIXEL_W);
         else
             mark_fail(BM_FEATURE_FONT_PIXEL_W);
+    }
+
+    // L89/L90 image load via the BMP loader.
+    {
+        struct image* img = graphics_image_load("@:/sysfont.bmp");
+        if (img) mark_pass(BM_FEATURE_BMP_IMG_LOAD);
+        else     mark_fail(BM_FEATURE_BMP_IMG_LOAD);
+    }
+
+    // L96-L100 terminal_create + terminal_write on the root
+    // graphics_info. Needs a loaded font.
+    {
+        struct graphics_info* g = graphics_screen_info();
+        struct framebuffer_pixel white = {0xFF, 0xFF, 0xFF, 0};
+        struct terminal* term = NULL;
+        if (g && loaded_font) {
+            term = terminal_create(g, 0, 0, 80, 25, loaded_font, white, 0);
+        }
+        if (term) mark_pass(BM_FEATURE_TERMINAL);
+        else      mark_fail(BM_FEATURE_TERMINAL);
+        if (term && terminal_write(term, 'H') >= 0)
+            mark_pass(BM_FEATURE_TERMINAL_WRITE);
+        else
+            mark_fail(BM_FEATURE_TERMINAL_WRITE);
+        if (term) terminal_free(term);
+    }
+
+    // L95 font_draw_text on a fresh kzalloc'd graphics_info.
+    // We do not need to render to the screen; a back-buffer-only
+    // draw lets us probe the codepath without affecting the
+    // user-side test that runs next.
+    {
+        struct graphics_info* g = graphics_screen_info();
+        struct framebuffer_pixel white = {0xFF, 0xFF, 0xFF, 0};
+        if (g && loaded_font &&
+            font_draw_text(g, loaded_font, 0, 0, "e2e", white) >= 0)
+            mark_pass(BM_FEATURE_FONT_DRAW);
+        else
+            mark_fail(BM_FEATURE_FONT_DRAW);
     }
 
     // vector_at retrieves the last-pushed element at index N-1.
