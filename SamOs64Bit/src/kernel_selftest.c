@@ -24,6 +24,7 @@
 #include "graphics/font.h"
 #include "graphics/terminal.h"
 #include "idt/irq.h"
+#include "mouse/mouse.h"
 #include "task/task.h"
 #include "loader/formats/elfloader.h"
 #include "graphics/image/image.h"
@@ -35,6 +36,20 @@
 
 static void mark_pass(boot_marker_stage_t s) { boot_marker_set(s, 1); }
 static void mark_fail(boot_marker_stage_t s) { boot_marker_set(s, 0); }
+
+// Mouse selftest callbacks (file scope so they can be passed by
+// address into mouse_register_*_handler).
+static int e2e_mouse_click_count = 0;
+static int e2e_mouse_move_count  = 0;
+void e2e_mouse_click_cb(struct mouse* m, int x, int y, MOUSE_CLICK_TYPE t) {
+    (void)m; (void)x; (void)y; (void)t;
+    e2e_mouse_click_count++;
+}
+void e2e_mouse_move_cb(struct mouse* m, int x, int y) {
+    (void)m; (void)x; (void)y;
+    e2e_mouse_move_count++;
+}
+static int e2e_mouse_init_cb(struct mouse* m) { (void)m; return 0; }
 
 // kmalloc / kfree round trip: allocate 1 KiB, write a pattern,
 // read it back, free. Catches "allocator returns NULL" and
@@ -762,6 +777,54 @@ int kernel_selftest(void) {
         else
             mark_fail(BM_FEATURE_TERMINAL_WRITE);
         if (term) terminal_free(term);
+    }
+
+    // L132-L148 synthetic mouse driver: register a no-op driver
+    // (init returns 0, draw is a no-op) so the mouse-system call
+    // sites have a non-NULL primary mouse to look at. Verify the
+    // click/move handler registration + dispatch path works.
+    static struct mouse e2e_mouse = {0};
+    static struct mouse* e2e_mouse_ptr = NULL;
+    {
+        e2e_mouse.init = e2e_mouse_init_cb;
+        e2e_mouse.draw = NULL;
+        // mouse_register sets up event_handlers vectors and
+        // pushes onto the mouse_driver_vector.
+        if (mouse_register(&e2e_mouse) == 0) {
+            mark_pass(BM_FEATURE_MOUSE_REG);
+            e2e_mouse_ptr = &e2e_mouse;
+        } else {
+            mark_fail(BM_FEATURE_MOUSE_REG);
+        }
+    }
+
+    // Click handler trampoline (file-scope so it can take the
+    // address). Increments e2e_mouse_click_count.
+    // (declared via local-scope nested function on GCC; here we
+    //  emulate by using a static stub at module scope - moved
+    //  outside this function.)
+    if (e2e_mouse_ptr) {
+        mouse_register_click_handler(e2e_mouse_ptr, e2e_mouse_click_cb);
+        mark_pass(BM_FEATURE_MOUSE_CLICK_H);
+        mouse_register_move_handler(e2e_mouse_ptr, e2e_mouse_move_cb);
+        mark_pass(BM_FEATURE_MOUSE_MOVE_H);
+
+        // Drive a click + move; expect our callbacks to fire.
+        int click_before = e2e_mouse_click_count;
+        mouse_click(e2e_mouse_ptr, MOUSE_LEFT_BUTTON_CLICKED);
+        if (e2e_mouse_click_count > click_before) mark_pass(BM_FEATURE_MOUSE_CLICK);
+        else                                        mark_fail(BM_FEATURE_MOUSE_CLICK);
+
+        int move_before = e2e_mouse_move_count;
+        mouse_position_set(e2e_mouse_ptr, 10, 10);
+        mouse_moved(e2e_mouse_ptr);
+        if (e2e_mouse_move_count > move_before) mark_pass(BM_FEATURE_MOUSE_MOVE);
+        else                                      mark_fail(BM_FEATURE_MOUSE_MOVE);
+    } else {
+        mark_fail(BM_FEATURE_MOUSE_CLICK_H);
+        mark_fail(BM_FEATURE_MOUSE_MOVE_H);
+        mark_fail(BM_FEATURE_MOUSE_CLICK);
+        mark_fail(BM_FEATURE_MOUSE_MOVE);
     }
 
     // L95 font_draw_text on a fresh kzalloc'd graphics_info.
