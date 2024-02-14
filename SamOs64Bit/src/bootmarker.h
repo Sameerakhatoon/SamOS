@@ -141,6 +141,9 @@ typedef enum {
     BM_FEATURE_MOUSE_MOVE_H   = 106, // mouse_register_move_handler attached
     BM_FEATURE_MOUSE_CLICK    = 107, // mouse_click invokes registered handler
     BM_FEATURE_MOUSE_MOVE     = 108, // mouse_moved invokes registered handler
+    BM_FEATURE_WIN_CREATE     = 109, // kernel-side window_create returns non-NULL
+    BM_FEATURE_WIN_REDRAW     = 110, // window_redraw on the created window does not crash
+    BM_FEATURE_WIN_POS_SET    = 111, // window_position_set returns 0
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is

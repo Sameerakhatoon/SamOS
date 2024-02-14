@@ -25,6 +25,7 @@
 #include "graphics/terminal.h"
 #include "idt/irq.h"
 #include "mouse/mouse.h"
+#include "graphics/window.h"
 #include "task/task.h"
 #include "loader/formats/elfloader.h"
 #include "graphics/image/image.h"
@@ -825,6 +826,32 @@ int kernel_selftest(void) {
         mark_fail(BM_FEATURE_MOUSE_MOVE_H);
         mark_fail(BM_FEATURE_MOUSE_CLICK);
         mark_fail(BM_FEATURE_MOUSE_MOVE);
+    }
+
+    // L154 / L136 kernel-side window_create + window_redraw +
+    // window_position_set on the root graphics.
+    {
+        struct graphics_info* g = graphics_screen_info();
+        struct window* w = NULL;
+        if (g) {
+            w = window_create(g, loaded_font, "e2e",
+                              50, 50, 100, 80, 0, -1);
+        }
+        if (w) mark_pass(BM_FEATURE_WIN_CREATE);
+        else   mark_fail(BM_FEATURE_WIN_CREATE);
+
+        if (w) {
+            window_redraw(w);
+            mark_pass(BM_FEATURE_WIN_REDRAW);
+
+            if (window_position_set(w, 60, 60) >= 0)
+                mark_pass(BM_FEATURE_WIN_POS_SET);
+            else
+                mark_fail(BM_FEATURE_WIN_POS_SET);
+        } else {
+            mark_fail(BM_FEATURE_WIN_REDRAW);
+            mark_fail(BM_FEATURE_WIN_POS_SET);
+        }
     }
 
     // L95 font_draw_text on a fresh kzalloc'd graphics_info.
