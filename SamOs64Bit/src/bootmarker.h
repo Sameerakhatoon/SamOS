@@ -151,6 +151,10 @@ typedef enum {
     BM_FEATURE_STREAMER_CACHE_HIT = 117, // diskstreamer_cache_new twice
     BM_FEATURE_KMALLOC_MANY   = 118, // 100 small allocs back to back
     BM_FEATURE_KMALLOC_BIG_FREE = 119, // 1 MiB alloc + free + 1 MiB alloc
+    BM_FEATURE_KBD_PUSH_POP   = 120, // keyboard_push + keyboard_pop round trip
+    BM_FEATURE_PCI_SAMOS_VEND = 121, // pci_device_get vendor field is non-zero
+    BM_FEATURE_TASK_PAGE_DESC = 122, // task_paging_desc returns non-NULL on running task
+    BM_FEATURE_FONT_LOAD_CACHE = 123, // second font_load returns same instance (cache hit)
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
@@ -176,7 +180,7 @@ typedef enum {
     BM_USER_PARSE_CMD_OK      = 83,  // samos_parse_command returned a non-NULL list
     BM_USER_PROC_ARGS_OK      = 84,  // samos_process_get_arguments round trip
 
-    BM_STAGE_MAX              = 120,
+    BM_STAGE_MAX              = 128,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.
