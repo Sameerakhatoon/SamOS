@@ -163,6 +163,18 @@ typedef enum {
     BM_FEATURE_KREALLOC_SHRINK = 129, // krealloc to smaller size still returns the pointer
     BM_FEATURE_TERMINAL_SCROLL = 130, // 30 newlines do not crash terminal_write
     BM_FEATURE_TASK_GET_NEXT = 131, // task_get_next returns 0 with no tasks
+    BM_FEATURE_TOLOWER       = 132, // tolower('A') == 'a'
+    BM_FEATURE_GRAPHICS_RECT = 133, // graphics_draw_rect does not crash
+    BM_FEATURE_WIN_EVT_PUSH  = 134, // window_event_push round-trips through ring
+    BM_FEATURE_ISDIGIT       = 135, // isdigit('5') == true
+    BM_FEATURE_TONUMERIC     = 136, // tonumericdigit('7') == 7
+    BM_FEATURE_STRNLEN_TERM  = 137, // strnlen_terminator stops on delim
+    BM_FEATURE_GRAPHICS_REDRAW_REGION = 138, // graphics_redraw_region runs
+    BM_FEATURE_KZALLOC_BIG   = 139, // kzalloc(32 KiB) is zeroed
+    BM_FEATURE_GFX_PIXEL_GET = 140, // graphics_pixel_get round trip
+    BM_FEATURE_FONT_DRAW_OFFSET = 141, // font_draw_text at non-zero offset works
+    BM_FEATURE_VECTOR_GROW = 142, // vector grows past initial capacity
+    BM_FEATURE_FREE_NULL = 143, // kfree(NULL) is a no-op
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
