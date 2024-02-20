@@ -980,5 +980,48 @@ int kernel_selftest(void) {
         else                          mark_fail(BM_FEATURE_FONT_LOAD_CACHE);
     }
 
+    // L97 terminal '\n' (line break) + L91 backspace ('\b') do
+    // not panic. We re-create a small terminal for these since
+    // the earlier one was freed.
+    {
+        struct graphics_info* g = graphics_screen_info();
+        struct framebuffer_pixel white = {0xFF, 0xFF, 0xFF, 0};
+        struct terminal* t = NULL;
+        if (g && loaded_font) {
+            t = terminal_create(g, 0, 0, 80, 25, loaded_font, white, 0);
+        }
+        if (t && terminal_write(t, '\n') >= 0)
+            mark_pass(BM_FEATURE_TERMINAL_NEWLINE);
+        else
+            mark_fail(BM_FEATURE_TERMINAL_NEWLINE);
+        if (t && terminal_write(t, '\b') >= 0)
+            mark_pass(BM_FEATURE_TERMINAL_BACKSPACE);
+        else
+            mark_fail(BM_FEATURE_TERMINAL_BACKSPACE);
+        if (t) terminal_free(t);
+    }
+
+    // L40 disk_read_block at a non-zero LBA still works.
+    {
+        struct disk* d = disk_primary();
+        unsigned char buf[512];
+        if (d && disk_read_block(d, 2, 1, buf) == 0)
+            mark_pass(BM_FEATURE_DISK_BLOCK_2);
+        else
+            mark_fail(BM_FEATURE_DISK_BLOCK_2);
+    }
+
+    // L48 VFS opens a second file independently of the first.
+    {
+        int fd_a = fopen("@:/BLANK.ELF", "r");
+        int fd_b = fopen("@:/BLANK.ELF", "r");
+        if (fd_a > 0 && fd_b > 0 && fd_a != fd_b)
+            mark_pass(BM_FEATURE_VFS_SECOND_FD);
+        else
+            mark_fail(BM_FEATURE_VFS_SECOND_FD);
+        if (fd_a > 0) fclose(fd_a);
+        if (fd_b > 0) fclose(fd_b);
+    }
+
     return 0;
 }
