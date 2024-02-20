@@ -1023,5 +1023,47 @@ int kernel_selftest(void) {
         if (fd_b > 0) fclose(fd_b);
     }
 
+    // L18 e820_largest_free_entry returns a non-NULL entry.
+    {
+        struct e820_entry* e = e820_largest_free_entry();
+        if (e) mark_pass(BM_FEATURE_E820_LARGEST);
+        else   mark_fail(BM_FEATURE_E820_LARGEST);
+    }
+
+    // L80 krealloc shrink. Allocate 1024, shrink to 64.
+    {
+        char* p = kmalloc(1024);
+        char* q = p ? krealloc(p, 64) : NULL;
+        if (q) { mark_pass(BM_FEATURE_KREALLOC_SHRINK); kfree(q); }
+        else   { mark_fail(BM_FEATURE_KREALLOC_SHRINK); }
+    }
+
+    // L98 terminal scroll: 30 newlines force at least one
+    // scroll cycle.
+    {
+        struct graphics_info* g = graphics_screen_info();
+        struct framebuffer_pixel white = {0xFF, 0xFF, 0xFF, 0};
+        struct terminal* t = NULL;
+        int ok = 0;
+        if (g && loaded_font) {
+            t = terminal_create(g, 0, 0, 80, 25, loaded_font, white, 0);
+        }
+        if (t) {
+            ok = 1;
+            for (int i = 0; i < 30 && ok; i++) {
+                if (terminal_write(t, '\n') < 0) ok = 0;
+            }
+            terminal_free(t);
+        }
+        if (ok) mark_pass(BM_FEATURE_TERMINAL_SCROLL);
+        else    mark_fail(BM_FEATURE_TERMINAL_SCROLL);
+    }
+
+    // L66 task_get_next returns NULL when there is no task.
+    {
+        if (task_get_next() == NULL) mark_pass(BM_FEATURE_TASK_GET_NEXT);
+        else                          mark_fail(BM_FEATURE_TASK_GET_NEXT);
+    }
+
     return 0;
 }

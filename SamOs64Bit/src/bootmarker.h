@@ -159,6 +159,10 @@ typedef enum {
     BM_FEATURE_TERMINAL_BACKSPACE = 125, // terminal_write '\b' returns >= 0
     BM_FEATURE_DISK_BLOCK_2 = 126, // disk_read_block at LBA 2 returns 0
     BM_FEATURE_VFS_SECOND_FD = 127, // open second file gets a different fd
+    BM_FEATURE_E820_LARGEST = 128, // e820_largest_free_entry returns non-NULL
+    BM_FEATURE_KREALLOC_SHRINK = 129, // krealloc to smaller size still returns the pointer
+    BM_FEATURE_TERMINAL_SCROLL = 130, // 30 newlines do not crash terminal_write
+    BM_FEATURE_TASK_GET_NEXT = 131, // task_get_next returns 0 with no tasks
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
@@ -184,7 +188,7 @@ typedef enum {
     BM_USER_PARSE_CMD_OK      = 83,  // samos_parse_command returned a non-NULL list
     BM_USER_PROC_ARGS_OK      = 84,  // samos_process_get_arguments round trip
 
-    BM_STAGE_MAX              = 132,
+    BM_STAGE_MAX              = 144,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.
