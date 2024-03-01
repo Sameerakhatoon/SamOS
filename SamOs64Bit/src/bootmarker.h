@@ -191,6 +191,7 @@ typedef enum {
     BM_FEATURE_IMG_PNG_NULL   = 157, // graphics_image_format_get("image/png") NULL
     BM_FEATURE_FONT_SAME      = 158, // font_get_system_font on filename hits cache
     BM_FEATURE_BUDDY_CONSEC   = 159, // two kmalloc + free + alloc gives stable address
+    BM_USER_KEY_RECEIVED      = 160, // user-side selftest received a key via samos_getkey
 
     // User-side feature slots written by the selftest ELF via
     // SYSTEM_COMMAND26_E2E_MARK. The first user slot is
@@ -216,7 +217,7 @@ typedef enum {
     BM_USER_PARSE_CMD_OK      = 83,  // samos_parse_command returned a non-NULL list
     BM_USER_PROC_ARGS_OK      = 84,  // samos_process_get_arguments round trip
 
-    BM_STAGE_MAX              = 160,
+    BM_STAGE_MAX              = 168,
 } boot_marker_stage_t;
 
 // Pack stage + value into the marker slot.
