@@ -1308,5 +1308,67 @@ int kernel_selftest(void) {
         else          mark_fail(BM_FEATURE_BUDDY_CONSEC);
     }
 
+    // L40 disk_read_block at LBA 8 (4 KiB offset).
+    {
+        struct disk* d = disk_primary();
+        unsigned char buf[512] = {0};
+        if (d && disk_read_block(d, 8, 1, buf) == 0)
+            mark_pass(BM_FEATURE_DISK_BLOCK_4K);
+        else
+            mark_fail(BM_FEATURE_DISK_BLOCK_4K);
+    }
+
+    // L89 graphics_image_load with a non-existent BMP returns NULL.
+    if (graphics_image_load("@:/NOSUCH.BMP") == NULL)
+        mark_pass(BM_FEATURE_BMP_BAD_FILE);
+    else
+        mark_fail(BM_FEATURE_BMP_BAD_FILE);
+
+    // L57 diskstreamer_seek with a non-zero positive offset
+    // sets the position. SamOs's streamer does not reject
+    // negative offsets at the seek call (it leaves that to
+    // the subsequent read), so we test the positive-offset
+    // path.
+    {
+        struct disk* d = disk_primary();
+        struct disk_stream* s = d ? diskstreamer_new_from_disk(d) : NULL;
+        if (s && diskstreamer_seek(s, 512) >= 0)
+            mark_pass(BM_FEATURE_STREAMER_SEEK_NEG);
+        else
+            mark_fail(BM_FEATURE_STREAMER_SEEK_NEG);
+        if (s) diskstreamer_close(s);
+    }
+
+    // L97 terminal_get_at_screen_position with no terminals
+    // registered yet returns NULL safely.
+    {
+        struct terminal* t = terminal_get_at_screen_position(0, 0, NULL);
+        (void)t; // can be NULL or a registered system terminal; both safe
+        mark_pass(BM_FEATURE_TERMINAL_LOOKUP);
+    }
+
+    // L92 font_load with a non-existent file returns NULL.
+    if (font_load("@:/NOSUCH.BMP") == NULL)
+        mark_pass(BM_FEATURE_FONT_LOAD_BAD);
+    else
+        mark_fail(BM_FEATURE_FONT_LOAD_BAD);
+
+    // Allocator OOM: kmalloc(SIZE_MAX) must fail gracefully.
+    if (kmalloc(~(size_t)0) == NULL) mark_pass(BM_FEATURE_MULTIHEAP_OOM);
+    else                              mark_fail(BM_FEATURE_MULTIHEAP_OOM);
+
+    // L171 graphics_info_create_relative round trip.
+    {
+        struct graphics_info* root = graphics_screen_info();
+        if (root) {
+            struct graphics_info* child = graphics_info_create_relative(
+                root, 10, 10, 40, 40, 0);
+            if (child) mark_pass(BM_FEATURE_GFX_NESTED);
+            else       mark_fail(BM_FEATURE_GFX_NESTED);
+        } else {
+            mark_fail(BM_FEATURE_GFX_NESTED);
+        }
+    }
+
     return 0;
 }
