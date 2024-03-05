@@ -24,6 +24,23 @@ set -e
 
 CURRENT_DIR=$(pwd)
 
+# Friendly dependency check. If anything obvious is missing, point
+# at bootstrap.sh rather than failing two layers deep in a Makefile.
+_missing=()
+command -v qemu-system-x86_64 >/dev/null 2>&1 || _missing+=(qemu-system-x86_64)
+command -v nasm               >/dev/null 2>&1 || _missing+=(nasm)
+command -v parted             >/dev/null 2>&1 || _missing+=(parted)
+command -v mkfs.vfat          >/dev/null 2>&1 || _missing+=(mkfs.vfat)
+command -v mcopy              >/dev/null 2>&1 || _missing+=(mcopy)
+[ -x "${PREFIX:-$HOME/opt/cross}/bin/x86_64-elf-gcc" ] || \
+    command -v x86_64-elf-gcc >/dev/null 2>&1 || _missing+=(x86_64-elf-gcc)
+if [ ${#_missing[@]} -gt 0 ]; then
+    echo "build.sh: missing required tools: ${_missing[*]}" >&2
+    echo "build.sh: run ./bootstrap.sh from this directory to install everything." >&2
+    exit 2
+fi
+unset _missing
+
 # -------------------------------------------------------------------
 # Step 1: EDK2 UEFI application build.
 # -------------------------------------------------------------------
