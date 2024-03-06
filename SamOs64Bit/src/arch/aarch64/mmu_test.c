@@ -56,7 +56,7 @@ static void probe(const char* name, uint64_t va)
 static void probe_layout(const struct fdt* f)
 {
     uint64_t local = 0;
-    uint64_t frame = pfa_alloc();
+    uint64_t frame = early_pfa_alloc();
     probe("text", (uint64_t)probe);
     probe("rodata", (uint64_t)_text_end);
     probe("data", (uint64_t)data_ret);
@@ -67,7 +67,7 @@ static void probe_layout(const struct fdt* f)
     probe("dtb", (uint64_t)f->blob);
     probe("uart", DIRECT_MAP_BASE + pl011_base());
     probe("identity", kernel_phys);
-    pfa_free(frame);
+    early_pfa_free(frame);
     int n;
     const struct mem_region* m = memmap_regions(&n);
     for (int i = 0; i < n; i++)
@@ -88,8 +88,8 @@ static int must_not_allocate(uint64_t pa)
             return 1;
         in_ram = 1;
     }
-    uint64_t t = pfa_table_pa();
-    return !in_ram || (pa >= t && pa < t + pfa_table_bytes());
+    uint64_t t = early_pfa_table_pa();
+    return !in_ram || (pa >= t && pa < t + early_pfa_table_bytes());
 }
 
 // Take every free frame, check it is outside every reservation and
@@ -100,9 +100,9 @@ static int must_not_allocate(uint64_t pa)
 static void pfa_test(void)
 {
     static uint64_t run_pa[PFA_TEST_RUNS], run_len[PFA_TEST_RUNS];
-    uint64_t before = pfa_free_frames(), n = 0, bad = 0, unmapped = 0, lost = 0, pa;
+    uint64_t before = early_pfa_free_frames(), n = 0, bad = 0, unmapped = 0, lost = 0, pa;
     int runs = 0;
-    while ((pa = pfa_alloc())) {
+    while ((pa = early_pfa_alloc())) {
         n++;
         bad += must_not_allocate(pa);
         uint64_t par = mmu_at((uint64_t)phys_to_virt(pa), AT_S1E1W);
@@ -117,15 +117,15 @@ static void pfa_test(void)
     uint64_t refused = 0;
     for (int i = 0; i < runs; i++)
         for (uint64_t k = 0; k < run_len[i]; k++)
-            refused += pfa_free(run_pa[i] + k * PAGE_SIZE) != 0;
+            refused += early_pfa_free(run_pa[i] + k * PAGE_SIZE) != 0;
     console_printf("pfa test: allocated %lu of %lu free frames in %d runs (%lu not recorded)\n", n, before, runs,
                    lost);
     console_printf("pfa test: %lu in reserved memory, %lu not writable through the direct map\n", bad, unmapped);
-    console_printf("pfa test: %lu frees refused, %lu free again\n", refused, pfa_free_frames());
-    pa = pfa_alloc();
-    int first = pfa_free(pa), second = pfa_free(pa);
+    console_printf("pfa test: %lu frees refused, %lu free again\n", refused, early_pfa_free_frames());
+    pa = early_pfa_alloc();
+    int first = early_pfa_free(pa), second = early_pfa_free(pa);
     console_printf("pfa test: free %d, double free %d, free of the kernel %d, free of the table %d\n", first,
-                   second, pfa_free(kernel_phys), pfa_free(pfa_table_pa()));
+                   second, early_pfa_free(kernel_phys), early_pfa_free(early_pfa_table_pa()));
 }
 
 static const char* fault_name(uint64_t par)
@@ -142,8 +142,8 @@ static const char* fault_name(uint64_t par)
 
 static void aspace_test(void)
 {
-    uint64_t free0 = pfa_free_frames(), tables0 = mmu_table_frames();
-    uint64_t fa = pfa_alloc(), fb = pfa_alloc(), fr = pfa_alloc();
+    uint64_t free0 = early_pfa_free_frames(), tables0 = mmu_table_frames();
+    uint64_t fa = early_pfa_alloc(), fb = early_pfa_alloc(), fr = early_pfa_alloc();
     *(uint64_t*)phys_to_virt(fa) = 0xaaaaaaaa;
     *(uint64_t*)phys_to_virt(fb) = 0xbbbbbbbb;
     struct aspace a, b;
@@ -180,11 +180,11 @@ static void aspace_test(void)
 
     aspace_destroy(&a);
     aspace_destroy(&b);
-    pfa_free(fa);
-    pfa_free(fb);
-    pfa_free(fr);
+    early_pfa_free(fa);
+    early_pfa_free(fb);
+    early_pfa_free(fr);
     console_printf("aspace: destroyed, %lu free frames (was %lu), %lu table frames (was %lu)\n",
-                   pfa_free_frames(), free0, mmu_table_frames(), tables0);
+                   early_pfa_free_frames(), free0, mmu_table_frames(), tables0);
 }
 
 void mmu_test(const struct fdt* f)
@@ -197,7 +197,7 @@ void mmu_test(const struct fdt* f)
 // An executable copy of `ret` in a fresh frame.
 static uint64_t ret_frame(void)
 {
-    uint64_t pa = pfa_alloc();
+    uint64_t pa = early_pfa_alloc();
     *(uint32_t*)phys_to_virt(pa) = INSN_RET;
     return pa;
 }

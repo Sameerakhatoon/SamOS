@@ -9,13 +9,19 @@
 #include "string/string.h"
 #include "arch/arch.h"
 #include "memory/heap/kheap.h"
+#include "boot/boot_info.h"
 
 // The frame table and every frame it hands out are direct-map
 // addresses; the reserved ranges below stay physical.
 #define PFA_VIRT(p) ((uintptr_t)PAGING_PHYS_TO_VIRT(p))
 
-// End of the kernel image including .bss (linker.ld).
-extern char samos_kernel_end[];
+// Where the frame table may go: below the boot identity map on
+// x86, anywhere in RAM where the arch's direct map is already complete.
+#ifdef ARCH_PFA_EARLY_MAP_LIMIT
+#define PFA_TABLE_LIMIT ARCH_PFA_EARLY_MAP_LIMIT
+#else
+#define PFA_TABLE_LIMIT PFA_EARLY_MAP_LIMIT
+#endif
 
 struct pfa_range {
     uintptr_t   start;
@@ -63,8 +69,8 @@ static uintptr_t pfa_find_table_home(size_t bytes){
         }
         uintptr_t s = r->base_addr < PFA_LOW_LIMIT ? PFA_LOW_LIMIT : r->base_addr;
         uintptr_t e = r->base_addr + r->length;
-        if(e > PFA_EARLY_MAP_LIMIT){
-            e = PFA_EARLY_MAP_LIMIT;
+        if(e > PFA_TABLE_LIMIT){
+            e = PFA_TABLE_LIMIT;
         }
         s = pfa_align_up(s);
         e = pfa_align_down(e);
@@ -131,13 +137,13 @@ void pfa_init(void){
     //     the boot stack kernel.asm points rsp at, growing down from
     //     SAMOS_BOOT_STACK_TOP towards the image;
     //   - the E820-format map the loader wrote at 0x210000.
-    uintptr_t image_end = (uintptr_t)samos_kernel_end - SAMOS_KERNEL_VMA;
-    if(image_end < SAMOS_BOOT_STACK_TOP){
-        image_end = SAMOS_BOOT_STACK_TOP;
-    }
-    pfa_add_reserved(SAMOS_KERNEL_LOCATION, image_end);
-    pfa_add_reserved(SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION,
-                     SAMOS_MEMORY_MAP_LOCATION + total * sizeof(struct e820_entry));
+    // Both from boot_info: the loader's kernel window (x86
+    // [SAMOS_KERNEL_LOCATION, SAMOS_BOOT_STACK_TOP), which linker.ld
+    // keeps the image inside) and memory_map, so the arch that built
+    // them says where they are.
+    pfa_add_reserved(samos_boot_info_ptr->kernel_start, samos_boot_info_ptr->kernel_end);
+    pfa_add_reserved(samos_boot_info_ptr->memory_map,
+                     samos_boot_info_ptr->memory_map + sizeof(uint64_t) + total * sizeof(struct e820_entry));
 
     size_t table_bytes = pfa_align_up(frames * sizeof(HEAP_BLOCK_TABLE_ENTRY));
     uintptr_t home = pfa_find_table_home(table_bytes);

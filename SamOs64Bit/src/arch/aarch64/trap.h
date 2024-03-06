@@ -11,8 +11,8 @@
 //
 // Restoring an EL1 frame puts SP back to just above the frame, so
 // for those `sp` is informational: a handler may change x0-x30, elr
-// and spsr, not sp (trap.c checks). The aarch64 user-mode work restores sp into SP_EL0
-// for frames from EL0.
+// and spsr, not sp (trap.c checks). For frames from EL0, sp is
+// the user's SP_EL0, restored with the frame.
 struct trap_frame {
     uint64_t x[31];     // x0-x30 (x29 frame pointer, x30 link register)
     uint64_t sp;        // SP at the trap
@@ -29,21 +29,27 @@ _Static_assert(sizeof(struct trap_frame) == TRAP_FRAME_SIZE, "vectors.S frame la
 #define SPSR_DAF        0x340   // D, A, F masked, I (IRQ) open
 
 // Vector table entries (VBAR_EL1 + 0x80 * n): four groups of sync,
-// IRQ, FIQ, SError. Only the EL1h sync and IRQ entries build a frame;
-// the rest are unexpected until the aarch64 user-mode work and dump and halt.
+// IRQ, FIQ, SError. The EL1h and EL0 sync and IRQ entries
+// build a frame; the rest are unexpected and dump and halt.
 #define VECTOR_EL1H_SYNC 4
 #define VECTOR_EL1H_IRQ  5
+#define VECTOR_EL0_SYNC  8
+#define VECTOR_EL0_IRQ   9
 
 // From vectors.S: returns the frame to resume, `f` itself or another
 // thread's after a switch.
 struct trap_frame* aarch64_trap(struct trap_frame* f, uint64_t vector);
 
-// IRQ handler for an INTID, called between acknowledge and EOI.
+// IRQ handler for an INTID. Before trap_enable_tasks it runs between
+// acknowledge and EOI; after, the EOI comes first (trap.c).
 typedef void (*irq_handler)(struct trap_frame* f);
 int  irq_register(uint32_t intid, irq_handler handler);
 
-// SVC from EL1 (no syscall layer until the aarch64 user-mode work): the test hook's handler.
+// SVC from EL1: the test hook's handler.
 void trap_set_svc_handler(void (*handler)(struct trap_frame* f, uint32_t imm));
+// Traps go to the shared kernel from now on (arch_trap_init):
+// syscalls, user faults, task state saved around IRQs from EL0.
+void trap_enable_tasks(void);
 
 // Dump the frame with the ESR decoded, then halt.
 void trap_dump(const struct trap_frame* f, uint64_t vector);

@@ -59,7 +59,7 @@ static uint64_t find_home(const struct mem_region* map, int n, uint64_t bytes)
     return 0;
 }
 
-int pfa_init(const struct mem_region* map, int n)
+int early_pfa_init(const struct mem_region* map, int n)
 {
     uint64_t lo = ~0ul, hi = 0;
     for (int i = 0; i < n; i++) {
@@ -97,7 +97,7 @@ int pfa_init(const struct mem_region* map, int n)
     return 0;
 }
 
-uint64_t pfa_alloc(void)
+uint64_t early_pfa_alloc(void)
 {
     uint8_t* t = table();
     for (uint64_t k = 0; nfree && k < frames; k++) {
@@ -113,7 +113,7 @@ uint64_t pfa_alloc(void)
     return 0;
 }
 
-int pfa_free(uint64_t pa)
+int early_pfa_free(uint64_t pa)
 {
     if (pa < base || (pa & (PFA_FRAME - 1)) || (pa - base) / PFA_FRAME >= frames)
         return -1;
@@ -127,9 +127,34 @@ int pfa_free(uint64_t pa)
     return 0;
 }
 
-uint64_t pfa_total_frames(void)    { return frames; }
-uint64_t pfa_free_frames(void)     { return nfree; }
-uint64_t pfa_used_frames(void)     { return nused; }
-uint64_t pfa_reserved_frames(void) { return frames - nfree - nused; }
-uint64_t pfa_table_pa(void)        { return table_pa; }
-uint64_t pfa_table_bytes(void)     { return table_bytes; }
+// The frames in use (page tables) and the table itself as
+// MEM_REGION_KERNEL runs, for the memory map the shared PFA takes over.
+int early_pfa_used_runs(struct mem_region* out, int max)
+{
+    uint8_t* t = table();
+    int n = 0;
+    for (uint64_t i = 0; i < frames; i++) {
+        uint64_t pa = base + i * PFA_FRAME;
+        int used = t[i] == FRAME_USED || (pa >= table_pa && pa < table_pa + table_bytes);
+        if (!used)
+            continue;
+        if (n && out[n - 1].base + out[n - 1].length == pa) {
+            out[n - 1].length += PFA_FRAME;
+            continue;
+        }
+        if (n == max)
+            return -1;
+        out[n].base = pa;
+        out[n].length = PFA_FRAME;
+        out[n].type = MEM_REGION_KERNEL;
+        n++;
+    }
+    return n;
+}
+
+uint64_t early_pfa_total_frames(void)    { return frames; }
+uint64_t early_pfa_free_frames(void)     { return nfree; }
+uint64_t early_pfa_used_frames(void)     { return nused; }
+uint64_t early_pfa_reserved_frames(void) { return frames - nfree - nused; }
+uint64_t early_pfa_table_pa(void)        { return table_pa; }
+uint64_t early_pfa_table_bytes(void)     { return table_bytes; }

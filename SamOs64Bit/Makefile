@@ -18,12 +18,14 @@
 #
 # The shared kernel code is everything under src/ outside src/arch/
 # (SHARED_OBJS). x86_64 links all of it with its src/arch/x86_64/
-# objects. aarch64 and riscv64 compile all of it too, into
-# build/<arch>/libsamos.a, which proves it builds for them through
-# arch/arch.h alone; their kernels are still the aarch64 MMU work / the riscv64 MMU work test
-# mains (PORT_OBJS) and take from the archive only what those
-# reference (the aarch64 user-mode work / the riscv64 user-mode work switch them to kernel_main). Their user-mode
-# syscall stubs (programs/stdlib/arch/<arch>/) are assembled as well.
+# objects; so does aarch64 with src/arch/aarch64/ (PORT_OBJS),
+# and boots into kernel_main. riscv64 compiles it into
+# build/riscv64/libsamos.a, which proves it builds through arch/arch.h
+# alone; its kernel is still the riscv64 MMU test main and takes from the
+# archive only what that references (the riscv64 user-mode work switches it). The user-mode
+# syscall stubs (programs/stdlib/arch/<arch>/) are assembled as well;
+# on aarch64 the user programs are built and put in a FAT16 RAM disk
+# image, bin/aarch64/ramdisk.img, for QEMU's -initrd.
 #
 # Pattern rules: an object's include path is src/, its own directory
 # and the one above it (what the per-file rules used to spell out).
@@ -51,7 +53,7 @@ SHARED_OBJS = kernel.o kernel_selftest.o string/string.o \
     loader/formats/elf.o loader/formats/elfloader.o \
     lib/vector/vector.o lib/spinlock/spinlock.o cpu/smp.o cpu/smp_selftest.o \
     virtio/virtio.o virtio/virtio_pci.o virtio/virtio_mmio.o disk/drivers/virtio_blk.o \
-    keyboard/virtio_input.o
+    keyboard/virtio_input.o disk/drivers/ramdisk.o
 
 # Freestanding, warnings are errors, no unused-parameter noise.
 COMMON_FLAGS = -g -ffreestanding -fno-builtin -nostdlib -nostartfiles -nodefaultlibs \
@@ -146,11 +148,20 @@ CROSS ?= aarch64-linux-gnu-
 #   also runs at the load address before the MMU is on.
 # -fno-tree-loop-distribute-patterns: no memset calls for the
 #   table-zeroing loops, there is no libc.
-ARCH_CFLAGS = -mgeneral-regs-only -mstrict-align -mcmodel=small -fno-tree-loop-distribute-patterns
+# -mno-outline-atomics: the atomics inline (LDXR/STXR), not libgcc's
+#   helpers, which need the C library's __getauxval.
+ARCH_CFLAGS = -mgeneral-regs-only -mstrict-align -mcmodel=small -fno-tree-loop-distribute-patterns \
+    -mno-outline-atomics
 PORT_OBJS = arch/aarch64/boot.S.o arch/aarch64/vectors.S.o arch/aarch64/main.o \
     arch/aarch64/pl011.o firmware/fdt.o arch/aarch64/console.o arch/aarch64/trap.o \
     arch/aarch64/gicv3.o arch/aarch64/timer.o arch/aarch64/sched.o arch/aarch64/fault_test.S.o \
-    arch/aarch64/mmu.o arch/aarch64/pfa.o arch/aarch64/memmap.o arch/aarch64/mmu_test.o
+    arch/aarch64/mmu.o arch/aarch64/pfa.o arch/aarch64/memmap.o arch/aarch64/mmu_test.o \
+    arch/aarch64/arch.o arch/aarch64/entry.S.o arch/aarch64/paging.o arch/aarch64/uaccess.o \
+    arch/aarch64/uaccess.S.o
+# The whole shared kernel, as on x86, except task/uaccess.o:
+# arch/aarch64/uaccess.c implements task/uaccess.h with LDTR/STTR and
+# the __ex_table fixups instead of a table walk.
+KERNEL_LIBS = $(filter-out $(BUILD)/task/uaccess.o,$(SHARED_FILES))
 else ifeq ($(ARCH),riscv64)
 CROSS ?= riscv64-linux-gnu-
 # rv64imac: no F/D, so the kernel has no FP state to save yet.
@@ -166,6 +177,7 @@ PORT_OBJS = arch/riscv64/boot.S.o arch/riscv64/main.o arch/riscv64/sbi.o \
     arch/riscv64/timer.o arch/riscv64/plic.o arch/riscv64/kthread.o \
     arch/riscv64/mmu.o arch/riscv64/pfa.o arch/riscv64/uaccess.o \
     arch/riscv64/uaccess.S.o arch/riscv64/mmu_test.o firmware/fdt.o string/string.o
+KERNEL_LIBS = $(BUILD)/libsamos.a
 else
 $(error ARCH must be x86_64, aarch64 or riscv64)
 endif
@@ -188,16 +200,68 @@ USER_STUBS   = $(patsubst ./programs/stdlib/arch/$(ARCH)/%.S,$(BUILD)/user/%.o,$
 
 all: ./bin/$(ARCH)/kernel.img $(USER_STUBS)
 
+ifeq ($(ARCH),aarch64)
+# ------------------------------------------------------------------
+# aarch64 user programs and the RAM disk. The stdlib's C files
+# and the programs as on x86 (-O0, the same warnings; FP/SIMD allowed,
+# the kernel saves it), the svc stubs from programs/stdlib/arch/aarch64/,
+# linked static at 0x400000 by user.ld. The image is FAT16 with the
+# label SAMOS, so "@:/" finds it as on the x86 disk, with the system
+# font and HELLO.TXT as there; X86BLANK.ELF is the x86 build's
+# blank.elf, an ELF for the wrong machine.
+# ------------------------------------------------------------------
+USER_BUILD  = $(BUILD)/user
+USER_CFLAGS = -ffreestanding -fno-builtin -nostdlib -nostartfiles -nodefaultlibs $(NOPIC) -O0 -g \
+    -std=gnu99 -Wall -Werror -Wno-unused-function -Wno-unused-label -Wno-cpp -Wno-unused-parameter \
+    -mno-outline-atomics -I./programs/stdlib/src
+USER_LD     = ./programs/stdlib/arch/aarch64/user.ld
+STDLIB_OBJS = $(USER_STUBS) $(addprefix $(USER_BUILD)/stdlib/src/,start.o samos.o stdlib.o stdio.o \
+    string.o memory.o file.o)
+USER_ELFS   = $(addprefix $(USER_BUILD)/,blank.elf hello.elf ktest.elf shell.elf)
+RAMDISK     = ./bin/aarch64/ramdisk.img
+
+all: $(RAMDISK)
+
+$(USER_BUILD)/%.o: ./programs/%.c
+	@mkdir -p $(@D)
+	$(CC) $(USER_CFLAGS) -I$(<D) -I$(<D)/.. -c $< -o $@
+
+$(USER_BUILD)/%.S.o: ./programs/%.S
+	@mkdir -p $(@D)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(USER_BUILD)/blank.elf: $(USER_BUILD)/blank/blank.o
+$(USER_BUILD)/hello.elf: $(USER_BUILD)/hello/src/hello.o
+$(USER_BUILD)/ktest.elf: $(USER_BUILD)/ktest/ktest.o $(USER_BUILD)/ktest/arch/aarch64/regs.S.o
+$(USER_BUILD)/shell.elf: $(USER_BUILD)/shell/src/shell.o
+$(USER_ELFS): $(STDLIB_OBJS) $(USER_LD)
+	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,max-page-size=0x1000 -T $(USER_LD) \
+	    -o $@ $(filter %.o,$^) -lgcc
+
+$(RAMDISK): $(USER_ELFS) ./hello.txt ./programs/blank/blank.elf ./assets/sysfont.bmp
+	@mkdir -p $(@D)
+	rm -f $@
+	mkfs.fat -F 16 -s 2 -n SAMOS -C $@ 8192 > /dev/null || { rm -f $@; exit 1; }
+	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(USER_BUILD)/blank.elf ::/BLANK.ELF
+	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(USER_BUILD)/hello.elf ::/HELLO.ELF
+	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(USER_BUILD)/ktest.elf ::/KTEST.ELF
+	MTOOLS_SKIP_CHECK=1 mcopy -i $@ $(USER_BUILD)/shell.elf ::/SHELL.ELF
+	MTOOLS_SKIP_CHECK=1 mcopy -i $@ ./hello.txt ::/HELLO.TXT
+	MTOOLS_SKIP_CHECK=1 mcopy -i $@ ./assets/sysfont.bmp ::/SYSFONT.BMP
+	MTOOLS_SKIP_CHECK=1 mcopy -i $@ ./programs/blank/blank.elf ::/X86BLANK.ELF
+	@echo "make: $@ ($$(stat -c%s $@) bytes)"
+endif
+
 shared_check: $(BUILD)/libsamos.a
 
 $(BUILD)/libsamos.a: $(SHARED_FILES)
 	rm -f $@
 	$(AR) rcs $@ $^
 
-$(BUILD)/kernel.elf: $(PORT_FILES) $(BUILD)/libsamos.a ./src/arch/$(ARCH)/linker.ld
+$(BUILD)/kernel.elf: $(PORT_FILES) $(KERNEL_LIBS) ./src/arch/$(ARCH)/linker.ld
 	$(CC) $(PORT_CFLAGS) -static -no-pie -Wl,--build-id=none -Wl,-z,noexecstack \
 	    -Wl,-Map,$(BUILD)/kernel.map -T ./src/arch/$(ARCH)/linker.ld -o $@ \
-	    $(PORT_FILES) $(BUILD)/libsamos.a -lgcc
+	    $(PORT_FILES) $(KERNEL_LIBS) -lgcc
 
 ./bin/$(ARCH)/kernel.img: $(BUILD)/kernel.elf
 	@mkdir -p $(@D)

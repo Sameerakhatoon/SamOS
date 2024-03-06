@@ -51,7 +51,7 @@ int sched_spawn(void (*entry)(void* arg), void* arg, void* stack, uint64_t size)
     return id;
 }
 
-void sched_tick(void)
+void sched_tick(struct trap_frame* f)
 {
     need_switch = 1;
 }

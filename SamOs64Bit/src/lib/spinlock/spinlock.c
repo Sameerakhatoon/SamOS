@@ -10,8 +10,6 @@
 #include "kernel.h"
 #include "string/string.h"
 
-extern uint64_t tsc_freq_val;
-
 void spin_lock_init(struct spinlock* lock, const char* name, int level, bool recursive){
     lock->locked     = 0;
     lock->depth      = 0;
@@ -66,7 +64,9 @@ bool spin_held(struct spinlock* lock){
 // while that is 0, before the TSC is calibrated, there is no timeout.
 static void __attribute__((noinline)) spin_wait(struct spinlock* lock, struct cpu* c){
     uint64_t start = arch_counter();
-    uint64_t limit = tsc_freq_val ? (SAMOS_LOCK_TIMEOUT_US / 1000000) * tsc_freq_val : 0;
+    // The counter frequency through arch.h (x86: tsc_freq_val).
+    uint64_t hz = arch_counter_hz();
+    uint64_t limit = hz ? (SAMOS_LOCK_TIMEOUT_US / 1000000) * hz : 0;
     uint32_t spins = 0;
     while(!atomic_cas(&lock->locked, 0, 1)){
         while(lock->locked){

@@ -35,8 +35,11 @@
 // by both boot.asm and the kernel's post-paging-switch tables.
 //
 #include <stdint.h>
+#ifndef VIRTIO_HOST_TEST            // the host test has its own MMIO stubs (virtio_io.h)
+#include "arch/arch.h"              // ARCH_BOOT_MARKER_SLOTS
+#endif
 
-#define BOOT_MARKER_BASE          0x6000ULL
+#define BOOT_MARKER_BASE         0x6000ULL
 #define BOOT_MARKER_MAGIC_PREFIX  0xB007C0DEULL  // ascii "Boot Code"
 
 // Marker slot ids. Add new stages at the END and bump
@@ -260,11 +263,23 @@ typedef enum {
     BM_STAGE_MAX              = 196,
 } boot_marker_stage_t;
 
+// The region, through the direct map: physical 0x6000 on x86.
+// An arch whose RAM does not start at 0 points ARCH_BOOT_MARKER_SLOTS
+// (arch_impl.h) at a region of its own (aarch64: a page in .bss).
+static inline volatile uint64_t* boot_marker_slots(void)
+{
+#ifdef ARCH_BOOT_MARKER_SLOTS
+    return ARCH_BOOT_MARKER_SLOTS;
+#else
+    return (volatile uint64_t*)(0xFFFF800000000000ULL + BOOT_MARKER_BASE);
+#endif
+}
+
 // Pack stage + value into the marker slot.
 static inline void boot_marker_set(boot_marker_stage_t stage, uint32_t value)
 {
     // Through the direct map; the region is still physical 0x6000.
-    volatile uint64_t* slots = (volatile uint64_t*)(0xFFFF800000000000ULL + BOOT_MARKER_BASE);
+    volatile uint64_t* slots = boot_marker_slots();
     uint64_t magic = (BOOT_MARKER_MAGIC_PREFIX << 32) | ((uint64_t)stage << 24);
     slots[stage] = magic | (uint64_t)value;
 }

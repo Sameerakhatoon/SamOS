@@ -3,9 +3,14 @@
 #include "boot/boot_info.h"
 #include "arch/arch.h"
 
+extern struct samos_boot_info* samos_boot_info_ptr;
+
 // The map is read through the direct map.
-#define E820_COUNT   ((uint16_t*)(SAMOS_DIRECT_MAP_BASE + SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION))
-#define E820_ENTRIES ((struct e820_entry*)(SAMOS_DIRECT_MAP_BASE + SAMOS_MEMORY_MAP_LOCATION))
+// At boot_info.memory_map: a 64-bit count, then the entries
+// (x86: the loader's table at SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION;
+// aarch64: the one the arch builds from the device tree).
+#define E820_COUNT   ((uint64_t*)PAGING_PHYS_TO_VIRT(samos_boot_info_ptr->memory_map))
+#define E820_ENTRIES ((struct e820_entry*)(E820_COUNT + 1))
 
 // Lecture 18 - E820 readers. The book's boot.asm put the entries at
 // 0x7E00; since the UEFI boot work the UEFI loader writes the count at
@@ -18,8 +23,6 @@
 size_t e820_total_entries(void){
     return *E820_COUNT;
 }
-
-extern struct samos_boot_info* samos_boot_info_ptr;
 
 // Reports loader and boot-services
 // memory as SAMOS_E820_TYPE_RECLAIMABLE. Nothing the kernel reads

@@ -114,4 +114,16 @@ void     aspace_destroy(struct aspace* as);
 
 uint64_t mmu_table_frames(void);    // page-table frames in use
 
+// ---- what paging.c (arch.h's paging_*) builds on ----------
+// Table frames from the shared PFA from now on (kernel_main's
+// paging_kernel_desc_new, after kheap_init).
+void     mmu_use_shared_pfa(void);
+uint64_t mmu_kernel_root(void);                         // pa of the TTBR1 L0 table
+uint64_t mmu_lookup_root(uint64_t root, uint64_t va, int* level);
+// One 4 KiB L3 entry: `desc` (0 unmaps), break-before-make with a
+// TLB flush for `asid` (or every ASID for a global entry). 0 or -1.
+int      mmu_set_page(uint64_t root, uint64_t va, uint64_t desc, uint32_t asid);
+void     mmu_sync_icache(uint64_t pa, uint64_t size);
+uint64_t aspace_ttbr0(const struct aspace* as);         // TTBR0_EL1 value (NULL: empty)
+
 #endif

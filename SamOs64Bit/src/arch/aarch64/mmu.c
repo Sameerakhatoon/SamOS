@@ -12,6 +12,7 @@
 #include "arch/aarch64/pl011.h"
 #include "arch/aarch64/sysreg.h"
 #include "arch/aarch64/trap.h"
+#include "memory/pfa.h"
 
 #define BLOCK_2M        (1ul << 21)
 #define MAIR_VALUE      (0xfful << (8 * MT_NORMAL) | 0x04ul << (8 * MT_DEVICE))
@@ -43,9 +44,34 @@ static uint64_t empty_root[512] __attribute__((aligned(4096)));
 
 static inline void dsb_ishst(void) { __asm__ volatile("dsb ishst" ::: "memory"); }
 
+// Frames from the boot allocator until kernel_main has built the
+// shared PFA (mmu_use_shared_pfa), then from that one.
+static int shared_pfa;
+
+static uint64_t frame_alloc(void)
+{
+    if (!shared_pfa)
+        return early_pfa_alloc();
+    void* v = pfa_alloc_frames(1);
+    return v ? virt_to_phys(v) : 0;
+}
+
+static void frame_free(uint64_t pa)
+{
+    if (shared_pfa)
+        pfa_free_frames(phys_to_virt(pa));
+    else
+        early_pfa_free(pa);
+}
+
+void mmu_use_shared_pfa(void)
+{
+    shared_pfa = 1;
+}
+
 static uint64_t table_alloc(void)
 {
-    uint64_t pa = pfa_alloc();
+    uint64_t pa = frame_alloc();
     if (!pa)
         return 0;
     uint64_t* t = phys_to_virt(pa);
@@ -126,7 +152,7 @@ static uint64_t free_tables(uint64_t pa, int level)
             if ((t[i] & (PTE_VALID | PTE_TABLE)) == (PTE_VALID | PTE_TABLE))
                 freed += free_tables(t[i] & PTE_ADDR, level + 1);
     }
-    pfa_free(pa);
+    frame_free(pa);
     tables--;
     return freed;
 }
@@ -140,17 +166,23 @@ static void __attribute__((noreturn)) early_fail(const struct fdt* f, const char
     aarch64_halt();
 }
 
-// Direct map of [start, end) minus the no-map regions.
+// Direct map of [start, end) minus the no-map regions and minus
+// [ro_start, ro_end), the kernel's text and rodata, which mmu_early
+// maps read-only there (as on x86: the alias is not a way to
+// write the kernel's code).
+static uint64_t ro_start, ro_end;
+
 static int map_ram(uint64_t start, uint64_t end)
 {
     int n;
     const struct mem_region* m = memmap_regions(&n);
     while (start < end) {
         uint64_t cut = end, skip = 0;
-        for (int i = 0; i < n; i++) {
-            uint64_t s = m[i].base & ~(PAGE_SIZE - 1);
-            uint64_t e = (m[i].base + m[i].length + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
-            if (!(m[i].type & MEMMAP_NOMAP) || e <= start || s >= cut)
+        for (int i = 0; i <= n; i++) {
+            int nomap = i < n ? m[i].type & MEMMAP_NOMAP : 1;
+            uint64_t s = i < n ? m[i].base & ~(PAGE_SIZE - 1) : ro_start;
+            uint64_t e = i < n ? (m[i].base + m[i].length + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1) : ro_end;
+            if (!nomap || e <= start || s >= cut)
                 continue;
             if (s <= start) {
                 skip = e;           // start is inside: jump past it
@@ -199,16 +231,20 @@ void mmu_early(uint64_t dtb)
         early_fail(&f, "memory map from the device tree", r);
     int n;
     const struct mem_region* m = memmap_regions(&n);
-    if (pfa_init(m, n) < 0)
+    if (early_pfa_init(m, n) < 0)
         early_fail(&f, "page-frame allocator: no usable RAM", -1);
 
     // TTBR1: the direct map, then the kernel image with W^X.
+    uint64_t text = (uint64_t)_text_end, ro = (uint64_t)_rodata_end;
+    ro_start = kernel_phys;
+    ro_end = ro;
     if (!(kernel_root = table_alloc()))
         early_fail(&f, "no frame for the kernel table", -1);
     for (int i = 0; i < n; i++)
         if (m[i].type == MEM_REGION_USABLE && map_ram(m[i].base, m[i].base + m[i].length) < 0)
             early_fail(&f, "direct map", i);
-    uint64_t text = (uint64_t)_text_end, ro = (uint64_t)_rodata_end;
+    if (map_range(kernel_root, DIRECT_MAP_BASE + kernel_phys, kernel_phys, ro - kernel_phys, PROT_KRO, 0) < 0)
+        early_fail(&f, "direct map of the kernel image", -1);
     uint64_t guard = (uint64_t)_stack_guard, sb = (uint64_t)_stack_bottom;
     // The page below the boot stack stays unmapped (a guard).
     if (map_range(kernel_root, KERNEL_VBASE, kernel_phys, text - kernel_phys, PROT_KTEXT, 0) < 0 ||
@@ -227,7 +263,7 @@ void mmu_early(uint64_t dtb)
     // MMU turns them on (QEMU has no caches; hardware does).
     dcache_inval(kernel_phys, kend);
     dcache_inval(early_lo, early_hi);
-    dcache_inval(pfa_table_pa(), pfa_table_pa() + pfa_table_bytes());
+    dcache_inval(early_pfa_table_pa(), early_pfa_table_pa() + early_pfa_table_bytes());
 
     sysreg_write("mair_el1", MAIR_VALUE);
     sysreg_write("tcr_el1", TCR_VALUE | ips << 32);
@@ -261,8 +297,8 @@ void mmu_report(void)
     console_printf("mmu: direct map at 0x%lx, %lu table frames, identity map removed (%lu tables freed)\n",
                    DIRECT_MAP_BASE, tables, idmap_freed);
     console_printf("pfa: %lu frames, %lu free, %lu used, %lu reserved, table 0x%lx (%lu bytes)\n",
-                   pfa_total_frames(), pfa_free_frames(), pfa_used_frames(), pfa_reserved_frames(),
-                   pfa_table_pa(), pfa_table_bytes());
+                   early_pfa_total_frames(), early_pfa_free_frames(), early_pfa_used_frames(), early_pfa_reserved_frames(),
+                   early_pfa_table_pa(), early_pfa_table_bytes());
 }
 
 uint64_t mmu_map_device(uint64_t pa, uint64_t size)
@@ -338,7 +374,7 @@ int aspace_map(struct aspace* as, uint64_t va, uint64_t pa, int prot)
 
 void aspace_switch(const struct aspace* as)
 {
-    sysreg_write("ttbr0_el1", as ? as->root | (uint64_t)as->asid << 48 : kimage_pa(empty_root));
+    sysreg_write("ttbr0_el1", aspace_ttbr0(as));
     isb();
 }
 
@@ -351,4 +387,72 @@ void aspace_destroy(struct aspace* as)
     asid_used[as->asid / 8] &= ~(1 << (as->asid % 8));
     as->root = 0;
     as->asid = 0;
+}
+
+// ---- single pages for the shared paging layer (paging.c) ----
+
+uint64_t mmu_kernel_root(void)
+{
+    return kernel_root;
+}
+
+uint64_t mmu_lookup_root(uint64_t root, uint64_t va, int* level)
+{
+    return lookup(root, va, level);
+}
+
+// Set the L3 entry for va in the tree at root to `desc` (a whole
+// descriptor, 0 to unmap). A valid entry that changes is broken first
+// (invalid, TLB flush by VA, then the new one: break-before-make).
+// Global entries (kernel) are flushed for every ASID, others for
+// `asid`. -1 if a 2 MiB block covers va or no table frame is left.
+int mmu_set_page(uint64_t root, uint64_t va, uint64_t desc, uint32_t asid)
+{
+    uint64_t* t = phys_to_virt(root);
+    for (int level = 0; level < 3; level++) {
+        uint64_t* e = &t[(va >> (39 - 9 * level)) & 511];
+        if (!(*e & PTE_VALID)) {
+            if (!desc)
+                return 0;
+            uint64_t n = table_alloc();
+            if (!n)
+                return -1;
+            *e = n | PTE_TABLE | PTE_VALID;
+        } else if (!(*e & PTE_TABLE)) {
+            return -1;
+        }
+        t = phys_to_virt(*e & PTE_ADDR);
+    }
+    uint64_t* e = &t[(va >> 12) & 511];
+    uint64_t old = *e;
+    if (old == desc)
+        return 0;
+    if (old & PTE_VALID) {
+        *e = 0;
+        uint64_t op = (va >> 12) & 0xfffffffffful;
+        if (old & PTE_NG)
+            __asm__ volatile("dsb ishst\n\ttlbi vae1is, %0\n\tdsb ish" :: "r"(op | (uint64_t)asid << 48) : "memory");
+        else
+            __asm__ volatile("dsb ishst\n\ttlbi vaae1is, %0\n\tdsb ish" :: "r"(op) : "memory");
+    }
+    *e = desc;
+    __asm__ volatile("dsb ishst\n\tisb" ::: "memory");
+    return 0;
+}
+
+// Code written through the direct map must reach the instruction
+// fetches of another alias: clean the data cache to the point of
+// unification, then invalidate the instruction caches.
+void mmu_sync_icache(uint64_t pa, uint64_t size)
+{
+    uint64_t line = 4ul << (sysreg_read("ctr_el0") >> 16 & 0xf);
+    uint64_t va = (uint64_t)phys_to_virt(pa);
+    for (uint64_t a = va & ~(line - 1); a < va + size; a += line)
+        __asm__ volatile("dc cvau, %0" :: "r"(a) : "memory");
+    __asm__ volatile("dsb ish\n\tic ialluis\n\tdsb ish\n\tisb" ::: "memory");
+}
+
+uint64_t aspace_ttbr0(const struct aspace* as)
+{
+    return as ? as->root | (uint64_t)as->asid << 48 : kimage_pa(empty_root);
 }

@@ -34,6 +34,12 @@ SECTIONS
     _text_end = .;
 
     .rodata : { *(.rodata .rodata.*) } :rodata
+    /* (instruction, fixup) pairs of the user accesses (uaccess.S) */
+    __ex_table : ALIGN(8) {
+        __ex_table_start = .;
+        KEEP(*(__ex_table))
+        __ex_table_end = .;
+    } :rodata
     . = ALIGN(4096);
     _rodata_end = .;
 
@@ -47,15 +53,18 @@ SECTIONS
         _bss_end = .;
     } :data
 
+    /* 64 KiB: kernel_main (-O0) and, once tasks run, every trap
+       from EL0, which arch_task_return starts at the top. */
     .stack (NOLOAD) : ALIGN(4096) {
         _stack_guard = .;
         . += 0x1000;
         _stack_bottom = .;
-        . += 0x4000;
+        . += 0x10000;
         _stack_top = .;
     } :data
 
     _end = .;
+    samos_kernel_end = .;   /* the shared code's name for it (memtest.c) */
     _kernel_size = _end - _head;
 
     /DISCARD/ : { *(.comment) *(.note*) *(.eh_frame*) }

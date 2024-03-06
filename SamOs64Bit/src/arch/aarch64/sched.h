@@ -18,7 +18,7 @@ void     sched_init(void);
 // New thread at entry(arg) on [stack, stack + size); returning from
 // entry ends it. Thread id, or -1 when the table is full.
 int      sched_spawn(void (*entry)(void* arg), void* arg, void* stack, uint64_t size);
-void     sched_tick(void);      // timer IRQ: switch at the end of this trap
+void     sched_tick(struct trap_frame* f);   // timer IRQ: switch at the end of this trap
 // End of an IRQ: save `f` as the current thread's context and return
 // the frame to resume.
 struct trap_frame* sched_switch(struct trap_frame* f);

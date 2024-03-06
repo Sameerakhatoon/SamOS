@@ -18,6 +18,7 @@
 #include "arch/arch.h"
 #include "string/string.h"
 #include "task/process.h"
+#include "boot/boot_info.h"
 
 #define BS SAMOS_HEAP_BLOCK_SIZE
 #define CHECK(cond) do { if(!(cond)) { return __LINE__; } } while(0)
@@ -44,17 +45,21 @@ static int memtest_pfa(void){
 
     // Everything in use at kernel entry is reserved. Frames are
     // direct-map addresses, the kernel image is at SAMOS_KERNEL_VMA.
-    CHECK(pfa_is_reserved(PAGING_PHYS_TO_VIRT(SAMOS_KERNEL_LOCATION)));
-    CHECK(pfa_is_reserved(PAGING_PHYS_TO_VIRT(samos_kernel_end - 1 - SAMOS_KERNEL_VMA)));
-    CHECK(pfa_is_reserved(PAGING_PHYS_TO_VIRT(SAMOS_BOOT_STACK_TOP - 8)));
-    CHECK(pfa_is_reserved(PAGING_PHYS_TO_VIRT(SAMOS_MEMORY_MAP_TOTAL_ENTRIES_LOCATION)));
+    // The kernel window and the map from boot_info, the image's
+    // end through the arch (x86: window [1 MiB, 2 MiB), the boot stack
+    // at its top; aarch64: wherever the image was loaded).
+    uint64_t kstart = samos_boot_info_ptr->kernel_start, kend = samos_boot_info_ptr->kernel_end;
+    CHECK(pfa_is_reserved(PAGING_PHYS_TO_VIRT(kstart)));
+    CHECK(pfa_is_reserved(PAGING_PHYS_TO_VIRT(paging_kernel_virt_to_phys(samos_kernel_end - 1))));
+    CHECK(pfa_is_reserved(PAGING_PHYS_TO_VIRT(kend - 8)));
+    CHECK(pfa_is_reserved(PAGING_PHYS_TO_VIRT(samos_boot_info_ptr->memory_map)));
     CHECK(pfa_is_reserved((void*)h->table->entries));
     CHECK(pfa_is_reserved((void*)(h->table->entries + h->table->total - 1)));
-    CHECK(pfa_is_reserved(PAGING_PHYS_TO_VIRT(0x6000)));   // boot markers, below 1 MiB
+    CHECK(pfa_is_reserved(PAGING_PHYS_TO_VIRT(BOOT_MARKER_BASE)));   // x86: below 1 MiB
     CHECK(PAGING_IS_DIRECT_MAP(h->saddr));
 
     // A reserved frame cannot be freed.
-    CHECK(pfa_free_frames(PAGING_PHYS_TO_VIRT(SAMOS_KERNEL_LOCATION)) < 0);
+    CHECK(pfa_free_frames(PAGING_PHYS_TO_VIRT(kstart)) < 0);
 
     size_t before = pfa_free_frame_count();
     uint8_t* f = pfa_alloc_frames(4);
@@ -74,11 +79,11 @@ static int memtest_pfa(void){
     // read-only; data and the frames above stay writable.
     // Through paging_get_flags, the arch's page-table walk.
     int fl;
-    fl = paging_get_flags(kernel_desc(), PAGING_PHYS_TO_VIRT((uintptr_t)memtest_pfa - SAMOS_KERNEL_VMA));
+    fl = paging_get_flags(kernel_desc(), PAGING_PHYS_TO_VIRT(paging_kernel_virt_to_phys((void*)memtest_pfa)));
     CHECK((fl & PAGING_IS_PRESENT) && !(fl & PAGING_IS_WRITEABLE) && (fl & PAGING_NO_EXECUTE));
-    fl = paging_get_flags(kernel_desc(), PAGING_PHYS_TO_VIRT((uintptr_t)"rodata" - SAMOS_KERNEL_VMA));
+    fl = paging_get_flags(kernel_desc(), PAGING_PHYS_TO_VIRT(paging_kernel_virt_to_phys((void*)"rodata")));
     CHECK((fl & PAGING_IS_PRESENT) && !(fl & PAGING_IS_WRITEABLE));
-    fl = paging_get_flags(kernel_desc(), PAGING_PHYS_TO_VIRT((uintptr_t)&memtest_data_probe - SAMOS_KERNEL_VMA));
+    fl = paging_get_flags(kernel_desc(), PAGING_PHYS_TO_VIRT(paging_kernel_virt_to_phys(&memtest_data_probe)));
     CHECK((fl & PAGING_IS_PRESENT) && (fl & PAGING_IS_WRITEABLE));
     return 1;
 }

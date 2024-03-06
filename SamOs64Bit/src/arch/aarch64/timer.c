@@ -19,7 +19,7 @@ static uint32_t intid;
 static uint64_t period;
 static uint64_t deadline;
 static volatile uint64_t ticks;
-static void (*tick_hook)(void);
+static void (*tick_hook)(struct trap_frame* f);
 
 uint64_t counter_read(void)
 {
@@ -75,10 +75,10 @@ static void timer_irq(struct trap_frame* f)
     sysreg_write("cntp_cval_el0", deadline);
     ticks++;
     if (tick_hook)
-        tick_hook();
+        tick_hook(f);
 }
 
-void timer_start(uint32_t hz, void (*on_tick)(void))
+void timer_start(uint32_t hz, void (*on_tick)(struct trap_frame* f))
 {
     tick_hook = on_tick;
     period = freq / hz;

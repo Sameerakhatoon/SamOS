@@ -32,6 +32,7 @@
 #include "graphics/image/image.h"
 #include "lib/vector/vector.h"
 #include "kernel.h"
+#include "boot/boot_info.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -183,13 +184,17 @@ static void selftest_vector_ops(void) {
 // (G23): physical 0x100000 is reached through the direct map,
 // kernel code through SAMOS_KERNEL_VMA, and the old identity
 // address is not mapped at all.
+// The kernel's load address from boot_info (x86 0x100000) and
+// the image's physical address by the arch's arithmetic, which the
+// table walk must agree with.
 static void selftest_paging_lookup(void) {
     struct paging_desc* d = kernel_desc();
     if (!d) { mark_fail(BM_FEATURE_PAGING_LOOKUP); return; }
     uintptr_t code = (uintptr_t)selftest_paging_lookup;
-    int ok = paging_get_physical_address(d, PAGING_PHYS_TO_VIRT(0x100000)) == (void*)0x100000ULL
-          && paging_get_physical_address(d, (void*)code) == (void*)(code - SAMOS_KERNEL_VMA)
-          && paging_get_physical_address(d, (void*)0x100000ULL) == NULL;
+    uint64_t load = samos_boot_info_ptr->kernel_start;
+    int ok = paging_get_physical_address(d, PAGING_PHYS_TO_VIRT(load)) == (void*)load
+          && paging_get_physical_address(d, (void*)code) == (void*)paging_kernel_virt_to_phys((void*)code)
+          && paging_get_physical_address(d, (void*)load) == NULL;
     if (ok) mark_pass(BM_FEATURE_PAGING_LOOKUP);
     else    mark_fail(BM_FEATURE_PAGING_LOOKUP);
 }

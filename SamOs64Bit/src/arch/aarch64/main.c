@@ -5,9 +5,12 @@
 // Runs with the MMU on, high (boot.S, mmu.c): prints the layout,
 // the memory map and the page-frame allocator first.
 //
-// A standalone spike until the hardware layer splits the kernel: boot.S calls
-// aarch64_main instead of the shared kernel_main, and the console
-// here is the early console that arch_console_putc will wrap.
+// After hello the shared kernel_main takes over (arch.c's
+// aarch64_enter_kernel): scheduler, processes, syscalls, the ELF
+// loader, the heap over the same PFA as x86, the VFS on the RAM disk
+// from -initrd. The lines above stay the early console's; the trap
+// spike (samos.sched_test) still runs its kernel threads instead, and
+// a GICv2 machine (no tick) halts after hello.
 //
 // Test hooks in bootargs:
 //   samos.fault_test[=brk|undef|dabort|svc]  take that exception
@@ -44,6 +47,9 @@ void fault_test_dabort(uint64_t addr);
 uint64_t fault_test_svc(uint64_t x0);
 void mmu_test(const struct fdt* f);
 int mmu_fault_test(const char* kind);
+void aarch64_gic_ready(void);
+void aarch64_enter_kernel(const struct fdt* f, uint64_t dtb_pa, const char* bootargs)
+    __attribute__((noreturn));
 
 static uint8_t work_stacks[2][WORK_STACK] __attribute__((aligned(16)));
 static uint64_t timer_epoch;        // CNTPCT when the tick started
@@ -211,20 +217,31 @@ void aarch64_main(uint64_t dtb, uint64_t boot_el)
         fault_test(kind, n > 0 ? mem[0].base + mem[0].size : 0);
 
     int ticking = gic_init(&f) == 0 && timer_init(&f) == 0;
+    int spike = cmdline_value(args, "samos.sched_test", unused, sizeof unused) == 0;
     if (ticking) {
-        sched_init();
         timer_epoch = counter_read();
-        timer_start(TICK_HZ, sched_tick);
-        irq_enable();
-        if (cmdline_value(args, "samos.sched_test", unused, sizeof unused) == 0)
+        if (spike) {
+            sched_init();
+            timer_start(TICK_HZ, sched_tick);
+            irq_enable();
             sched_test();
-        else
+        } else {
+            timer_start(TICK_HZ, 0);
+            irq_enable();
             measure_ticks(10);
+            irq_save();
+        }
     }
 
     console_printf("SamOS aarch64: hello\n");
-    if (!ticking)
+    if (!ticking) {
+        console_printf("SamOS aarch64: the shared kernel needs a GICv3 tick, halted\n");
         aarch64_halt();
-    for (;;)
-        __asm__ volatile("wfi");    // the idle thread
+    }
+    if (spike)
+        for (;;)
+            __asm__ volatile("wfi");    // the idle thread
+    // The shared kernel, with IRQs masked until the first task.
+    aarch64_gic_ready();
+    aarch64_enter_kernel(&f, dtb, args);
 }

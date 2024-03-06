@@ -3,12 +3,10 @@
 // The inline half of arch/arch.h on aarch64. Include
 // arch/arch.h, not this file.
 //
-// Enough for the shared kernel code to compile here (make
-// ARCH=aarch64 builds it into build/aarch64/libsamos.a). The
-// out-of-line functions arch.h declares come with the aarch64 user-mode work (traps, user
-// mode, syscalls, FP/SIMD save) and the aarch64 device work (devices); the trap and MMU
-// pieces they build on are named next to each one in
-// the hardware layer notes.
+// The out-of-line functions arch.h declares are in arch.c
+// (boot, interrupts, timer, firmware, power), paging.c (MMU),
+// uaccess.c (task/uaccess.h), entry.S (return to EL0, FP/SIMD) and
+// trap.c; device interrupt lines come with the aarch64 device work, other CPUs with the aarch64 SMP work.
 
 #include <stdint.h>
 #include <stddef.h>
@@ -67,9 +65,10 @@ static inline void trap_frame_init_user(struct trap_frame* f, uint64_t entry, ui
 }
 
 // ------------------------------------------------------------------
-// FP/SIMD state: q0-q31, FPSR, FPCR. The kernel is built
-// -mgeneral-regs-only; the aarch64 user-mode work saves and restores at the trap boundary
-// (fpsimd.S).
+// FP/SIMD state: q0-q31, then FPSR and FPCR (8 bytes each). The
+// kernel is built -mgeneral-regs-only, so the user's values are still
+// in the registers at the trap boundary, where task.c saves and
+// restores them (entry.S).
 // ------------------------------------------------------------------
 
 #define ARCH_FPU_STATE_SIZE (32 * 16 + 16)
@@ -94,7 +93,7 @@ void arch_fpu_restore(const struct arch_fpu_state* s);
 
 struct arch_cpu {
     uint64_t mpidr;            // MPIDR_EL1 affinity, for PSCI CPU_ON
-    uint8_t* kernel_stack;     // SP_EL1 for traps from EL0
+    uint8_t* kernel_stack;     // top of the stack traps from EL0 start on
 };
 
 static inline void* arch_cpu_self(void){
@@ -194,5 +193,14 @@ static inline void arch_memcpy(void* d, const void* s, size_t n){
 #define PAGING_PHYS_TO_VIRT(p)  phys_to_virt((uint64_t)(uintptr_t)(p))
 #define PAGING_IS_DIRECT_MAP(v) ((uintptr_t)(v) >= SAMOS_DIRECT_MAP_BASE && \
                                  (uintptr_t)(v) <  SAMOS_DIRECT_MAP_BASE + SAMOS_DIRECT_MAP_SIZE)
+
+// mmu_early's direct map covers all RAM before kernel_main, so
+// the shared PFA may put its frame table anywhere (memory/pfa.c).
+#define ARCH_PFA_EARLY_MAP_LIMIT  (~0ULL)
+
+// RAM does not start at 0 here, so the boot markers
+// (bootmarker.h) are a page of .bss (arch.c) instead of physical 0x6000.
+extern uint64_t aarch64_boot_markers[];
+#define ARCH_BOOT_MARKER_SLOTS    ((volatile uint64_t*)aarch64_boot_markers)
 
 #endif

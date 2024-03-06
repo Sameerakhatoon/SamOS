@@ -75,7 +75,7 @@ static inline bool disk_irq_masked_by_cmdline(void){
 }
 
 static inline void disk_irq_count(boot_marker_stage_t stage){
-    volatile uint64_t* slots = (volatile uint64_t*)(SAMOS_DIRECT_MAP_BASE + BOOT_MARKER_BASE);
+    volatile uint64_t* slots = boot_marker_slots();
     uint64_t v = slots[stage];
     uint32_t n = (v >> 24) == ((BOOT_MARKER_MAGIC_PREFIX << 8) | stage) ? (uint32_t)(v & 0xFFFFFF) : 0;
     boot_marker_set(stage, n + 1);

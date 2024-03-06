@@ -4,16 +4,35 @@
 // only an SVC with a handler installed returns. IRQs are acknowledged
 // at the GIC, handed to the INTID's handler, ended, and then the
 // scheduler may pick another thread's frame to resume.
+//
+// Once kernel_main's arch_trap_init has run (trap_tasks), traps
+// follow the shared kernel's model, x86's interrupt_handler:
+//   - svc from EL0: isr80h_handler (it saves the task's state, runs the
+//     syscall, puts the result in x0);
+//   - any other sync exception from EL0: the process is killed with
+//     ESR, ELR and FAR on the console, the CPU runs the next task;
+//   - IRQ: EOI first (the handler may switch tasks and not come back),
+//     then the handler; from EL0 the task's state is saved before and
+//     task_check_killed runs after;
+//   - a data abort at EL1 on a user access listed in __ex_table
+//     (uaccess.S) resumes at its fixup.
 #include "arch/aarch64/trap.h"
 #include "arch/aarch64/console.h"
 #include "arch/aarch64/gicv3.h"
 #include "arch/aarch64/sched.h"
+#include "arch/arch.h"
+#include "kernel.h"
+#include "isr80h/isr80h.h"
+#include "task/task.h"
+#include "task/process.h"
 
 #define IRQ_MAX 1020            // INTIDs 0-1019: SGI, PPI, SPI
 
 // ESR_EL1.EC, bits [31:26]
 #define EC_UNKNOWN      0x00    // also UDF and other undefined encodings
+#define EC_WFX          0x01
 #define EC_SVC64        0x15
+#define EC_SYSREG       0x18    // MSR/MRS/system instruction not allowed here
 #define EC_IABT_LOWER   0x20
 #define EC_IABT_CUR     0x21
 #define EC_PC_ALIGN     0x22
@@ -24,8 +43,15 @@
 
 static irq_handler irq_handlers[IRQ_MAX];
 static void (*svc_handler)(struct trap_frame* f, uint32_t imm);
+static int trap_tasks;
 
 void aarch64_exception(uint64_t vector, uint64_t esr, uint64_t elr, uint64_t far, uint64_t spsr);
+void aarch64_bad_stack(uint64_t esr, uint64_t elr, uint64_t far, uint64_t spsr, uint64_t sp);
+
+struct ex_entry {
+    uint64_t insn, fixup;
+};
+extern const struct ex_entry __ex_table_start[], __ex_table_end[];
 
 static const char* const vector_names[4] = { "sync", "irq", "fiq", "serror" };
 static const char* const vector_groups[4] = {
@@ -42,7 +68,9 @@ static const char* ec_name(uint32_t ec)
 {
     switch (ec) {
     case EC_UNKNOWN:    return "undefined instruction";
+    case EC_WFX:        return "wfi/wfe";
     case EC_SVC64:      return "svc";
+    case EC_SYSREG:     return "system register access";
     case EC_IABT_LOWER: return "instruction abort, lower EL";
     case EC_IABT_CUR:   return "instruction abort";
     case EC_PC_ALIGN:   return "pc alignment fault";
@@ -110,11 +138,24 @@ void trap_dump(const struct trap_frame* f, uint64_t vector)
     console_printf("  sp  0x%016lx\n", f->sp);
 }
 
-static struct trap_frame* sync_exception(struct trap_frame* f)
+static const struct ex_entry* ex_lookup(uint64_t elr)
+{
+    for (const struct ex_entry* e = __ex_table_start; e < __ex_table_end; e++)
+        if (e->insn == elr)
+            return e;
+    return 0;
+}
+
+static struct trap_frame* sync_el1(struct trap_frame* f)
 {
     uint32_t ec = (f->esr >> 26) & 0x3f;
     if (ec == EC_SVC64 && svc_handler) {
         svc_handler(f, f->esr & 0xffff);   // ELR is already past the svc
+        return f;
+    }
+    const struct ex_entry* e = ec == EC_DABT_CUR ? ex_lookup(f->elr) : 0;
+    if (e) {
+        f->elr = e->fixup;
         return f;
     }
     trap_dump(f, VECTOR_EL1H_SYNC);
@@ -122,22 +163,115 @@ static struct trap_frame* sync_exception(struct trap_frame* f)
     aarch64_halt();
 }
 
+static char* put_str(char* p, const char* s)
+{
+    while (*s)
+        *p++ = *s++;
+    return p;
+}
+
+static char* put_hex(char* p, uint64_t v)
+{
+    p = put_str(p, "0x");
+    int shift = 60;
+    while (shift > 0 && !((v >> shift) & 0xf))
+        shift -= 4;
+    for (; shift >= 0; shift -= 4)
+        *p++ = "0123456789abcdef"[(v >> shift) & 0xf];
+    return p;
+}
+
+// The exit status of a process a fault kills is 128 + a trap class in
+// x86's numbering, so a parent sees the same status for the same kind
+// of fault on every arch: 14 for an abort (#PF), 6 for an undefined
+// instruction (#UD), 17 for an alignment fault (#AC), 3 for brk (#BP),
+// 13 (#GP) for the rest (a system register or wfi at EL0, ...).
+static int fault_class(uint32_t ec)
+{
+    switch (ec) {
+    case EC_IABT_LOWER:
+    case EC_DABT_LOWER: return 14;
+    case EC_UNKNOWN:    return 6;
+    case EC_PC_ALIGN:
+    case EC_SP_ALIGN:   return 17;
+    case EC_BRK64:      return 3;
+    default:            return 13;
+    }
+}
+
+// As x86 does for a fault in ring 3: report, end the process,
+// run the next task.
+static void user_fault(struct trap_frame* f)
+{
+    uint32_t ec = (f->esr >> 26) & 0x3f;
+    kernel_page();
+    struct process* process = task_current()->process;
+    char line[256];
+    char* p = put_str(line, "\nUSER FAULT: ");
+    p = put_str(p, ec_name(ec));
+    p = put_str(p, " in ");
+    p = put_str(p, process->filename);
+    p = put_str(p, ": ESR ");
+    p = put_hex(p, f->esr);
+    p = put_str(p, " ELR ");
+    p = put_hex(p, f->elr);
+    p = put_str(p, " FAR ");
+    p = put_hex(p, f->far);
+    put_str(p, "\nprocess killed\n")[0] = 0;
+    print(line);
+    process_exit(process, PROCESS_EXIT_FAULT_BASE + fault_class(ec));
+    task_next();
+}
+
+static struct trap_frame* sync_el0(struct trap_frame* f)
+{
+    if (((f->esr >> 26) & 0x3f) == EC_SVC64) {
+        isr80h_handler(f);
+        return f;
+    }
+    user_fault(f);
+    return f;
+}
+
 static struct trap_frame* irq(struct trap_frame* f)
 {
     uint32_t intid = gic_ack();
     if (intid >= GIC_INTID_SPURIOUS)
         return f;                           // nothing pending: no EOI
-    if (intid < IRQ_MAX && irq_handlers[intid])
-        irq_handlers[intid](f);
+    irq_handler h = intid < IRQ_MAX ? irq_handlers[intid] : 0;
+    if (!trap_tasks) {
+        if (h)
+            h(f);
+        else
+            console_printf("irq: unexpected INTID %u\n", intid);
+        gic_eoi(intid);
+        return sched_switch(f);
+    }
+    gic_eoi(intid);
+    bool user = trap_frame_from_user(f);
+    if (user) {
+        kernel_page();
+        task_current_save_state(f);
+    }
+    if (h)
+        h(f);
     else
         console_printf("irq: unexpected INTID %u\n", intid);
-    gic_eoi(intid);
-    return sched_switch(f);
+    if (user) {
+        task_check_killed();
+        task_page();
+    }
+    return f;
 }
 
 struct trap_frame* aarch64_trap(struct trap_frame* f, uint64_t vector)
 {
-    struct trap_frame* next = vector == VECTOR_EL1H_IRQ ? irq(f) : sync_exception(f);
+    struct trap_frame* next;
+    switch (vector) {
+    case VECTOR_EL1H_SYNC: next = sync_el1(f); break;
+    case VECTOR_EL0_SYNC:  next = sync_el0(f); break;
+    default:               next = irq(f); break;    // VECTOR_EL1H_IRQ, VECTOR_EL0_IRQ
+    }
     // vectors.S puts SP just above the frame for an EL1 return.
     if ((next->spsr & 0xf) == SPSR_EL1H && next->sp != (uint64_t)next + TRAP_FRAME_SIZE) {
         console_printf("trap: frame at 0x%lx has sp 0x%lx\n", (uint64_t)next, next->sp);
@@ -159,6 +293,11 @@ void trap_set_svc_handler(void (*handler)(struct trap_frame* f, uint32_t imm))
     svc_handler = handler;
 }
 
+void trap_enable_tasks(void)
+{
+    trap_tasks = 1;
+}
+
 // The unexpected entries (vectors.S exception_common): no frame.
 void aarch64_exception(uint64_t vector, uint64_t esr, uint64_t elr, uint64_t far, uint64_t spsr)
 {
@@ -166,5 +305,15 @@ void aarch64_exception(uint64_t vector, uint64_t esr, uint64_t elr, uint64_t far
     console_printf("  ESR 0x%lx (EC 0x%lx)\n  ELR 0x%lx\n  FAR 0x%lx\n  SPSR 0x%lx\n",
                    esr, esr >> 26, elr, far, spsr);
     console_printf("exception: unexpected vector %lu, halted\n", vector);
+    aarch64_halt();
+}
+
+// vectors.S bad_stack: a sync exception at EL1 whose frame did not fit.
+void aarch64_bad_stack(uint64_t esr, uint64_t elr, uint64_t far, uint64_t spsr, uint64_t sp)
+{
+    console_printf("\nexception: sync (current EL, SP_ELx) on a bad kernel stack, sp 0x%lx\n", sp);
+    console_printf("  ESR 0x%lx (EC 0x%lx, %s)\n  ELR 0x%lx\n  FAR 0x%lx\n  SPSR 0x%lx\n", esr, esr >> 26,
+                   ec_name((esr >> 26) & 0x3f), elr, far, spsr);
+    console_printf("exception: kernel stack overflow, halted\n");
     aarch64_halt();
 }

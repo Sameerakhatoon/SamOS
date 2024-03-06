@@ -58,27 +58,69 @@
 #include "stdio.h"
 #include "file.h"
 
-#define REGS_SLOTS   (15 + 32)   // rax..r15, then xmm0-15 as 2 qwords each
+#if defined(__aarch64__)
+// x0-x30, the x0 the svc gets, then q0-q31 as 2 qwords each
+// (arch/aarch64/regs.S). x8 is the syscall number.
+#define REGS_GPRS    32
+#define REGS_VECS    32
+#define SLOT_ARG0    31          // x0 at the svc; slot 0 is x0 after it
+#define SLOT_ARG1    1
+#define SLOT_NR      8
+#define VEC_NAME     "q"
+#define REGS_EXTRA   2           // then FPCR and FPSR
+#define SLOT_FPCR    (REGS_GPRS + 2 * REGS_VECS)
+#define FPCR_BITS    0x07c00000ul    // AHP, DN, FZ, RMode
+#define FPSR_BITS    0x0800009ful    // QC, IDC, IXC..IOC
+#else
+#define REGS_GPRS    15          // rax..r15
+#define REGS_VECS    16          // xmm0-15
+#define SLOT_ARG0    5           // rdi
+#define SLOT_ARG1    4           // rsi
+#define VEC_NAME     "xmm"
+#define REGS_EXTRA   0
+#endif
+#define REGS_SLOTS   (REGS_GPRS + 2 * REGS_VECS + REGS_EXTRA)
 #define REGS_ROUNDS  20
 
 #define CMD_SUM      0
 #define CMD_UDELAY   25
 
-// regs.asm
+// regs.asm / arch/aarch64/regs.S
 extern void ktest_regs_roundtrip(unsigned long* in, unsigned long* out,
                                  unsigned long cmd);
 
-// in[] slots of the syscall argument registers.
-#define SLOT_RSI 4
-#define SLOT_RDI 5
-
 static const char* slot_name(int i)
 {
+#if defined(__aarch64__)
+    static char name[8];
+    if (i >= SLOT_FPCR) {
+        return i == SLOT_FPCR ? "fpcr" : "fpsr";
+    }
+    if (i >= REGS_GPRS) {
+        return VEC_NAME;
+    }
+    snprintf(name, sizeof(name), i == SLOT_ARG0 ? "x0 in" : "x%d", i);
+    return name;
+#else
     const char* names[15] = {
         "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8",
         "r9", "r10", "r11", "r12", "r13", "r14", "r15",
     };
-    return i < 15 ? names[i] : "xmm";
+    return i < 15 ? names[i] : VEC_NAME;
+#endif
+}
+
+// The registers a syscall gets: number, first and second argument;
+// `ret` is the result expected in the return register.
+static void regs_set_call(unsigned long* in, unsigned long cmd, unsigned long a0,
+                          unsigned long a1, unsigned long ret)
+{
+    in[SLOT_ARG0] = a0;
+    in[SLOT_ARG1] = a1;
+    in[0] = ret;
+#if defined(__aarch64__)
+    in[SLOT_NR] = cmd;
+#endif
 }
 
 // Format a whole line and print it with one syscall: with preemption
@@ -99,8 +141,8 @@ static int regs_check(unsigned long seed, int round, const char* what,
     for (int i = 0; i < REGS_SLOTS; i++) {
         if (in[i] != out[i]) {
             char xmm[8] = "";
-            if (i >= 15) {
-                snprintf(xmm, sizeof(xmm), "%d%s", (i - 15) / 2, (i - 15) % 2 ? ".hi" : ".lo");
+            if (i >= REGS_GPRS && i < REGS_GPRS + 2 * REGS_VECS) {
+                snprintf(xmm, sizeof(xmm), "%d%s", (i - REGS_GPRS) / 2, (i - REGS_GPRS) % 2 ? ".hi" : ".lo");
             }
             say("REGS FAIL %lu round %d after %s: %s%s expected %p got %p\n", seed, round, what,
                 slot_name(i), xmm, (void*)in[i], (void*)out[i]);
@@ -119,13 +161,15 @@ static int regs_test(unsigned long seed)
             in[i] = (seed << 56) ^ ((unsigned long)round << 40) ^
                     (0x0101010101ul * (i + 1)) ^ 0x5A5A0000ul;
         }
+#if defined(__aarch64__)
+        in[SLOT_FPCR] &= FPCR_BITS;          // only bits that read back
+        in[SLOT_FPCR + 1] &= FPSR_BITS;
+#endif
 
         // A syscall that returns straight through the trap frame.
         // Command 0 adds its two arguments (rdi, rsi): rax = 2 * arg.
         unsigned long arg = round + 1;
-        in[SLOT_RDI] = arg;
-        in[SLOT_RSI] = arg;
-        in[0] = 2 * arg;
+        regs_set_call(in, CMD_SUM, arg, arg, 2 * arg);
         ktest_regs_roundtrip(in, out, CMD_SUM);
         if (regs_check(seed, round, "sum", in, out)) {
             return 1;
@@ -133,8 +177,7 @@ static int regs_test(unsigned long seed)
 
         // A syscall that sleeps, runs the other tasks and comes back
         // through task_enter: rax = 0. rdi = 1000 microseconds.
-        in[SLOT_RDI] = 1000;
-        in[0] = 0;
+        regs_set_call(in, CMD_UDELAY, 1000, in[SLOT_ARG1], 0);
         ktest_regs_roundtrip(in, out, CMD_UDELAY);
         if (regs_check(seed, round, "udelay", in, out)) {
             return 1;
@@ -454,7 +497,12 @@ static int parent_test(void)
     parent_expect("exit(42) status", status, 42);
 
     parent_expect("main returning 7", parent_run("ktest.elf exit 7", &pid), 7);
+#if defined(__aarch64__)
+    // No divide trap here; a fault's status uses x86's numbers.
+    parent_expect("undefined instruction is 128 + 6", parent_run("ktest.elf ud", &pid), 128 + 6);
+#else
     parent_expect("divide by zero is 128 + 0", parent_run("ktest.elf de", &pid), 128);
+#endif
     parent_expect("page fault is 128 + 14", parent_run("ktest.elf pf", &pid), 128 + 14);
 
     // kill a CPU-bound child; the parent runs again because of
@@ -979,7 +1027,12 @@ static int readers_test(int argc, char** argv)
     return failures != 0;
 }
 
-static unsigned char data_code[16] = { 0xC3 };   // ret, in .data
+#if defined(__aarch64__)
+#define RET_BYTES 0xC0, 0x03, 0x5F, 0xD6           // ret (0xd65f03c0)
+#else
+#define RET_BYTES 0xC3                             // ret
+#endif
+static unsigned char data_code[16] = { RET_BYTES };   // in .data
 
 // Returns 1 if the mode was one of these, after the fault (which
 // kills the process, so a return means the fault did not happen).
@@ -1000,12 +1053,12 @@ static int isolation_mode(const char* mode, int argc, char** argv)
         print("KTEST stack: recursing\n");
         recurse(0);
     } else if (strncmp(mode, "nxstack", 8) == 0) {
-        unsigned char code[16] = { 0xC3 };
+        unsigned char code[16] = { RET_BYTES };
         print("KTEST nxstack\n");
         ((void (*)(void))code)();
     } else if (strncmp(mode, "nxheap", 7) == 0) {
         unsigned char* code = malloc(16);
-        code[0] = 0xC3;
+        memcpy(code, data_code, 4);
         print("KTEST nxheap\n");
         ((void (*)(void))code)();
     } else if (strncmp(mode, "nxdata", 7) == 0) {
@@ -1026,19 +1079,31 @@ int main(int argc, char** argv)
     const char* mode = argc > 1 ? argv[1] : "";
 
     if (strncmp(mode, "de", 3) == 0) {
+        // aarch64 has no divide trap: the quotient is 0 and this
+        // returns.
         print("KTEST de: dividing by zero\n");
         volatile int zero = 0;
         volatile int x = 10 / zero;
         (void)x;
     } else if (strncmp(mode, "gp", 3) == 0) {
+#if defined(__aarch64__)
+        print("KTEST gp: masking IRQs at EL0\n");
+        __asm__ volatile("msr daifset, #2");
+#else
         print("KTEST gp: executing hlt in ring 3\n");
         __asm__ volatile("hlt");
+#endif
     } else if (strncmp(mode, "pf", 3) == 0) {
         print("KTEST pf: writing to an unmapped page\n");
         *(volatile unsigned long*)0x0000700000000000ul = 1;
     } else if (strncmp(mode, "ud", 3) == 0) {
+#if defined(__aarch64__)
+        print("KTEST ud: udf\n");
+        __asm__ volatile("udf #0");
+#else
         print("KTEST ud: ud2\n");
         __asm__ volatile("ud2");
+#endif
     } else if (strncmp(mode, "kptr", 5) == 0) {
         return kptr_test();
     } else if (strncmp(mode, "longpath", 9) == 0) {
