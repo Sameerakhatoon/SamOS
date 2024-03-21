@@ -7,9 +7,9 @@
 // nothing else. Each architecture implements it in src/arch/<arch>/:
 // arch_impl.h holds the types and the inline parts (trap frame,
 // per-CPU pointer, atomics, MMIO, mapping flags), the .c/.asm/.S files
-// the rest. x86_64 implements all of it. aarch64 and riscv64 provide
-// arch_impl.h so the shared code compiles for them; their functions
-// below come with the aarch64 user-mode work and the riscv64 user-mode work (the hardware layer notes).
+// the rest. x86_64, aarch64 and riscv64 implement all
+// of it; on the two ports some device and SMP functions are still
+// stubs.
 //
 // Conventions:
 //  - IRQ numbers are the controller's own (x86: ISA IRQ 0-15, GICv3:

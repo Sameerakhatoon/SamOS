@@ -11,11 +11,16 @@ struct fdt;
 
 // samos.test on the command line: halting powers QEMU off instead.
 extern bool riscv64_test_mode;
+// samos.bringup: the early riscv64 boot (kthreads on the timer,
+// the MMU tests) instead of the shared kernel_main.
+extern bool riscv64_bringup;
 
 void riscv64_main(uint64_t hartid, uint64_t dtb);
 __attribute__((noreturn)) void riscv64_halt(void);
 // The /cpus child whose reg is `hartid`, or a negative FDT_ERR_*.
 int riscv64_cpu_node(const struct fdt* f, uint64_t hartid);
+// The device tree riscv64_main parsed.
+const struct fdt* riscv64_fdt(void);
 
 #define csr_read(csr) ({ uint64_t v_; __asm__ volatile("csrr %0, " #csr : "=r"(v_)); v_; })
 #define csr_write(csr, v) __asm__ volatile("csrw " #csr ", %0" : : "rK"((uint64_t)(v)) : "memory")

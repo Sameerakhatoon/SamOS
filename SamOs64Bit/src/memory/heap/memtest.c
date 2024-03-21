@@ -290,8 +290,10 @@ static int memtest_steady_cycle(void){
     uint64_t phys9 = paging_kernel_virt_to_phys(p[9]);
     CHECK(paging_map(d, (void*)0x400000, (void*)phys9, PAGING_IS_PRESENT | PAGING_IS_WRITEABLE) == 0);
     CHECK(paging_map(d, (void*)0x401000, (void*)(phys9 + BS), PAGING_IS_PRESENT) == 0);
-    CHECK(paging_map(d, (void*)0x7F0000000000ULL, (void*)paging_kernel_virt_to_phys(p[8]),
-                     PAGING_IS_PRESENT) == 0);
+    // Near the top of the user half (x86: 0x7F0000000000; riscv64: the
+    // half is smaller under riscv64's Sv39).
+    CHECK(paging_map(d, (void*)(SAMOS_USER_SPACE_END - SAMOS_USER_SPACE_END / 128),
+                     (void*)paging_kernel_virt_to_phys(p[8]), PAGING_IS_PRESENT) == 0);
     CHECK(paging_get_physical_address(d, (void*)0x401000) == (void*)(phys9 + BS));
     CHECK(paging_map(d, (void*)SAMOS_DIRECT_MAP_BASE, NULL, PAGING_IS_PRESENT | PAGING_ACCESS_FROM_ALL) < 0);
     // The kernel half translates in `d` as in the kernel's own tables

@@ -5,15 +5,18 @@
 #include "arch/riscv64/mmu_test.h"
 #include "arch/riscv64/console.h"
 #include "arch/riscv64/mmu.h"
-#include "arch/riscv64/pfa.h"
 #include "arch/riscv64/riscv64.h"
 #include "arch/riscv64/timer.h"
 #include "arch/riscv64/trap.h"
 #include "arch/riscv64/uaccess.h"
+#include "memory/memregion.h"
+#include "memory/pfa.h"
 #include "status.h"
 #include "string/string.h"
 
 #define UVA 0x10000ul   // a's pages: UVA rw, UVA + 0x1000 r, UVA + 0x2000 unmapped
+
+extern char __kernel_end[];
 
 static const char rodata_probe[] = "rodata";
 static uint32_t data_probe[2] = { 0x00008067, 0x00008067 };   // ret, ret
@@ -47,7 +50,11 @@ void mmu_report(uintptr_t uart_va)
     if (uart_va) {
         console_printf("mmu: uart 0x%lx %s\n", uart_va, prot(uart_va));
     }
-    console_printf("mmu: direct map 0x%lx %s\n", dmap_base + mmu_kernel_pa(), prot(dmap_base + mmu_kernel_pa()));
+    // RAM past the image, and the image's text through the
+    // direct map, which is read-only now.
+    uint64_t ram = kernel_image_pa(__kernel_end);
+    console_printf("mmu: direct map 0x%lx (pa 0x%lx) %s", dmap_base + ram, ram, prot(dmap_base + ram));
+    console_printf(", image text 0x%lx %s\n", dmap_base + mmu_kernel_pa(), prot(dmap_base + mmu_kernel_pa()));
     console_printf("mmu: %lu writable+executable leaves, %lu user leaves in the kernel tables\n",
                    mmu_kernel_leaves(PTE_W | PTE_X), mmu_kernel_leaves(PTE_U));
 }
@@ -67,7 +74,8 @@ static bool overlaps(uint64_t pa, const struct mem_region* r)
 // Every free frame once: inside /memory, outside every reservation,
 // and writable through the direct map (a frame in OpenSBI's PMP
 // region would fault here). The frames hold a list of themselves, so
-// they free without a side table.
+// they free without a side table. The shared allocator
+// (memory/pfa.c), which kheap_init built from boot_info's map.
 void pfa_test(void)
 {
     int nr;
@@ -104,7 +112,7 @@ void pfa_test(void)
     uint8_t* run = pfa_alloc_frames(64);
     bool contiguous = run != 0;
     for (int i = 0; run && i < 64; i++) {
-        contiguous = contiguous && !pfa_is_reserved(virt_to_phys(run) + i * PFA_FRAME_SIZE);
+        contiguous = contiguous && !pfa_is_reserved(run + i * PFA_FRAME_SIZE);
     }
     int f1 = pfa_free_frames(run), f2 = pfa_free_frames(run);
     console_printf("pfa test: run of 64 at 0x%lx %s, free %d, again %d, %lu free now\n",
@@ -155,14 +163,14 @@ void uaccess_test(void)
                    UVA, UVA + 0x1000, UVA + 0x2000, UVA, a.asid, b.asid, mmu_asid_bits());
     mm_switch(&a);
     char buf[64];
-    int r = copy_from_user(buf, (void*)UVA, 7);
+    int r = copy_from_user(0, buf, (void*)UVA, 7);
     console_printf("uaccess: read %d '%s'\n", r, r ? "" : buf);
 
-    r = copy_to_user((void*)(UVA + 256), "written by the kernel", 22);
+    r = copy_to_user(0, (void*)(UVA + 256), "written by the kernel", 22);
     console_printf("uaccess: write %d, page holds '%s'\n", r, (char*)phys_to_virt(rw) + 256);
 
     uint64_t fx = trap_fixup_count();
-    r = copy_to_user((void*)(UVA + 0x1000), "x", 1);
+    r = copy_to_user(0, (void*)(UVA + 0x1000), "x", 1);
     console_printf("uaccess: write to the read-only page %d, %lu fault(s), scause 0x%lx, page holds '%c'\n",
                    r, trap_fixup_count() - fx, trap_fixup_last_cause(), ro_k[0]);
 
@@ -170,24 +178,24 @@ void uaccess_test(void)
         big[i] = 0;
     }
     fx = trap_fixup_count();
-    r = copy_from_user(big, (void*)(UVA + 0x1800), 4096);
+    r = copy_from_user(0, big, (void*)(UVA + 0x1800), 4096);
     console_printf("uaccess: read across into the unmapped page %d after %u bytes, %lu fault(s), scause 0x%lx\n",
                    r, nonzero_prefix(big, 4096), trap_fixup_count() - fx, trap_fixup_last_cause());
 
     fx = trap_fixup_count();
-    int k1 = copy_from_user(buf, (void*)KERNEL_VMA, 8);
-    int k2 = copy_to_user(phys_to_virt(rw), "x", 1);
-    int k3 = copy_from_user(buf, (void*)(user_end - 8), 16);
-    int k4 = copy_from_user(buf, (void*)UVA, ~0ul - UVA + 2);
+    int k1 = copy_from_user(0, buf, (void*)KERNEL_VMA, 8);
+    int k2 = copy_to_user(0, phys_to_virt(rw), "x", 1);
+    int k3 = copy_from_user(0, buf, (void*)(user_end - 8), 16);
+    int k4 = copy_from_user(0, buf, (void*)UVA, ~0ul - UVA + 2);
     console_printf("uaccess: kernel image %d, direct map %d, past user_end %d, wrapping %d, %lu fault(s)\n",
                    k1, k2, k3, k4, trap_fixup_count() - fx);
 
-    long l1 = strncpy_from_user(buf, (void*)(UVA + 512), sizeof(buf));
+    long l1 = strncpy_from_user(0, buf, (void*)(UVA + 512), sizeof(buf));
     console_printf("uaccess: strncpy %ld '%s'\n", l1, buf);
-    long l2 = strncpy_from_user(buf, (void*)(UVA + 512), 4);
+    long l2 = strncpy_from_user(0, buf, (void*)(UVA + 512), 4);
     console_printf("uaccess: strncpy into 4 bytes %ld '%s'\n", l2, buf);
-    long l3 = strncpy_from_user(buf, (void*)(UVA + 0x1000 + 4092), sizeof(buf));
-    long l4 = strncpy_from_user(buf, (void*)KERNEL_VMA, sizeof(buf));
+    long l3 = strncpy_from_user(0, buf, (void*)(UVA + 0x1000 + 4092), sizeof(buf));
+    long l4 = strncpy_from_user(0, buf, (void*)KERNEL_VMA, sizeof(buf));
     console_printf("uaccess: strncpy into the unmapped page %ld, from the kernel %ld\n", l3, l4);
 
     // SUM is set inside the copies only; without it the hardware
@@ -214,13 +222,13 @@ void uaccess_test(void)
 
     // Same address, other address space, and back.
     mm_switch(&b);
-    int rb = copy_from_user(buf, (void*)UVA, 7);
+    int rb = copy_from_user(0, buf, (void*)UVA, 7);
     console_printf("uaccess: mm b reads %d '%s'", rb, rb ? "" : buf);
     mm_switch(&a);
-    int ra = copy_from_user(buf, (void*)UVA, 7);
+    int ra = copy_from_user(0, buf, (void*)UVA, 7);
     console_printf(", mm a again %d '%s'\n", ra, ra ? "" : buf);
     mm_switch(0);
-    r = copy_from_user(buf, (void*)UVA, 1);
+    r = copy_from_user(0, buf, (void*)UVA, 1);
     console_printf("uaccess: kernel root %d\n", r);
 }
 

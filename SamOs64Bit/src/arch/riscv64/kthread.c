@@ -58,6 +58,8 @@ int kthread_create(const char* name, void (*fn)(void* arg), void* arg)
         f->x[TF_SP] = (uint64_t)top;
         f->x[TF_A0] = (uint64_t)arg;
         __asm__("mv %0, gp" : "=r"(f->x[TF_GP]));
+        // Tp is the struct cpu (cpu/percpu.h) in kernel code.
+        __asm__("mv %0, tp" : "=r"(f->x[TF_TP]));
         uint64_t flags = irq_save();
         threads[i] = (struct kthread){ KT_READY, name, f, 0 };
         irq_restore(flags);

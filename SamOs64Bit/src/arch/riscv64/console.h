@@ -6,6 +6,7 @@
 
 void console_set_putc(void (*putc)(char c));
 void console_putc(char c);
+void console_raw_putc(char c);   // No \n -> \r\n
 void console_puts(const char* s);
 // %s %c %d %u %x with an optional l (64-bit), and %%. No widths.
 void console_printf(const char* fmt, ...);

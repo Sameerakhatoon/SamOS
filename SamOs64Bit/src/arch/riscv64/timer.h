@@ -15,6 +15,9 @@
 
 struct fdt;
 
+// The time CSR's rate (the cpu node's timebase-frequency, else
+// /cpus'), 0 if the tree has none. Read early for arch_counter_hz.
+uint64_t timer_probe_timebase(const struct fdt* f, int cpu);
 // Program the first deadline at `hz` and enable STIE (sstatus.SIE is
 // the caller's). `cpu` is the boot hart's /cpus node. 0 or -1.
 int      timer_init(const struct fdt* f, int cpu, unsigned hz);

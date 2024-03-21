@@ -1,14 +1,18 @@
 // riscv64 C entry: boot to a serial hello.
 //
-// A standalone spike until the hardware layer splits the hardware layer; then this
-// becomes the riscv64 arch_early_init and hands off to kernel_main.
 // Output starts on the SBI console and moves to the 16550 UART the
 // device tree names.
 //
 // Then the trap path's tests (bootargs), the 100 Hz timer and
 // the PLIC with the UART's receive interrupt, and two kernel threads
 // that only the timer switches.
+//
+// The early part (per-CPU pointer, MMU, device tree, console,
+// memory map) runs on every boot and builds the boot_info a loader
+// would hand over; then the shared kernel_main. samos.bringup instead
+// runs the early riscv64 tests above and halts, as those boots did.
 
+#include "arch/arch.h"
 #include "arch/riscv64/riscv64.h"
 #include "arch/riscv64/console.h"
 #include "arch/riscv64/kthread.h"
@@ -19,16 +23,42 @@
 #include "arch/riscv64/timer.h"
 #include "arch/riscv64/trap.h"
 #include "arch/riscv64/uart16550.h"
+#include "boot/boot_info.h"
+#include "cpu/percpu.h"
 #include "firmware/fdt.h"
+#include "io/serial.h"
+#include "kernel.h"
+#include "memory/heap/heap.h"
+#include "memory/heap/kheap.h"
+#include "memory/memory.h"
+#include "memory/memregion.h"
+#include "memory/pfa.h"
 #include "string/string.h"
 
 #define TICK_HZ 100
+#define MAP_MAX 64
 
 bool riscv64_test_mode;
 
 static struct fdt fdt;
 static int uart_node = -1;
 static uintptr_t uart_va;
+
+// What the UEFI loader hands x86's kernel (boot/boot_info.h): the
+// memory map as E820 entries after a 64-bit count, the kernel's
+// physical range, the command line.
+static struct samos_boot_info boot_info;
+static struct {
+    uint64_t count;
+    struct e820_entry entry[MAP_MAX];
+} __attribute__((packed)) boot_map;
+
+extern char __kernel_end[];
+
+const struct fdt* riscv64_fdt(void)
+{
+    return &fdt;
+}
 
 void riscv64_halt(void)
 {
@@ -313,10 +343,95 @@ static void interrupts_init(uint64_t hartid, const char* args)
     }
 }
 
+// ---- boot_info ---------------------------------------------------
+
+static void map_add(uint64_t base, uint64_t end, uint32_t type)
+{
+    if (end > base && boot_map.count < MAP_MAX) {
+        boot_map.entry[boot_map.count++] = (struct e820_entry){ base, end - base, type, 0 };
+    }
+}
+
+// E820 entries do not overlap, and the shared frame allocator frees
+// every usable one, so /memory goes in minus every reservation; the
+// reservations follow as reserved (firmware) or kernel (ours).
+static void build_memory_map(void)
+{
+    int n;
+    const struct mem_region* r = mmu_regions(&n);
+    for (int i = 0; i < n; i++) {
+        if (r[i].type != MEM_REGION_USABLE) {
+            map_add(r[i].base, r[i].base + r[i].length, r[i].type == MEM_REGION_KERNEL
+                    ? SAMOS_E820_TYPE_KERNEL : SAMOS_E820_TYPE_RESERVED);
+            continue;
+        }
+        uint64_t lo = r[i].base, hi = r[i].base + r[i].length;
+        while (lo < hi) {
+            uint64_t cut = hi;
+            bool inside = false;
+            for (int j = 0; j < n && !inside; j++) {
+                uint64_t b = r[j].base, e = r[j].base + r[j].length;
+                if (r[j].type == MEM_REGION_USABLE || e <= lo || b >= hi) {
+                    continue;
+                }
+                if (b <= lo) {
+                    lo = e;
+                    inside = true;
+                } else if (b < cut) {
+                    cut = b;
+                }
+            }
+            if (!inside) {
+                map_add(lo, cut, SAMOS_E820_TYPE_USABLE);
+                lo = cut;
+            }
+        }
+    }
+}
+
+static void build_boot_info(const char* args)
+{
+    build_memory_map();
+    boot_info.magic = SAMOS_BOOT_INFO_MAGIC;
+    boot_info.version = SAMOS_BOOT_INFO_VERSION;
+    boot_info.size = sizeof(boot_info);
+    boot_info.fb_format = ~0u;   // no framebuffer (graphics.c: no screen output)
+    boot_info.memory_map = kernel_image_pa(&boot_map);
+    boot_info.kernel_start = mmu_kernel_pa();
+    boot_info.kernel_end = kernel_image_pa(__kernel_end);
+    strncpy(boot_info.cmdline, args ? args : "", SAMOS_BOOT_CMDLINE_MAX - 1);
+    samos_boot_info_ptr = &boot_info;
+}
+
+// The bring-up boot's frame allocator line: the shared allocator's
+// table spans its lowest to its highest usable frame.
+static void pfa_report(void)
+{
+    struct heap* h = pfa_heap();
+    console_printf("pfa: frame table at 0x%lx, %lu bytes\n", virt_to_phys(h->table->entries), h->table->total);
+    console_printf("pfa: %lu frames (%lu MiB) from 0x%lx: %lu free, %lu reserved\n", pfa_total_frames(),
+                   pfa_total_frames() >> 8, virt_to_phys(h->saddr), pfa_free_frame_count(),
+                   pfa_reserved_frame_count());
+}
+
+// cpus[0] is the boot hart (cpu/percpu.h); tp points at it from here
+// on, in the kernel (boot.S keeps it across traps from U-mode).
+static void percpu_init(uint64_t hartid)
+{
+    struct cpu* c = &cpus[0];
+    c->self = c;
+    c->index = 0;
+    c->hw_id = (uint32_t)hartid;
+    c->online = 1;
+    c->arch.hart_id = hartid;
+    __asm__ volatile("mv tp, %0" : : "r"(c));
+}
+
 void riscv64_main(uint64_t hartid, uint64_t dtb)
 {
+    percpu_init(hartid);
     sbi_init();
-    console_printf("\nSamOS riscv64 (S-R3)\n");
+    console_printf("\nSamOS riscv64 (S-R4)\n");
     console_printf("boot hart: %lu\n", hartid);
     console_printf("dtb: 0x%lx\n", dtb);
     sbi_print_info();
@@ -327,19 +442,30 @@ void riscv64_main(uint64_t hartid, uint64_t dtb)
     int err = fdt_init(&fdt, phys_to_virt(dtb), 1 << 20);
     if (err != 0) {
         console_printf("fdt: no device tree at 0x%lx (error %d)\n", dtb, err);
-    } else {
-        if (mmu_memory_init(&fdt) != 0) {
-            riscv64_halt();
-        }
-        console_to_uart();
-        mmu_report(uart_va);
-        print_memory();
-        console_printf("harts: %d\n", count_harts());
-        const char* args = fdt_bootargs(&fdt);
-        console_printf("bootargs: %s\n", args ? args : "");
-        riscv64_test_mode = cmdline_has(args, "samos.test=1");
-        interrupts_init(hartid, args);
+        print_harts();
+        console_printf("SamOS riscv64: hello\n");
+        riscv64_halt();
     }
+    if (mmu_memory_init(&fdt) != 0) {
+        riscv64_halt();
+    }
+    console_to_uart();
+    mmu_report(uart_va);
+    print_memory();
+    console_printf("harts: %d\n", count_harts());
+    const char* args = fdt_bootargs(&fdt);
+    console_printf("bootargs: %s\n", args ? args : "");
+    riscv64_test_mode = cmdline_has(args, "samos.test=1");
+    riscv64_bringup = cmdline_has(args, "samos.bringup");
+    build_boot_info(args);
+    if (!riscv64_bringup) {
+        kernel_main();
+    }
+
+    serial_init();
+    kheap_init();
+    pfa_report();
+    interrupts_init(hartid, args);
     print_harts();
     console_printf("SamOS riscv64: hello\n");
     riscv64_halt();

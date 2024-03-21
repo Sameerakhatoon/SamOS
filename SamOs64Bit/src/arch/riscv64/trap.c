@@ -2,18 +2,29 @@
 // The C half of the trap path: decode scause, dispatch the
 // timer and the PLIC, preempt on the way out, dump and halt on a
 // kernel exception (as on x86: KERNEL FAULT plus registers).
+// Traps from U-mode go to the shared kernel as x86's do
+// (interrupt_handler, isr80h_handler): an ecall is a syscall, an
+// interrupt saves the task's state first, a fault kills the process.
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "arch/arch.h"
 #include "arch/riscv64/console.h"
 #include "arch/riscv64/kthread.h"
 #include "arch/riscv64/plic.h"
 #include "arch/riscv64/riscv64.h"
 #include "arch/riscv64/timer.h"
 #include "arch/riscv64/trap.h"
+#include "isr80h/isr80h.h"
+#include "kernel.h"
+#include "task/process.h"
+#include "task/task.h"
 
 #define EXC_ILLEGAL_INSTRUCTION 2
 #define EXC_BREAKPOINT          3
+#define EXC_ECALL_U             8
+
+bool riscv64_bringup;
 
 static const char* const reg_names[31] = {
     "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0", "a1",
@@ -38,9 +49,8 @@ static const char* cause_name(uint64_t scause)
     return scause < 16 && exceptions[scause] ? exceptions[scause] : "reserved";
 }
 
-static void dump_frame(const char* what, const struct trap_frame* f)
+void arch_dump_frame(struct trap_frame* f)
 {
-    console_printf("\n%s: scause 0x%lx (%s)\n", what, f->scause, cause_name(f->scause));
     console_printf("  sepc 0x%lx stval 0x%lx sstatus 0x%lx\n", f->sepc, f->stval, f->sstatus);
     for (int i = 0; i < 31; i++) {
         console_printf("%s%s 0x%lx", i % 4 ? " " : "  ", reg_names[i], f->x[i]);
@@ -48,6 +58,12 @@ static void dump_frame(const char* what, const struct trap_frame* f)
             console_printf("\n");
         }
     }
+}
+
+static void dump_frame(const char* what, struct trap_frame* f)
+{
+    console_printf("\n%s: scause 0x%lx (%s)\n", what, f->scause, cause_name(f->scause));
+    arch_dump_frame(f);
 }
 
 static volatile bool probe_active;
@@ -108,12 +124,17 @@ static unsigned insn_length(uint64_t pc)
     return (*(volatile uint16_t*)pc & 3) == 3 ? 4 : 2;
 }
 
-// The tick, as x86's clock handler: count it, then let the scheduler switch
-// on the way out of the trap.
+// The tick, as x86's clock handler: count it and program the next
+// deadline, then the scheduler: the riscv64 trap code's kthreads switch on the way out
+// of the trap (samos.bringup), the shared one (task_clock) inside it.
 static void riscv64_clock(struct trap_frame* frame)
 {
     timer_interrupt();
-    sched_tick();
+    if (riscv64_bringup) {
+        sched_tick();
+    } else {
+        task_clock(frame);
+    }
 }
 
 static void interrupt(struct trap_frame* f)
@@ -133,6 +154,43 @@ static void interrupt(struct trap_frame* f)
     }
 }
 
+// As on x86, a fault in U-mode kills only that process. The
+// parent's wait sees 128 + scause (x86: 128 + the vector).
+static void user_fault(struct trap_frame* f)
+{
+    kernel_page();
+    struct process* process = task_current()->process;
+    console_printf("\nUSER FAULT: scause 0x%lx (%s) in %s: sepc 0x%lx stval 0x%lx\nprocess killed\n",
+                   f->scause, cause_name(f->scause), process->filename, f->sepc, f->stval);
+    process_exit(process, PROCESS_EXIT_FAULT_BASE + (int)f->scause);
+    task_next();
+}
+
+// A trap from U-mode, on this hart's trap stack. Anything that
+// switches tasks (task_clock, a blocking syscall, an exit) does it in
+// task_next and never comes back here; otherwise the task resumes from
+// this frame.
+static struct trap_frame* user_trap(struct trap_frame* f)
+{
+    if (f->scause == EXC_ECALL_U) {
+        // ecall has no compressed form; the restart of a blocked
+        // syscall steps back the same 4 bytes.
+        f->sepc += 4;
+        isr80h_handler(f);
+        return f;
+    }
+    if (!(f->scause & SCAUSE_INTERRUPT)) {
+        user_fault(f);
+    }
+    kernel_page();
+    task_current_save_state(f);
+    interrupt(f);
+    // A kill from another CPU takes effect here.
+    task_check_killed();
+    task_page();
+    return f;
+}
+
 static uint64_t sum_in_frame, sum_in_handler;
 
 void trap_sum_counts(uint64_t* in_frame, uint64_t* in_handler)
@@ -145,9 +203,12 @@ struct trap_frame* riscv64_trap(struct trap_frame* f)
 {
     sum_in_frame += (f->sstatus & SSTATUS_SUM) != 0;
     sum_in_handler += (csr_read(sstatus) & SSTATUS_SUM) != 0;
+    if (!(f->sstatus & SSTATUS_SPP) && !riscv64_bringup) {
+        return user_trap(f);
+    }
     if (f->scause & SCAUSE_INTERRUPT) {
         interrupt(f);
-        return sched_switch(f);
+        return riscv64_bringup ? sched_switch(f) : f;
     }
     if (f->scause == EXC_ILLEGAL_INSTRUCTION && probe_active) {
         probe_faults++;
@@ -164,8 +225,6 @@ struct trap_frame* riscv64_trap(struct trap_frame* f)
         console_printf("breakpoint: resuming at 0x%lx\n", f->sepc);
         return f;
     }
-    // No user mode until the riscv64 user-mode work, where a U-mode fault kills the task
-    // instead (as on x86).
     dump_frame(f->sstatus & SSTATUS_SPP ? "KERNEL FAULT" : "USER FAULT", f);
     console_printf("System halted.\n");
     riscv64_halt();

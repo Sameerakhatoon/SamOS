@@ -78,13 +78,19 @@
 //
 // The upper half (PML4 slots 256-511) is built once and shared by
 // every process; the lower half belongs to the process alone.
-#define SAMOS_USER_SPACE_END            0x0000800000000000ULL
+//
+// An arch whose layout is chosen at boot defines the five
+// layout names itself, before any header (riscv64: Sv48 or Sv39; the
+// Makefile -includes arch/riscv64/layout.h). These are the defaults.
 #define SAMOS_USER_HEAP_START           0x0000000010000000ULL
 #define SAMOS_USER_STACK_GUARD          (SAMOS_PROGRAM_VIRTUAL_STACK_ADDRESS_END - 0x1000)
+#ifndef SAMOS_DIRECT_MAP_BASE
+#define SAMOS_USER_SPACE_END            0x0000800000000000ULL
 #define SAMOS_DIRECT_MAP_BASE           0xFFFF800000000000ULL
 #define SAMOS_DIRECT_MAP_SIZE           0x0000400000000000ULL
 #define SAMOS_KERNEL_HEAP_ARENA_BASE    0xFFFFC00000000000ULL
 #define SAMOS_KERNEL_VMA                0xFFFFFFFF80000000ULL
+#endif
 
 #define SAMOS_MAX_PROGRAM_ALLOCATIONS    1024
 #define SAMOS_MAX_PROCESSES              16

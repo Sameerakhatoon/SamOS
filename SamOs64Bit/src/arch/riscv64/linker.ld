@@ -56,6 +56,8 @@ SECTIONS
     }
 
     __kernel_end = .;
+    /* The shared kernel's name for it (memtest.c). */
+    samos_kernel_end = .;
 
     /DISCARD/ : {
         *(.comment) *(.note .note.*) *(.eh_frame .eh_frame_hdr)

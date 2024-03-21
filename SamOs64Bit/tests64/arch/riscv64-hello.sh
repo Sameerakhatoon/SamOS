@@ -18,6 +18,9 @@
 #      Moved the kernel to the higher half (sepc 0xffffffff802...)
 #      and the load goes through the Sv48 direct map, so stval is
 #      0xffff800000000000 + 0x80000000; still a PMP access fault.
+# Every boot adds samos.bringup, the early riscv64 boot that ends in
+# hello; without it the kernel goes on to the shared kernel_main
+# (riscv64-user.sh).
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 kernel="${RISCV64_KERNEL:-$here/../../bin/riscv64/kernel.img}"
@@ -33,7 +36,7 @@ checks=0
 boot() {
     local log="$tmp/$1.log"
     qemu-system-riscv64 -machine virt -m 512M -smp "$2" -nographic -bios default \
-        -kernel "$kernel" -append "$3" < /dev/null > "$log.raw" 2>&1 &
+        -kernel "$kernel" -append "$3 samos.bringup" < /dev/null > "$log.raw" 2>&1 &
     local pid=$! left=200
     powered_off=0
     while [ $left -gt 0 ]; do
@@ -83,7 +86,7 @@ expect '^console: ns16550a at 0x10000000$' "console moved to the device tree's 1
 expect '^memory: 0x80000000 size 0x20000000$' "memory node"
 expect '^memory: 512 MiB in 1 region\(s\)$' "memory size"
 expect '^harts: 1$' "hart count from /cpus"
-expect '^bootargs: samos.test=1$' "bootargs"
+expect '^bootargs: samos.test=1 samos.bringup$' "bootargs"
 expect '^hsm: 0=started$' "one hart, started"
 expect '^SamOS riscv64: hello$' "hello"
 expect '^riscv64: halted$' "halted"
@@ -101,7 +104,7 @@ expect '^SamOS riscv64: hello$' "hello"
 
 echo "riscv64 samos.trap_test"
 boot trap 1 "samos.test=1 samos.trap_test"
-expect '^bootargs: samos.test=1 samos.trap_test$' "bootargs"
+expect '^bootargs: samos.test=1 samos.trap_test samos.bringup$' "bootargs"
 expect '^KERNEL FAULT: scause 0x5 \(load access fault\)$' "scause dump"
 expect '^  sepc 0xffffffff802[0-9a-f]{5} stval 0xffff800080000000 sstatus 0x[0-9a-f]+$' "sepc in the kernel, stval the address"
 expect '^  ra 0x[0-9a-f]+ sp 0x[0-9a-f]+ gp 0x[0-9a-f]+ tp 0x[0-9a-f]+$' "register dump"

@@ -2,18 +2,18 @@
 // address spaces. See mmu.h for the layout.
 //
 // mmu_boot runs from boot.S at the physical load address with the MMU
-// off; everything it reaches (this file's walker, pfa_ready, globals)
+// off; everything it reaches (this file's walker, pfa_total_frames, globals)
 // is addressed PC-relative (medany), so it works there as well as at
 // KERNEL_VMA. It must not use a pointer stored in initialised data,
 // which holds the link address.
 
 #include "arch/riscv64/mmu.h"
 #include "arch/riscv64/console.h"
-#include "arch/riscv64/pfa.h"
 #include "arch/riscv64/riscv64.h"
 #include "firmware/fdt.h"
+#include "memory/memregion.h"
+#include "memory/pfa.h"
 
-#define PTE_RWX      (PTE_R | PTE_W | PTE_X)
 #define PTE_PPN_MASK 0x003ffffffffffc00ul
 #define MMIO_WINDOW  (1ul << 30)
 #define MAX_REGIONS  32
@@ -22,10 +22,12 @@
 extern char __kernel_start[], __text_end[], __rodata_end[], __image_end[];
 extern char __pt_pool_start[], __pt_pool_end[], __stack_start[], __kernel_end[];
 
-uint64_t dmap_base, user_end;
+// The layout the shared kernel sees (layout.h).
+uint64_t dmap_base, dmap_size, arena_base, user_end;
+uint64_t kernel_va_off;                     // VA - PA of the image
 int mmu_levels;
 
-static uint64_t kernel_pa, kernel_va_off;   // load address; VA - PA of the image
+static uint64_t kernel_pa;                  // load address
 static uint64_t kernel_root;                // physical
 static uint64_t pt_virt_off;                // tables are at PA + this (0 with the MMU off)
 static uint64_t mmio_base, mmio_next;
@@ -33,6 +35,7 @@ static unsigned pool_used;
 static bool sealed;                         // kernel root-level upper half is final
 static uint64_t sv48_readback;              // satp after the Sv48 probe write
 static uint64_t boot_dtb, boot_dtb_size;
+static uint64_t initrd_base, initrd_size;
 static unsigned asid_bits;
 static uint16_t next_asid;
 static struct mm* current_mm;
@@ -40,15 +43,22 @@ static struct mm* current_mm;
 static struct mem_region regions[MAX_REGIONS];
 static int nregions;
 
+// The shared multiheap's arena (VA = arena_base + PA) sits
+// between the direct map and the mmio window, so the window moved up
+// from 0xffffc00000000000 in Sv48 (layout.h).
 static void set_layout(int levels)
 {
     mmu_levels = levels;
     if (levels == 4) {
         dmap_base = 0xffff800000000000ul;
-        mmio_base = 0xffffc00000000000ul;
+        dmap_size = 1ul << 46;
+        arena_base = 0xffffc00000000000ul;
+        mmio_base = 0xffffe00000000000ul;
         user_end = 1ul << 47;
     } else {
         dmap_base = 0xffffffc000000000ul;
+        dmap_size = 1ul << 36;
+        arena_base = 0xffffffd000000000ul;
         mmio_base = 0xffffffe000000000ul;
         user_end = 1ul << 38;
     }
@@ -89,11 +99,12 @@ static inline uint64_t pte_make(uint64_t pa, uint64_t flags)
 }
 
 // A zeroed table: from the boot pool (in the image, so reserved with
-// it) until the frame allocator is up, then from the allocator.
+// it) until the frame allocator is up, then from the allocator (the
+// shared one, memory/pfa.c, which kheap_init builds).
 static uint64_t pt_alloc(void)
 {
     uint64_t pa;
-    if (pfa_ready()) {
+    if (pfa_total_frames()) {
         void* p = pfa_alloc_frames(1);
         if (!p) {
             return 0;
@@ -116,7 +127,7 @@ static uint64_t pt_alloc(void)
 // tables above it when `alloc`. NULL when a leaf above is in the way,
 // on no memory, or when a new root-level entry would be needed in the
 // sealed kernel root.
-static uint64_t* pt_entry(uint64_t root, uint64_t va, int level, bool alloc)
+uint64_t* pt_entry(uint64_t root, uint64_t va, int level, bool alloc)
 {
     uint64_t* t = table_at(root);
     for (int l = mmu_levels - 1; l > level; l--) {
@@ -168,7 +179,7 @@ static int pt_map(uint64_t root, uint64_t va, uint64_t pa, uint64_t size, uint64
 }
 
 // The leaf PTE for `va`, 0 if none.
-static uint64_t pt_lookup(uint64_t root, uint64_t va, int* level)
+uint64_t pt_lookup(uint64_t root, uint64_t va, int* level)
 {
     uint64_t* t = table_at(root);
     for (int l = mmu_levels - 1; l >= 0; l--) {
@@ -187,7 +198,7 @@ static uint64_t pt_lookup(uint64_t root, uint64_t va, int* level)
     return 0;
 }
 
-static uint64_t make_satp(uint64_t root, uint64_t asid)
+uint64_t make_satp(uint64_t root, uint64_t asid)
 {
     uint64_t mode = mmu_levels == 4 ? SATP_MODE_SV48 : SATP_MODE_SV39;
     return mode << 60 | asid << 44 | root >> 12;
@@ -374,43 +385,89 @@ static void reserve_from_fdt(const struct fdt* f)
     }
 }
 
+// A /chosen property of one or two cells (QEMU writes the initrd
+// bounds as 64-bit values), 0 when absent.
+static uint64_t chosen_u64(const struct fdt* f, const char* name)
+{
+    uint32_t len = 0;
+    int node = fdt_path_offset(f, "/chosen");
+    const uint8_t* p = node < 0 ? 0 : fdt_getprop(f, node, name, &len);
+    uint64_t v = 0;
+    for (uint32_t i = 0; p && (len == 4 || len == 8) && i < len; i++) {
+        v = v << 8 | p[i];
+    }
+    return v;
+}
+
 int mmu_memory_init(const struct fdt* f)
 {
     struct fdt_region mem[8];
+    uint64_t ram_lo = ~0ul, ram_hi = 0;
     int n = fdt_memory_regions(f, mem, 8);
     for (int i = 0; i < n && i < 8; i++) {
         uint64_t lo = (mem[i].base + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
         uint64_t hi = (mem[i].base + mem[i].size) & ~(PAGE_SIZE - 1);
-        if (hi <= lo || hi > mmio_base - dmap_base
+        if (hi <= lo || hi > dmap_size
             || pt_map(kernel_root, dmap_base + lo, lo, hi - lo, PTE_R | PTE_W | PTE_G, true) != 0) {
             console_printf("mmu: cannot direct-map 0x%lx size 0x%lx\n", mem[i].base, mem[i].size);
             return -1;
         }
         reserve(lo, hi - lo, MEM_REGION_USABLE, "memory");
+        ram_lo = lo < ram_lo ? lo : ram_lo;
+        ram_hi = hi > ram_hi ? hi : ram_hi;
+    }
+    // The image's text and rodata are read-only in the direct map
+    // too (as on x86; memtest checks it). The boot pass mapped the image
+    // there in 4 KiB pages, which the loop above kept and replaced.
+    if (pt_map(kernel_root, dmap_base + kernel_pa, kernel_pa, kernel_image_pa(__rodata_end) - kernel_pa,
+               PTE_R | PTE_G, true) != 0) {
+        console_printf("mmu: cannot protect the image in the direct map\n");
+        return -1;
     }
     sfence_vma();
     console_printf("mmu: direct map of %d region(s), %u boot page tables used\n", n, pool_used);
+    if (!ram_hi) {
+        console_printf("pfa: no usable memory\n");
+        return -1;
+    }
 
     reserve_from_fdt(f);
     reserve(kernel_pa, kernel_image_pa(__image_end) - kernel_pa, MEM_REGION_KERNEL, "kernel image");
     reserve(kernel_image_pa(__pt_pool_start), __pt_pool_end - __pt_pool_start, MEM_REGION_KERNEL, "boot page tables");
     reserve(kernel_image_pa(__stack_start), __kernel_end - __stack_start, MEM_REGION_KERNEL, "boot stack");
     reserve(boot_dtb, boot_dtb_size, MEM_REGION_KERNEL, "device tree");
-    if (pfa_init(regions, nregions) != 0) {
-        console_printf("pfa: no usable memory\n");
-        return -1;
-    }
-    console_printf("pfa: frame table at 0x%lx, %lu bytes\n", pfa_table_pa(), pfa_table_size());
-    console_printf("pfa: %lu frames (%lu MiB): %lu free, %lu reserved\n", pfa_total_frames(),
-                   pfa_total_frames() >> 8, pfa_free_frame_count(), pfa_reserved_frame_count());
+    // QEMU's -initrd, the RAM disk the shared kernel boots from.
+    initrd_base = chosen_u64(f, "linux,initrd-start");
+    uint64_t end = chosen_u64(f, "linux,initrd-end");
+    initrd_size = end > initrd_base ? end - initrd_base : 0;
+    reserve(initrd_base, initrd_size, MEM_REGION_KERNEL, "initrd");
 
-    // The mmio window's root-level entry, then no new ones: every
-    // address space copies the upper half's root entries once.
+    // The root-level entries of the mmio window and of the heap arena
+    // over RAM, then no new ones: every address space copies the upper
+    // half's root entries once. The tables below them come later.
+    uint64_t span = 1ul << (12 + 9 * (mmu_levels - 1));
     if (!pt_entry(kernel_root, mmio_base, mmu_levels - 2, true)) {
         return -1;
     }
+    for (uint64_t va = (arena_base + ram_lo) & ~(span - 1); va < arena_base + ram_hi; va += span) {
+        if (!pt_entry(kernel_root, va, mmu_levels - 2, true)) {
+            return -1;
+        }
+    }
     sealed = true;
     return 0;
+}
+
+int mmu_initrd(uint64_t* base, uint64_t* size)
+{
+    *base = initrd_base;
+    *size = initrd_size;
+    return initrd_size ? 0 : -1;
+}
+
+uint64_t mmu_kernel_root(void)
+{
+    return kernel_root;
 }
 
 const struct mem_region* mmu_regions(int* count)
@@ -460,6 +517,7 @@ int mm_create(struct mm* mm)
     }
     mm->root = virt_to_phys(t);
     // ASID 0 is the kernel root's; when they run out, 0 means "flush".
+    // Never recycled yet (65535 address spaces on QEMU).
     mm->asid = asid_bits && next_asid + 1u < (1u << asid_bits) ? ++next_asid : 0;
     return 0;
 }
@@ -471,6 +529,47 @@ static void flush_asid(uint16_t asid)
     } else {
         sfence_vma();
     }
+}
+
+// One page of `mm` (all of its ASID's when there are none).
+void mm_flush_page(struct mm* mm, uint64_t va)
+{
+    if (mm->asid && asid_bits) {
+        __asm__ volatile("sfence.vma %0, %1" : : "r"(va), "r"((uint64_t)mm->asid) : "memory");
+    } else {
+        sfence_vma();
+    }
+}
+
+// The tables under one lower-half root entry, `level` being the
+// level of the table's own entries. Leaves are the process's pages,
+// which process.c frees itself.
+static void free_tables(uint64_t table, int level)
+{
+    uint64_t* t = table_at(table);
+    for (int i = 0; level > 0 && i < 512; i++) {
+        if ((t[i] & PTE_V) && !(t[i] & PTE_RWX)) {
+            free_tables(pte_pa(t[i]), level - 1);
+        }
+    }
+    pfa_free_frames(t);
+}
+
+void mm_destroy(struct mm* mm)
+{
+    if (current_mm == mm) {
+        mm_switch(0);
+    }
+    uint64_t* t = table_at(mm->root);
+    for (int i = 0; i < 256; i++) {
+        if ((t[i] & PTE_V) && !(t[i] & PTE_RWX)) {
+            free_tables(pte_pa(t[i]), mmu_levels - 2);
+        }
+    }
+    // No TLB entry of this ASID may outlive its tables.
+    flush_asid(asid_bits ? mm->asid : 0);
+    pfa_free_frames(t);
+    mm->root = 0;
 }
 
 int mm_map(struct mm* mm, uint64_t va, uint64_t pa, uint64_t size, uint64_t prot)

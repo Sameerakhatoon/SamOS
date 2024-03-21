@@ -101,3 +101,11 @@ void sbi_shutdown(void)
     }
     sbi_call(SBI_EXT_LEGACY_SHUTDOWN, 0, 0, 0, 0);
 }
+
+// SRST cold reboot (reset type 1).
+void sbi_reboot(void)
+{
+    if (sbi_probe(SBI_EXT_SRST)) {
+        sbi_call(SBI_EXT_SRST, 0, 1, 0, 0);
+    }
+}

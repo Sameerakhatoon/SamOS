@@ -3,11 +3,10 @@
 // The inline half of arch/arch.h on riscv64. Include
 // arch/arch.h, not this file.
 //
-// Enough for the shared kernel code to compile here (make
-// ARCH=riscv64 builds it into build/riscv64/libsamos.a). The
-// out-of-line functions arch.h declares come with the riscv64 user-mode work (user mode,
-// syscalls, FP save) and the riscv64 device work (devices); the trap and MMU pieces they
-// build on are named next to each one in the hardware layer notes.
+// The out-of-line functions arch.h declares are in arch.c,
+// paging.c, trap.c, uaccess.c and fpu.S; the riscv64 kernel is the
+// shared kernel_main. The layout names of
+// config.h are the probed paging mode's (layout.h).
 
 #include <stdint.h>
 #include <stddef.h>
@@ -60,17 +59,26 @@ static inline void trap_frame_syscall_restart(struct trap_frame* f){
     f->sepc -= 4;
 }
 
+// sstatus.FS, the FP unit's state: Off, Initial, Clean, Dirty.
+#define SSTATUS_FS          (3ul << 13)
+#define SSTATUS_FS_INITIAL  (1ul << 13)
+#define SSTATUS_FS_CLEAN    (2ul << 13)
+
 // U-mode (SPP clear) with SPIE set: interrupts open after sret.
+// FP on (FS Initial), so user code may use F and D.
 static inline void trap_frame_init_user(struct trap_frame* f, uint64_t entry, uint64_t sp){
     f->sepc     = entry;
     f->x[TF_SP] = sp;
-    f->sstatus  = (f->sstatus & ~SSTATUS_SPP) | SSTATUS_SPIE;
+    f->sstatus  = (f->sstatus & ~(SSTATUS_SPP | SSTATUS_FS)) | SSTATUS_SPIE | SSTATUS_FS_INITIAL;
 }
 
 // ------------------------------------------------------------------
-// FP state: f0-f31 and fcsr. The kernel is rv64imac (no F/D);
-// Decides whether user mode gets F/D (f0-f31, or no FP)
-// and saves them at the trap boundary.
+// FP state: f0-f31 and fcsr (fpu.S). The kernel is rv64imac and never
+// touches them, so they are saved and restored at the user boundary,
+// as x86 does with fxsave. Eager: task_enter restores them
+// before every return into a task; a trap from U-mode saves them only
+// when sstatus.FS says Dirty, since otherwise they still hold what
+// the last restore loaded.
 // ------------------------------------------------------------------
 
 #define ARCH_FPU_STATE_SIZE (32 * 8 + 8)
@@ -89,13 +97,15 @@ void arch_fpu_save(struct arch_fpu_state* s);
 void arch_fpu_restore(const struct arch_fpu_state* s);
 
 // ------------------------------------------------------------------
-// Per-CPU data: tp holds this CPU's struct cpu in the kernel
-// (sscratch while in user mode).
+// Per-CPU data: tp holds this CPU's struct cpu in the kernel. In user
+// mode tp is the program's; sscratch then holds the top of this CPU's
+// trap stack, and the word at that top holds the struct cpu, which
+// trap_entry loads back into tp (boot.S).
 // ------------------------------------------------------------------
 
 struct arch_cpu {
     uint64_t hart_id;          // for SBI HSM hart_start and IPIs
-    uint8_t* kernel_stack;     // the trap stack for traps from U-mode
+    uint8_t* kernel_stack;     // top of the trap stack for traps from U-mode
 };
 
 static inline void* arch_cpu_self(void){
@@ -189,9 +199,16 @@ static inline void arch_memcpy(void* d, const void* s, size_t n){
 #define PAGING_IS_PRESENT       0b00000001
 
 // The direct map starts at dmap_base, which depends on the
-// paging mode probed at boot (Sv48 or Sv39); the riscv64 user-mode work bounds it by mode.
+// paging mode probed at boot (Sv48 or Sv39); the riscv64 user-mode work: so does its size
+// (arch/riscv64/layout.h).
 #define PAGING_PHYS_TO_VIRT(p)  phys_to_virt((uint64_t)(uintptr_t)(p))
 #define PAGING_IS_DIRECT_MAP(v) ((uintptr_t)(v) >= dmap_base && \
-                                 (uintptr_t)(v) <  dmap_base + SAMOS_DIRECT_MAP_SIZE)
+                                 (uintptr_t)(v) <  dmap_base + dmap_size)
+
+// mmu_memory_init direct-maps all of /memory before pfa_init,
+// so the frame table may go anywhere; the e2e boot markers live in an
+// array in the image (RAM does not start at 0).
+#define ARCH_PFA_EARLY_MAP_LIMIT  UINT64_MAX
+#define ARCH_BOOT_MARKER_SLOTS    riscv64_boot_markers
 
 #endif

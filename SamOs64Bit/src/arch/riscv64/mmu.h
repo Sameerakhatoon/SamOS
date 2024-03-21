@@ -11,12 +11,15 @@
 //                 Sv48                     Sv39
 //   user          0 .. 0x00007fffffffffff  0 .. 0x0000003fffffffff
 //   direct map    0xffff800000000000       0xffffffc000000000
-//   mmio window   0xffffc00000000000       0xffffffe000000000  (1 GiB)
+//   heap arena    0xffffc00000000000       0xffffffd000000000 
+//   mmio window   0xffffe00000000000       0xffffffe000000000  (1 GiB)
 //   kernel image  0xffffffff80200000       0xffffffff80200000
 //
 // The direct map covers every /memory region (x86's 0xffff800000000000
 // in Sv48; Sv39 has only 256 GiB of upper half, so it starts at the
-// bottom of it). The image is linked at KERNEL_VMA and mapped onto
+// bottom of it). The shared multiheap's arena (x86's address in
+// Sv48) moved the Sv48 mmio window up (layout.h). The image is linked
+// at KERNEL_VMA and mapped onto
 // wherever OpenSBI loaded it, with W^X: text RX, rodata R, data, bss,
 // page-table pool and boot stack RW. Kernel pages are global (G).
 
@@ -40,12 +43,16 @@ struct fdt;
 #define PTE_G (1ul << 5)
 #define PTE_A (1ul << 6)
 #define PTE_D (1ul << 7)
+#define PTE_RWX (PTE_R | PTE_W | PTE_X)
 
 #define SATP_MODE_SV39 8ul
 #define SATP_MODE_SV48 9ul
 
 extern uint64_t dmap_base;   // direct map: VA = dmap_base + PA
+extern uint64_t dmap_size;   // Its size, and the heap arena (layout.h)
+extern uint64_t arena_base;
 extern uint64_t user_end;    // first address above the user half
+extern uint64_t kernel_va_off;   // VA - PA of the image
 extern int mmu_levels;       // 4 = Sv48, 3 = Sv39
 
 static inline void* phys_to_virt(uint64_t pa)
@@ -76,10 +83,23 @@ uint64_t mmu_boot(uint64_t dtb_pa);
 // First thing after the switch: remove the identity map, probe ASIDs,
 // print the mode and layout.
 void mmu_init(void);
-// Direct map every /memory region, then the page-frame allocator from
-// /memory minus every reservation, then seal the kernel's root-level
-// upper half (see mm_create). 0 or -1.
+// Direct map every /memory region, list /memory and every reservation
+// (the initrd too) for the frame allocator, then seal the
+// kernel's root-level upper half (see mm_create): the mmio window's
+// entry and the heap arena's over RAM are made first. 0 or -1.
+// The shared allocator (memory/pfa.c) is built from that list
+// by kheap_init, through boot_info's memory map (main.c).
 int  mmu_memory_init(const struct fdt* f);
+// QEMU's -initrd from /chosen: 0 and where it is, or -1.
+int  mmu_initrd(uint64_t* base, uint64_t* size);
+uint64_t mmu_kernel_root(void);   // physical
+
+// The walker for paging.c: the PTE for `va` at `level` under
+// `root` (tables above created when `alloc`, NULL if a leaf is in the
+// way or a sealed root entry would be needed), and the leaf for `va`.
+uint64_t* pt_entry(uint64_t root, uint64_t va, int level, bool alloc);
+uint64_t  pt_lookup(uint64_t root, uint64_t va, int* level);
+uint64_t  make_satp(uint64_t root, uint64_t asid);
 // Map `size` bytes of device registers at `pa` RW, never executable,
 // into the mmio window. Returns the virtual address of `pa`, 0 when
 // the window is full.
@@ -118,6 +138,11 @@ int  mm_map(struct mm* mm, uint64_t va, uint64_t pa, uint64_t size, uint64_t pro
 // otherwise the whole TLB is flushed. NULL = the kernel's own root.
 void mm_switch(struct mm* mm);
 struct mm* mm_current(void);
+// Free the root and every lower-half table (not the pages the
+// leaves point at); switches to the kernel root first if `mm` is live.
+void mm_destroy(struct mm* mm);
+// Drop `va` of `mm` from this hart's TLB.
+void mm_flush_page(struct mm* mm, uint64_t va);
 unsigned mmu_asid_bits(void);
 // samos.mmu_noasid: ignore ASIDs and flush on every switch.
 void mmu_disable_asids(void);

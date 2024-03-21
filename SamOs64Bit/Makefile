@@ -18,14 +18,12 @@
 #
 # The shared kernel code is everything under src/ outside src/arch/
 # (SHARED_OBJS). x86_64 links all of it with its src/arch/x86_64/
-# objects; so does aarch64 with src/arch/aarch64/ (PORT_OBJS),
-# and boots into kernel_main. riscv64 compiles it into
-# build/riscv64/libsamos.a, which proves it builds through arch/arch.h
-# alone; its kernel is still the riscv64 MMU test main and takes from the
-# archive only what that references (the riscv64 user-mode work switches it). The user-mode
-# syscall stubs (programs/stdlib/arch/<arch>/) are assembled as well;
-# on aarch64 the user programs are built and put in a FAT16 RAM disk
-# image, bin/aarch64/ramdisk.img, for QEMU's -initrd.
+# objects; so do aarch64 and riscv64 with their
+# src/arch/<arch>/ objects (PORT_OBJS, KERNEL_LIBS), and both boot into
+# kernel_main. build/<arch>/libsamos.a (shared_check) still proves the
+# shared code builds through arch/arch.h alone. The user programs are
+# built for each port and put in a FAT16 RAM disk image for QEMU's
+# -initrd: bin/aarch64/ramdisk.img, bin/riscv64/initrd.img.
 #
 # Pattern rules: an object's include path is src/, its own directory
 # and the one above it (what the per-file rules used to spell out).
@@ -171,13 +169,21 @@ CROSS ?= riscv64-linux-gnu-
 # -mno-relax: boot.S and mmu_boot run at the load address before
 #   the MMU maps the link address, so every symbol reference must
 #   stay PC-relative; relaxation may rewrite some.
-ARCH_CFLAGS = -march=rv64imac_zicsr -mabi=lp64 -mcmodel=medany -mno-relax -fno-tree-loop-distribute-patterns
+# -include layout.h: the address-space layout is the paging
+#   mode's, probed at boot, so config.h's constants become variables.
+ARCH_CFLAGS = -march=rv64imac_zicsr -mabi=lp64 -mcmodel=medany -mno-relax -fno-tree-loop-distribute-patterns \
+    -include ./src/arch/riscv64/layout.h
 PORT_OBJS = arch/riscv64/boot.S.o arch/riscv64/main.o arch/riscv64/sbi.o \
     arch/riscv64/console.o arch/riscv64/trap.o arch/riscv64/uart16550.o \
     arch/riscv64/timer.o arch/riscv64/plic.o arch/riscv64/kthread.o \
-    arch/riscv64/mmu.o arch/riscv64/pfa.o arch/riscv64/uaccess.o \
-    arch/riscv64/uaccess.S.o arch/riscv64/mmu_test.o firmware/fdt.o string/string.o
-KERNEL_LIBS = $(BUILD)/libsamos.a
+    arch/riscv64/mmu.o arch/riscv64/paging.o arch/riscv64/arch.o arch/riscv64/fpu.S.o \
+    arch/riscv64/uaccess.o arch/riscv64/uaccess.S.o arch/riscv64/mmu_test.o firmware/fdt.o
+# The kernel is the shared one (kernel_main): every shared
+# object is linked, except task/uaccess.o, which uaccess.c replaces
+# (SUM and the fixup table).
+KERNEL_LIBS = $(filter-out $(BUILD)/task/uaccess.o,$(SHARED_FILES))
+# User programs: rv64gc, so they have F and D (the kernel saves f0-f31).
+USER_ARCH_CFLAGS = -march=rv64gc -mabi=lp64d -mcmodel=medany
 else
 $(error ARCH must be x86_64, aarch64 or riscv64)
 endif
@@ -198,7 +204,25 @@ PORT_C_FILES = $(filter-out %.S.o,$(PORT_FILES))
 SHARED_FILES = $(addprefix $(BUILD)/,$(filter-out $(PORT_OBJS),$(SHARED_OBJS)))
 USER_STUBS   = $(patsubst ./programs/stdlib/arch/$(ARCH)/%.S,$(BUILD)/user/%.o,$(wildcard ./programs/stdlib/arch/$(ARCH)/*.S))
 
-all: ./bin/$(ARCH)/kernel.img $(USER_STUBS)
+# The port's user programs: the shared stdlib (programs/stdlib/
+# src) over the arch's stubs and start, BLANK.ELF and HELLO.ELF from
+# programs/, the shell, and RVTEST.ELF (programs/rvtest, the user-mode
+# probes). WRONGM.ELF is RVTEST.ELF with e_machine set to EM_X86_64,
+# for the loader's machine check. No disk driver before the riscv64 device work, so they
+# reach the kernel as a FAT16 image (label SAMOS) for QEMU's -initrd.
+ifdef USER_ARCH_CFLAGS
+USER_DIR    = $(BUILD)/user
+USER_CFLAGS = -g -ffreestanding -fno-builtin -nostdlib -nostartfiles -nodefaultlibs $(NOPIC) \
+    -O0 -std=gnu99 -Wall -Werror -Wno-unused-function -Wno-unused-parameter -Wno-unused-label -Wno-cpp \
+    -I./programs/stdlib/src $(USER_ARCH_CFLAGS)
+USER_LIBC   = $(addprefix $(USER_DIR)/libc/,start.S.o samos.S.o start.o samos.o stdlib.o stdio.o \
+    string.o memory.o file.o)
+USER_ELFS   = $(addprefix $(USER_DIR)/,blank.elf hello.elf shell.elf rvtest.elf)
+USER_LD     = ./programs/stdlib/arch/$(ARCH)/linker.ld
+USER_ALL    = ./bin/$(ARCH)/initrd.img
+endif
+
+all: ./bin/$(ARCH)/kernel.img $(USER_STUBS) $(USER_ALL)
 
 ifeq ($(ARCH),aarch64)
 # ------------------------------------------------------------------
@@ -279,6 +303,37 @@ $(BUILD)/%.S.o: ./src/%.S
 $(BUILD)/user/%.o: ./programs/stdlib/arch/$(ARCH)/%.S
 	@mkdir -p $(@D)
 	$(CC) $(PORT_CFLAGS) -I./programs/stdlib/src -c $< -o $@
+
+ifdef USER_ARCH_CFLAGS
+$(USER_DIR)/libc/%.o: ./programs/stdlib/src/%.c
+	@mkdir -p $(@D)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(USER_DIR)/libc/%.S.o: ./programs/stdlib/arch/$(ARCH)/%.S
+	@mkdir -p $(@D)
+	$(CC) $(USER_CFLAGS) -c $< -o $@
+
+$(USER_DIR)/blank.elf: ./programs/blank/blank.c
+$(USER_DIR)/hello.elf: ./programs/hello/src/hello.c
+$(USER_DIR)/shell.elf: ./programs/shell/src/shell.c
+$(USER_DIR)/rvtest.elf: ./programs/rvtest/rvtest.c ./programs/rvtest/regs.S
+$(USER_ELFS): $(USER_LIBC) $(USER_LD)
+	$(CC) $(USER_CFLAGS) -I./programs/shell/src -T $(USER_LD) -Wl,-z,max-page-size=0x1000 \
+	    -Wl,--build-id=none -static -o $@ $(filter %.c %.S,$^) $(USER_LIBC) -lgcc
+
+# mtools on the image file, as build.sh does for x86 (8.3 names).
+./bin/$(ARCH)/initrd.img: $(USER_ELFS)
+	@mkdir -p $(@D)
+	cp $(USER_DIR)/rvtest.elf $(USER_DIR)/wrongm.elf
+	printf '\076\000' | dd of=$(USER_DIR)/wrongm.elf bs=1 seek=18 conv=notrunc status=none
+	rm -f $@
+	mkfs.fat -C -F 16 -s 1 -n SAMOS $@ 8192 > /dev/null || { rm -f $@; exit 1; }
+	for f in $(USER_ELFS) $(USER_DIR)/wrongm.elf; do \
+	    MTOOLS_SKIP_CHECK=1 MTOOLS_NO_VFAT=1 mcopy -i $@ $$f ::/$$(basename $$f | tr a-z A-Z) \
+	        || { rm -f $@; exit 1; }; \
+	done
+	@echo "make: $@ ($$(stat -c%s $@) bytes)"
+endif
 
 clean:
 	rm -rf $(BUILD) ./bin/$(ARCH)

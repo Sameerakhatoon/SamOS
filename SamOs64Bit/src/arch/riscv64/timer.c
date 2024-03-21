@@ -58,12 +58,15 @@ static bool stimecmp_works(void)
     return trap_probe_end() == 0;
 }
 
+uint64_t timer_probe_timebase(const struct fdt* f, int cpu)
+{
+    uint64_t t = fdt_getprop_u32(f, cpu, "timebase-frequency", 0);
+    return t ? t : fdt_getprop_u32(f, fdt_parent(f, cpu), "timebase-frequency", 0);
+}
+
 int timer_init(const struct fdt* f, int cpu, unsigned hz)
 {
-    timebase = fdt_getprop_u32(f, cpu, "timebase-frequency", 0);
-    if (timebase == 0) {
-        timebase = fdt_getprop_u32(f, fdt_parent(f, cpu), "timebase-frequency", 0);
-    }
+    timebase = timer_probe_timebase(f, cpu);
     if (timebase == 0 || hz == 0) {
         console_printf("timer: no timebase-frequency\n");
         return -1;

@@ -141,12 +141,20 @@ static int64_t heap_get_start_block(struct heap* heap, uintptr_t total_blocks){
     }
 
     // Start at the search hint; everything below it is taken.
+    // And move the hint past the taken blocks the scan meets
+    // before the first free one: a hint left on a reserved block made
+    // every allocation rescan the whole table.
+    bool seen_free = false;
     for(size_t i = heap->search_hint; i < table->total; i++){
         if(heap_get_entry_type(table->entries[i]) != HEAP_BLOCK_TABLE_ENTRY_FREE){
             bc = 0;
             bs = -1;
+            if(!seen_free){
+                heap->search_hint = i + 1;
+            }
             continue;
         }
+        seen_free = true;
         if(bs == -1){
             bs = i;
         }

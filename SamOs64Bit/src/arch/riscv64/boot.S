@@ -69,7 +69,9 @@ park:
 // is put back and the frame goes below the interrupted code's stack.
 // riscv64_trap returns the frame to restore, which is another
 // thread's when the timer preempted (kthread.c), so the restore half
-// reads everything, sp last, from that frame.
+// reads everything, sp last, from that frame. The shared
+// scheduler switches tasks inside task_next instead (as on x86), whose
+// arch_task_return comes back in at trap_return.
     .text
     .balign 4
     .globl trap_entry
@@ -88,6 +90,12 @@ trap_entry:
     sd t0, TF_SEPC(sp)
     csrr t0, sstatus
     sd t0, TF_SSTATUS(sp)
+    // From U-mode, tp is the program's; this hart's struct cpu
+    // is the word at the top of its trap stack, just above the frame.
+    andi t1, t0, 0x100          // SSTATUS_SPP
+    bnez t1, 3f
+    ld tp, TRAP_FRAME_SIZE(sp)
+3:
     // A trap in the middle of copy_from_user must not run its
     // handler with user access on; sret puts SUM back from the frame.
     li t0, SSTATUS_SUM_BIT
@@ -99,6 +107,10 @@ trap_entry:
     mv a0, sp
     call riscv64_trap
 
+    // arch_task_return enters here with a0 = a frame it has put
+    // at the top of this hart's trap stack.
+    .globl trap_return
+trap_return:
     mv sp, a0
     ld t0, TF_SEPC(sp)
     csrw sepc, t0

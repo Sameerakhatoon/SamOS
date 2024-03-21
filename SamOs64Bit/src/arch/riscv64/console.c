@@ -12,6 +12,12 @@ void console_set_putc(void (*putc)(char c))
     console_out = putc;
 }
 
+// One byte as is, for arch_console_putc (serial.c adds the \r).
+void console_raw_putc(char c)
+{
+    console_out(c);
+}
+
 void console_putc(char c)
 {
     if (c == '\n') {

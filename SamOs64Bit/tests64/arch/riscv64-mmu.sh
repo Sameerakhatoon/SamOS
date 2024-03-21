@@ -22,6 +22,13 @@
 #      text and to rodata (store page fault), a jump into data
 #      (instruction page fault), a load through the removed identity
 #      map (load page fault); scause, stval and sepc checked.
+# Every boot adds samos.bringup (the riscv64 MMU boot, not the shared
+# kernel_main). The frame allocator is the shared one (memory/pfa.c),
+# built from the memory map the port hands kernel_main: its table spans
+# its lowest usable frame (past OpenSBI's reservation) to the end of
+# RAM, a double free is any negative status, and the Sv48 mmio window
+# moved to 0xffffe00000000000 for the shared heap arena. The image's
+# text is read-only in the direct map now; RAM past the image is rw-.
 set -u
 here="$(cd "$(dirname "$0")" && pwd)"
 kernel="${RISCV64_KERNEL:-$here/../../bin/riscv64/kernel.img}"
@@ -37,7 +44,7 @@ checks=0
 boot() {
     local log="$tmp/$1.log"
     qemu-system-riscv64 -machine virt -cpu "$cpu" -m "$2" -nographic -bios default \
-        -kernel "$kernel" -append "$3" < /dev/null > "$log.raw" 2>&1 &
+        -kernel "$kernel" -append "$3 samos.bringup" < /dev/null > "$log.raw" 2>&1 &
     local pid=$! left=600
     powered_off=0
     while [ $left -gt 0 ]; do
@@ -74,7 +81,10 @@ check_layout() {
     expect '^mmu: identity map removed, 0 low-half root entries$' "identity map removed"
     expect '^mmu: text r-x-g rodata r---g data rw--g bss rw--g stack rw--g$' "W^X: text r-x, rodata r--, data/bss/stack rw-"
     expect "^mmu: uart ${mmio} rw--g$" "UART in the mmio window, rw, not executable"
-    expect "^mmu: direct map $(printf '0x%x' $((dmap + 0x80200000))) rw--g$" "direct map rw, not executable"
+    local pa
+    pa=$(field '^mmu: direct map 0x[0-9a-f]+ \(pa (0x[0-9a-f]+)\) .*$')
+    expect "^mmu: direct map $(printf '0x%x' $((dmap + ${pa:-0}))) \(pa ${pa:-none}\) rw--g, " "direct map rw, not executable"
+    expect "image text $(printf '0x%x' $((dmap + 0x80200000))) r---g$" "the image's text read-only in the direct map"
     expect '^mmu: 0 writable\+executable leaves, 0 user leaves in the kernel tables$' "no W+X leaf, no U leaf in the kernel tables"
     expect '^SamOS riscv64: hello$' "hello"
     expect_count 'FAULT:|unexpected|no handler' 0 "no fault"
@@ -89,13 +99,14 @@ check_pfa() {
     expect '^pfa: reserve 0x[0-9a-f]+-0x[0-9a-f]+ boot stack$' "boot stack reserved"
     dtb=$(field '^dtb: (0x[0-9a-f]+)$')
     expect "^pfa: reserve ${dtb:-none}-0x[0-9a-f]+ device tree$" "device tree reserved (${dtb:-none})"
-    read -r frames free <<< "$(sed -nE 's/^pfa: ([0-9]+) frames \([0-9]+ MiB\): ([0-9]+) free, [0-9]+ reserved$/\1 \2/p' "$cur" | head -1)"
-    [ "${frames:-0}" -eq $((mib * 256)) ] && [ "${free:-0}" -gt 0 ]
-    check $? "$((mib * 256)) frames for $mib MiB (${frames:-?}, ${free:-?} free)"
+    local from
+    read -r frames from free <<< "$(sed -nE 's/^pfa: ([0-9]+) frames \([0-9]+ MiB\) from (0x[0-9a-f]+): ([0-9]+) free, [0-9]+ reserved$/\1 \2 \3/p' "$cur" | head -1)"
+    [ -n "$from" ] && [ "${frames:-0}" -eq $(((0x80000000 + mib * 1048576 - ${from:-0}) / 4096)) ] && [ "${free:-0}" -gt 0 ]
+    check $? "frames from ${from:-?} to the end of $mib MiB (${frames:-?}, ${free:-?} free)"
     n=$(field '^pfa test: ([0-9]+) frames allocated .*$')
     expect "^pfa test: ${n:-x} frames allocated \(${n:-x} were free\), 0 outside memory or reserved$" "every free frame allocated, none in a reservation (${n:-?})"
     expect "^pfa test: ${n:-x} read back, ${n:-x} freed, ${n:-x} free now$" "each written through the direct map, read back and freed"
-    expect "^pfa test: run of 64 at 0x[0-9a-f]+ ok, free 0, again -1, ${n:-x} free now$" "contiguous run; a double free is refused"
+    expect "^pfa test: run of 64 at 0x[0-9a-f]+ ok, free 0, again -[0-9]+, ${n:-x} free now$" "contiguous run; a double free is refused"
 }
 
 check_uaccess() {
@@ -137,7 +148,7 @@ fault_boot() {
 for mode in sv48 sv39; do
     if [ $mode = sv48 ]; then
         cpu=rv64 levels=4 probe='sv48 accepted \(read back 0x9[0-9a-f]+\)$'
-        dmap=0xffff800000000000 mmio=0xffffc00000000000 uend=0x800000000000
+        dmap=0xffff800000000000 mmio=0xffffe00000000000 uend=0x800000000000
     else
         cpu=rv64,sv48=off levels=3 probe='sv48 rejected, sv39 \(read back 0x0\)$'
         dmap=0xffffffc000000000 mmio=0xffffffe000000000 uend=0x4000000000

@@ -17,6 +17,8 @@
 #   5-7. samos.trap_test=illegal|load|ebreak: the dump's scause and
 #      sepc match the faulting instruction the kernel names; the
 #      breakpoint is stepped over and boot goes on.
+# samos.bringup on every boot: these are the riscv64 trap boot (kthreads
+# on the timer), not the shared kernel_main (riscv64-user.sh).
 # All seven run twice, with the MMU on in Sv48 (default CPU)
 # and in Sv39 (-cpu rv64,sv48=off); the load test goes through the
 # direct map.
@@ -37,7 +39,7 @@ checks=0
 # uart16550_init would be lost to its FIFO reset). Keyed to
 # the kernel's output, not a delay, so a slow host only takes longer.
 boot() {
-    local name="$1" smp="$2" append="$3"
+    local name="$1" smp="$2" append="$3 samos.bringup"
     shift 3
     local log="$tmp/$mode-$name.log" cpu="rv64${CPUOPT:-}$mode_opt"
     if [ -n "${INPUT:-}" ]; then
