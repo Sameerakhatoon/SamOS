@@ -90,6 +90,9 @@ void  task_tick(struct trap_frame* frame);
 // the ticks counted so far (the BSP's).
 void  task_clock(struct trap_frame* frame);
 uint64_t task_clock_ticks(void);
+// `fn` runs on the BSP's tick, before the scheduler (one hook:
+// polled USB input).
+void  task_clock_register(void (*fn)(void));
 
 // Multi-CPU scheduling.
 void  task_start(struct task* task);            // NEW -> a run queue

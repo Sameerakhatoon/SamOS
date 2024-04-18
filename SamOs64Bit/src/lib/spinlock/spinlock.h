@@ -32,6 +32,8 @@ enum lock_level {
     LOCK_LEVEL_PROCESS = 20,   // process table, pids, parents, zombies, keyboard rings
     LOCK_LEVEL_VFS     = 30,   // file descriptors, FAT, path lookups
     LOCK_LEVEL_DISK    = 40,   // every disk driver call and the sector caches
+    LOCK_LEVEL_USB_CMD = 44,   // One xHCI command at a time
+    LOCK_LEVEL_USB     = 46,   // An xHCI's event ring and transfer rings
     LOCK_LEVEL_SCHED   = 50,   // run queues, sleep lists, task states
     LOCK_LEVEL_KMEM    = 60,   // PFA, multiheap, slabs, kernel-half page tables
     LOCK_LEVEL_IOAPIC  = 65,   // IOAPIC register pair

@@ -16,6 +16,11 @@
 //
 // SAMOS_STORAGE_FORCE_READ_ONLY=1 makes every disk read-only,
 // even under a hypervisor.
+//
+// USB mass storage is the one exception: a USB disk is the
+// stick SamOS boots from and writes its files to, so it is writable on
+// bare metal too unless it reports write protection or
+// SAMOS_STORAGE_FORCE_READ_ONLY is set (disk/drivers/usb_msc.c).
 
 #ifndef SAMOS_STORAGE_WRITE_REAL_HW
 #define SAMOS_STORAGE_WRITE_REAL_HW 0

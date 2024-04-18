@@ -14,6 +14,7 @@
 #include "graphics/graphics.h"
 #include "graphics/window.h"
 #include "mouse/ps2mouse.h"
+#include "usb/usb.h"
 #include "kernel.h"
 #include "status.h"
 
@@ -29,7 +30,10 @@ struct vector* mouse_driver_vector = NULL;
 // mouse_register returns the error without adding it; boot
 // continues either way.
 int mouse_system_load_static_drivers(void){
-    return mouse_register(ps2_mouse_get());
+    int res = mouse_register(ps2_mouse_get());
+    // USB mice move the PS/2 cursor, or their own without one.
+    usb_hid_mouse_attach(res == 0 ? ps2_mouse_get() : NULL);
+    return res;
 }
 
 // Give a mouse its cursor window. kernel_main loads the

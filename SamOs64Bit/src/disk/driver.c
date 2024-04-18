@@ -12,6 +12,7 @@
 #include "drivers/ahci.h"      // ahci_driver_init
 #include "drivers/virtio_blk.h" // virtio_blk_driver_init
 #include "drivers/ramdisk.h"    // ramdisk_driver_init
+#include "drivers/usb_msc.h"    // usb_msc_driver_init
 #include "status.h"
 
 struct vector* disk_driver_vec = NULL;
@@ -42,6 +43,11 @@ int disk_driver_system_load_drivers(){
     // A RAM disk image from the boot loader, if the arch found
     // one (aarch64: -initrd). Last, for the same reason.
     res = disk_driver_register(ramdisk_driver_init());
+    if(res < 0){
+        goto out;
+    }
+    // USB mass storage (it also starts the xHCI controllers).
+    res = disk_driver_register(usb_msc_driver_init());
 out:
     return res;
 }

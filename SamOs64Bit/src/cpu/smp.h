@@ -28,6 +28,7 @@ void smp_tlb_shootdown(struct paging_desc* desc, uint64_t va);
 void smp_handle_ipi(enum arch_ipi ipi, struct trap_frame* frame);
 // What ARCH_IPI_INPUT runs: input work an interrupt handler hands to
 // a CPU because it may itself run inside a disk wait (virtio-input).
+// Up to four, each run on every ARCH_IPI_INPUT (USB too).
 void smp_input_register(void (*fn)(void));
 
 // Answer pending cross-CPU requests; spin loops call this.

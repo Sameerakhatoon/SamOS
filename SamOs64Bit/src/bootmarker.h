@@ -260,6 +260,10 @@ typedef enum {
     BM_FEATURE_DISK_IRQ_VIRTIO = 192, // virtio-blk completions taken at the interrupt
     BM_FEATURE_VIRTIO_INPUT_KEYS = 193, // key events that came in through virtio-input
 
+    // USB (src/usb/, usb_msc.c): running counts.
+    BM_FEATURE_DISK_IRQ_USB   = 194, // USB mass storage transfers ended at the xHCI interrupt
+    BM_FEATURE_USB_KEYS       = 195, // key events that came in through a USB keyboard
+
     BM_STAGE_MAX              = 196,
 } boot_marker_stage_t;
 

@@ -54,8 +54,23 @@ void serial_flush(void)
     }
 }
 
+// The boot's output until the APs start, UART or not, for
+// samos.bootlog (kernel.c) on machines without a serial port.
+static char serial_boot_log[SERIAL_BOOT_LOG_SIZE];
+static unsigned int serial_boot_log_len;
+
+const char* serial_boot_log_get(unsigned int* len)
+{
+    *len = serial_boot_log_len;
+    return serial_boot_log;
+}
+
 void serial_putc(char c)
 {
+    if (!smp_active() && serial_boot_log_len < SERIAL_BOOT_LOG_SIZE)
+    {
+        serial_boot_log[serial_boot_log_len++] = c;
+    }
     if (!serial_ready)
     {
         return;

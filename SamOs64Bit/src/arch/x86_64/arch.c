@@ -157,6 +157,22 @@ int arch_irq_set_cpu(uint32_t gsi, struct cpu* c){
     return ioapic_set_dest(gsi, c->hw_id);
 }
 
+// MSI: fixed delivery, edge, physical destination; the same
+// vector and EOI as a GSI on that slot. xAPIC ids only (8 bits).
+int arch_irq_msi(unsigned slot, struct cpu* c, INTERRUPT_CALLBACK_FUNCTION handler,
+                 uint64_t* addr, uint32_t* data){
+    uint8_t vector = APIC_VECTOR_DISK_BASE + slot;
+    if(!apic_active() || vector >= APIC_VECTOR_DISK_END || c->hw_id > 0xFF){
+        return -EINVARG;
+    }
+    if(handler){
+        idt_register_interrupt_callback(vector, handler);
+    }
+    *addr = 0xFEE00000u | (c->hw_id << 12);
+    *data = vector;
+    return vector;
+}
+
 // The LAPIC TPR is APIC_TPR_DISK_WAIT meanwhile, so only the disk
 // vectors (0x50-0x5F) are taken. The state is the old TPR and RFLAGS.IF.
 uint64_t arch_irq_wait_begin(void){

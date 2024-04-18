@@ -607,12 +607,20 @@ void task_resched(struct trap_frame* frame){
 // the PIT or LAPIC timer vector). Every CPU has its own timer;
 // the tick count is the BSP's.
 static volatile uint64_t clock_ticks;
+static void (*clock_hook)(void);
 
 void task_clock(struct trap_frame* frame){
     if(this_cpu()->index == 0){
         clock_ticks++;
+        if(clock_hook){
+            clock_hook();
+        }
     }
     task_tick(frame);
+}
+
+void task_clock_register(void (*fn)(void)){
+    clock_hook = fn;
 }
 
 uint64_t task_clock_ticks(void){

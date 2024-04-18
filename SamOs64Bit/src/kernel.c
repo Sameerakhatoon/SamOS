@@ -162,6 +162,22 @@ static int cmdline_has(const char* word)
     return 0;
 }
 
+// samos.bootlog: everything written to serial so far (also
+// without a UART) to @:/BOOTLOG.TXT, replacing the last one.
+static void kernel_write_bootlog(void)
+{
+    unsigned int len = 0;
+    const char* log = serial_boot_log_get(&len);
+    fremove("@:/BOOTLOG.TXT");
+    int fd = fopen("@:/BOOTLOG.TXT", "w");
+    int res = fd > 0 ? fwrite(log, len, 1, fd) : -EIO;
+    if (fd > 0)
+    {
+        fclose(fd);
+    }
+    print(res < 0 ? "bootlog: @:/BOOTLOG.TXT not written\n" : "bootlog: @:/BOOTLOG.TXT written\n");
+}
+
 // e2e hook: CMDLINE.TXT "samos.run=PROG.ELF arg ...;PROG2.ELF ..."
 // (last on the line) loads each program from @:/ with its arguments,
 // ahead of BLANK.ELF, so it runs first. Not from the book.
@@ -518,6 +534,13 @@ void kernel_main(void)
 
     // Memory-manager self-tests (leak, stress, PFA, slabs).
     memtest_run(cmdline_has("samos.memtest=full"));
+
+    // Logging without serial: the boot's output to the boot
+    // volume (the USB stick on a real PC).
+    if (cmdline_has("samos.bootlog"))
+    {
+        kernel_write_bootlog();
+    }
 
     // e2e hooks: power off or reset once the boot is done.
     if (cmdline_has("samos.shutdown_test"))

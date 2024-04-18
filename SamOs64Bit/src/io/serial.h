@@ -19,5 +19,9 @@ void serial_write_hex(unsigned long long value);
 void serial_flush(void);
 void serial_write_unlocked(const char* str);
 void serial_write_hex_unlocked(unsigned long long value);
+// The first SERIAL_BOOT_LOG_SIZE bytes written before the APs
+// start, kept even without a UART.
+#define SERIAL_BOOT_LOG_SIZE  (64 * 1024)
+const char* serial_boot_log_get(unsigned int* len);
 
 #endif

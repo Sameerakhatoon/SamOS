@@ -1,6 +1,7 @@
 #include "keyboard.h"
 #include "classic.h"
 #include "virtio_input.h"
+#include "usb/usb.h"
 #include "status.h"
 #include "kernel.h"
 #include "task/process.h"
@@ -36,6 +37,9 @@ void keyboard_init(){
     // virtio-input keyboards feed the same translator and
     // keyboard_push; PS/2 stays the default keyboard.
     virtio_input_init();
+    // USB keyboards too (usb_hid.c); usually already up from
+    // the disk mount.
+    usb_init();
 }
 
 int keyboard_insert(struct keyboard* keyboard){

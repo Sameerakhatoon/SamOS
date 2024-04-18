@@ -19,6 +19,8 @@ The x86-64 kernel runs on every CPU the MADT lists. This file is the lock list: 
 | 20 | `process` | `task/process.c` (`process_lock`) | yes | `process_vector`, pid allocation, parent links, the zombie list, the foreground process, the per-process keyboard rings, and the "check, then block" of waitpid and getkey_block. |
 | 30 | `vfs` | `fs/file.c` (`vfs_lock`) | yes | The descriptor table, the path parser and the filesystem drivers (FAT keeps one stream and its tables per volume). Every public VFS call; `file_remove` holds it over its type check and the remove. |
 | 40 | `disk` | `disk_lock`, one for every disk (`disk/disk.c`) | yes | One CPU at a time in any disk driver, and the sector caches. Taken at the `disk_read_block` / `disk_write_block` boundary and around `diskstreamer_read` / `diskstreamer_write`. Never inside `disk/drivers/*`. One lock, not one per disk: two PATA drives share a channel's registers and IRQ, the AHCI ports of an HBA share its line and wait flag, and a completion wait steers that line to its own CPU (last section). |
+| 44 | `usb_cmd` | `usb/xhci.c`, one per xHCI | no | One xHCI command at a time (`xhci_command`): enqueue, doorbell, poll for its completion. |
+| 46 | `usb` | `usb/xhci.c`, one per xHCI | no | The controller's event ring and every producer ring (command and transfer rings) and the transfer state they drain into. Taken by the xHCI interrupt handler, also inside a disk wait. |
 | 50 | `sched` | `task/task.c` | no | Every CPU's run queue and sleep list, task states, `task->cpu`, the kill flags, the task list. |
 | 60 | `kmem` | `memory/heap/kheap.c` (`kmem_lock`) | yes | The PFA, the multiheap, the slabs and the kernel half of the page tables (`paging_map` of an address at or above the direct map). One lock because it is one structure: the multiheap's sub-heap is the PFA's frame table, and mapping an arena page allocates page tables from the heap again. |
 | 65 | `ioapic` | `io/apic.c` | no | The IOAPIC's IOREGSEL/IOWIN register pair: `ioapic_set_masked`, `ioapic_route_gsi`, `ioapic_set_dest`. |
@@ -36,6 +38,7 @@ The x86-64 kernel runs on every CPU the MADT lists. This file is the lock list: 
 - `process` > `kmem`: a zombie is freed.
 - `vfs` > `disk` > `kmem`: a read fills the sector cache.
 - `disk` > `ioapic`: a completion wait points its line at the CPU that waits.
+- `disk` > `usb_cmd` > `usb`: a USB stick transfer, a stall cleared; `disk` > `usb` in the xHCI handler inside the wait.
 - `kmem` > `smp` > `serial`: a kernel-half unmap sends a shootdown.
 - `vfs` > `rtc`: a FAT write stamps the entry with the RTC time.
 - anything > `serial`: printing.
@@ -56,6 +59,8 @@ The driver waits under `disk`, so with interrupts off; `disk_irq_wait` opens the
 The IOAPIC sends each line to one CPU, the BSP at boot. A wait on an AP would then rely on the BSP taking the interrupt, and the BSP may be spinning on `disk` (or any lock) with interrupts off: the wait would run into its grace period and, after three in a row, drop to polling for good. So `disk_irq_arm` points the line at the CPU that is about to issue the command (`ioapic_set_dest`, only when it changes). With one `disk` lock there is one waiter per line at a time. `e2e/194` checks this on q35 (AHCI) and pc (PATA) with four CPUs reading at once: APs take their own completions (marker 190), none is taken by another CPU (191) and none is polled (187).
 
 Virtio: virtio-blk is one more driver under `disk` with no lock of its own; virtio-blk disks on one GSI share one wait, like AHCI ports (`e2e/197`, four CPUs). A virtio-input device can share that GSI, so its handler can run inside a disk wait: it only reads its ISR and sends `ARCH_IPI_INPUT` (x86: vector 0x48) to the BSP, which the wait's TPR holds off; `keyboard_push` runs there, outside any disk wait.
+
+USB: the xHCI handler is the one disk-window handler that takes a lock, its controller's `usb` (46, above `disk`, so in order; the holder never takes another lock, so it cannot wait on the waiter). It drains the event ring into flags, signals the wait, and sends `ARCH_IPI_INPUT` to the BSP for keyboard and mouse reports and plug events, which run there outside any wait. An MSI or MSI-X message is retargeted to the waiting CPU by `usb_irq_arm`, the message version of `disk_irq_arm` (`e2e/204`, four CPUs).
 
 ## Adding a lock
 

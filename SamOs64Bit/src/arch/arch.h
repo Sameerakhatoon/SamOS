@@ -135,6 +135,13 @@ int  arch_irq_attach_gsi(uint32_t gsi, uint16_t flags, unsigned slot, bool maske
                          INTERRUPT_CALLBACK_FUNCTION handler);
 // Deliver `gsi` to CPU `c` from now on.
 int  arch_irq_set_cpu(uint32_t gsi, struct cpu* c);
+// A message-signalled completion line (PCI MSI, MSI-X) on
+// `slot`: the device writes *data to *addr to interrupt CPU `c`.
+// `handler` NULL keeps the one registered (retargeting). Returns the
+// line number, or < 0. Ports without it: a weak -EUNIMP in
+// usb/xhci.c, so the xHCI driver falls back to INTx or polling.
+int  arch_irq_msi(unsigned slot, struct cpu* c, INTERRUPT_CALLBACK_FUNCTION handler,
+                  uint64_t* addr, uint32_t* data);
 // A driver's wait in the middle of a syscall: between begin and end
 // only completion lines are taken, each time arch_irq_wait_window
 // opens interrupts for one instruction.

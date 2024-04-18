@@ -150,7 +150,9 @@ void smp_call(struct cpu* target, void (*fn)(void*), void* arg){
     spin_unlock(&call_lock);
 }
 
-static void (*smp_input_fn)(void);
+// virtio-input and USB each register one.
+#define SMP_INPUT_FNS 4
+static void (*smp_input_fn[SMP_INPUT_FNS])(void);
 
 void smp_handle_ipi(enum arch_ipi ipi, struct trap_frame* frame){
     switch(ipi){
@@ -165,15 +167,20 @@ void smp_handle_ipi(enum arch_ipi ipi, struct trap_frame* frame){
             smp_call_run();
             break;
         case ARCH_IPI_INPUT:
-            if(smp_input_fn){
-                smp_input_fn();
+            for(int i = 0; i < SMP_INPUT_FNS && smp_input_fn[i]; i++){
+                smp_input_fn[i]();
             }
             break;
     }
 }
 
 void smp_input_register(void (*fn)(void)){
-    smp_input_fn = fn;
+    for(int i = 0; i < SMP_INPUT_FNS; i++){
+        if(!smp_input_fn[i] || smp_input_fn[i] == fn){
+            smp_input_fn[i] = fn;
+            return;
+        }
+    }
 }
 
 // ------------------------------------------------------------------

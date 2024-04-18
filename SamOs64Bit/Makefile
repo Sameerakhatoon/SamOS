@@ -51,7 +51,8 @@ SHARED_OBJS = kernel.o kernel_selftest.o string/string.o \
     loader/formats/elf.o loader/formats/elfloader.o \
     lib/vector/vector.o lib/spinlock/spinlock.o cpu/smp.o cpu/smp_selftest.o \
     virtio/virtio.o virtio/virtio_pci.o virtio/virtio_mmio.o disk/drivers/virtio_blk.o \
-    keyboard/virtio_input.o disk/drivers/ramdisk.o
+    keyboard/virtio_input.o disk/drivers/ramdisk.o \
+    usb/xhci.o usb/usb_hid.o disk/drivers/usb_msc.o
 
 # Freestanding, warnings are errors, no unused-parameter noise.
 COMMON_FLAGS = -g -ffreestanding -fno-builtin -nostdlib -nostartfiles -nodefaultlibs \
