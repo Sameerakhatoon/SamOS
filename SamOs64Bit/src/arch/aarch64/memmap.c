@@ -1,6 +1,10 @@
 // Physical memory map from the device tree. See memmap.h.
 #include "arch/aarch64/memmap.h"
 #include "arch/aarch64/console.h"
+#include "arch/aarch64/mmu.h"
+#include "boot/boot_info.h"
+#include "config.h"
+#include "memory/memory.h"
 
 #define MAX_FDT_ENTRIES 16
 
@@ -84,6 +88,78 @@ int memmap_build(const struct fdt* f, uint64_t dtb_pa, uint64_t kernel_start, ui
     return 0;
 }
 
+const struct samos_boot_info* memmap_boot_info(uint64_t pa)
+{
+    const struct samos_boot_info* bi = phys_to_virt(pa);
+    if (!pa || (pa & 7) || bi->magic != SAMOS_BOOT_INFO_MAGIC || bi->version != SAMOS_BOOT_INFO_VERSION)
+        return 0;
+    return bi;
+}
+
+static int is_ram(uint32_t t)
+{
+    return t == SAMOS_E820_TYPE_USABLE || t == SAMOS_E820_TYPE_RECLAIMABLE || t == SAMOS_E820_TYPE_KERNEL ||
+           t == SAMOS_E820_TYPE_ACPI_RECLAIMABLE || t == SAMOS_E820_TYPE_ACPI_NVS;
+}
+
+// Contiguous entries of one kind become one region.
+static int add_merged(uint64_t base, uint64_t length, uint32_t type, uint8_t src)
+{
+    struct mem_region* last = count ? &regions[count - 1] : 0;
+    if (last && sources[count - 1] == src && last->type == type && last->base + last->length == base) {
+        last->length += length;
+        return 0;
+    }
+    return add(base, length, type, src, -1);
+}
+
+int memmap_build_uefi(const struct samos_boot_info* bi, uint64_t kernel_start, uint64_t kernel_end)
+{
+    const uint64_t* map = phys_to_virt(bi->memory_map);
+    const struct e820_entry* e = (const struct e820_entry*)(map + 1);
+    uint64_t n = map[0];
+    int r;
+    count = dyn_count = 0;
+    for (int pass = 0; pass < 2; pass++) {
+        for (uint64_t i = 0; i < n; i++) {
+            uint32_t t = e[i].type;
+            if (pass == 0 && is_ram(t))
+                r = add_merged(e[i].base_addr, e[i].length, MEM_REGION_USABLE, SRC_MEMORY);
+            else if (pass == 1 && t == SAMOS_E820_TYPE_ACPI_RECLAIMABLE)
+                r = add_merged(e[i].base_addr, e[i].length, MEM_REGION_ACPI, SRC_ACPI);
+            else if (pass == 1 && t == SAMOS_E820_TYPE_ACPI_NVS)
+                r = add_merged(e[i].base_addr, e[i].length, MEM_REGION_ACPI_NVS, SRC_ACPI);
+            else
+                r = 0;
+            if (r < 0)
+                return r;
+        }
+        if (pass == 0 && !count)
+            return -1;
+    }
+    if ((r = add(kernel_start, kernel_end - kernel_start, MEM_REGION_KERNEL, SRC_KERNEL, -1)) < 0 ||
+        (r = add(virt_to_phys((void*)bi),SAMOS_BOOT_DATA_PAGES * PAGE_SIZE, MEM_REGION_KERNEL, SRC_BOOT_DATA, -1)) < 0)
+        return r;
+    if (bi->dtb && (r = add(bi->dtb, fdt_header_totalsize(phys_to_virt(bi->dtb)), MEM_REGION_KERNEL, SRC_DTB, -1)) < 0)
+        return r;
+    if (bi->initrd_size) {
+        initrd_base = bi->initrd_base;
+        initrd_size = bi->initrd_size;
+        if ((r = add(initrd_base, initrd_size, MEM_REGION_KERNEL, SRC_INITRD, -1)) < 0)
+            return r;
+    }
+    return 0;
+}
+
+int memmap_ram(uint64_t base, uint64_t size)
+{
+    for (int i = 0; i < count; i++)
+        if (regions[i].type == MEM_REGION_USABLE && base >= regions[i].base &&
+            base + size <= regions[i].base + regions[i].length)
+            return !memmap_nomap(base, size);
+    return 0;
+}
+
 const struct mem_region* memmap_regions(int* n)
 {
     *n = count;
@@ -108,7 +184,8 @@ int memmap_nomap(uint64_t base, uint64_t size)
 
 void memmap_print(const struct fdt* f)
 {
-    static const char* const names[] = { "memory", "kernel image", "dtb", "memreserve", "reserved-memory", "initrd" };
+    static const char* const names[] = { "memory", "kernel image", "dtb", "memreserve", "reserved-memory", "initrd",
+                                         "acpi", "boot data" };
     for (int i = 0; i < count; i++) {
         const char* node = nodes[i] >= 0 ? fdt_node_name(f, nodes[i]) : 0;
         console_printf("memmap: 0x%lx-0x%lx %s%s%s%s\n", regions[i].base, regions[i].base + regions[i].length,

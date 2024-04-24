@@ -15,7 +15,7 @@
 // and bump SAMOS_BOOT_INFO_VERSION.
 
 #define SAMOS_BOOT_INFO_MAGIC    0x4F464E49534F4D53ULL   // "SMOSINFO"
-#define SAMOS_BOOT_INFO_VERSION  1
+#define SAMOS_BOOT_INFO_VERSION  2       // Dtb, initrd_base, initrd_size
 #define SAMOS_BOOT_CMDLINE_MAX   256
 
 // E820 entry types in the memory map. 1..7 are the ACPI ones; the
@@ -34,6 +34,7 @@
 // without screen output.
 #define SAMOS_FB_FORMAT_BGRX     0   // byte order B,G,R,X (what the graphics code draws)
 #define SAMOS_FB_FORMAT_RGBX     1   // byte order R,G,B,X (the kernel swaps red and blue)
+#define SAMOS_FB_FORMAT_NONE     2   // No framebuffer (AArch64 without GOP)
 
 struct samos_boot_info {
     unsigned long long magic;
@@ -53,6 +54,11 @@ struct samos_boot_info {
     unsigned long long kernel_end;
 
     char cmdline[SAMOS_BOOT_CMDLINE_MAX];   // NUL-terminated, from \CMDLINE.TXT on the ESP
+
+    // (version 2): the AArch64 loader's; 0 from x86's.
+    unsigned long long dtb;             // the firmware's DTB, copied to kernel memory; 0 if none
+    unsigned long long initrd_base;     // \INITRD.IMG from the ESP; 0 if none
+    unsigned long long initrd_size;
 } __attribute__((packed));
 
 #endif

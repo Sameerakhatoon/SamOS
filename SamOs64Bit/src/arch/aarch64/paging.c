@@ -17,6 +17,7 @@
 // User pages are non-global (nG), so they are tagged with the ASID.
 
 #include "arch/arch.h"
+#include "arch/aarch64/memmap.h"
 #include "arch/aarch64/mmu.h"
 #include "cpu/percpu.h"
 #include "memory/heap/kheap.h"
@@ -199,8 +200,14 @@ uint64_t paging_kernel_virt_to_phys(void* virt)
     return kernel_half((uint64_t)virt) && walk(NULL, (uint64_t)virt, &pa) ? pa : 0;
 }
 
+// A cacheable request inside RAM (ACPI tables) is the direct
+// map: Normal memory, where the ACPI code's unaligned loads are fine
+// (on Device memory they fault), and no lock, so acpi_init works in
+// aarch64_main before this CPU's struct cpu exists.
 void* paging_map_mmio(uint64_t phys, uint64_t size, int flags)
 {
+    if (!(flags & PAGING_CACHE_DISABLED) && memmap_ram(phys, size))
+        return phys_to_virt(phys);
     kmem_lock();
     uint64_t va = mmu_map_device(phys, size);
     kmem_unlock();

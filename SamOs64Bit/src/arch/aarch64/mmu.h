@@ -73,7 +73,7 @@ static inline uint64_t kimage_pa(const void* p)
 }
 
 // boot.S, MMU off: memory map, PFA, tables, MAIR/TCR. Halts on error.
-void     mmu_early(uint64_t dtb);
+void     mmu_early(uint64_t arg);     // x0: the DTB, or the UEFI boot_info
 // boot.S, MMU on and running high: direct map on, identity map gone.
 void     mmu_late(void);
 // Print the layout, the reservations and the allocator (main.c).

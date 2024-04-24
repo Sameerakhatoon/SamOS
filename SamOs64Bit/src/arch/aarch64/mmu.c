@@ -12,6 +12,7 @@
 #include "arch/aarch64/pl011.h"
 #include "arch/aarch64/sysreg.h"
 #include "arch/aarch64/trap.h"
+#include "boot/boot_info.h"
 #include "memory/pfa.h"
 
 #define BLOCK_2M        (1ul << 21)
@@ -209,17 +210,24 @@ static void dcache_inval(uint64_t start, uint64_t end)
     __asm__ volatile("dsb sy" ::: "memory");
 }
 
-void mmu_early(uint64_t dtb)
+// `arg` is x0 at entry: the DTB (-kernel), or the UEFI
+// loader's boot_info, whose memory map is the firmware's and whose
+// DTB is optional (ACPI only). `fp` is the DT for early_fail's
+// console, when there is one.
+void mmu_early(uint64_t arg)
 {
     static const uint8_t pa_range_bits[] = { 32, 36, 40, 42, 44, 48 };
     struct fdt f;
-    int r = fdt_init(&f, (const void*)dtb, 0);
-    if (r < 0)
+    const struct samos_boot_info* bi = memmap_boot_info(arg);
+    uint64_t dtb = bi ? bi->dtb : arg;
+    int r = dtb ? fdt_init(&f, (const void*)dtb, 0) : FDT_ERR_NOTFOUND;
+    const struct fdt* fp = r < 0 ? 0 : &f;
+    if (r < 0 && !bi)
         early_fail(0, "no valid device tree", r);
 
     uint64_t mmfr0 = sysreg_read("id_aa64mmfr0_el1");
     if (((mmfr0 >> 28) & 0xf) == 0xf)
-        early_fail(&f, "no 4 KiB granule (ID_AA64MMFR0_EL1.TGran4)", -1);
+        early_fail(fp, "no 4 KiB granule (ID_AA64MMFR0_EL1.TGran4)", -1);
     uint64_t ips = mmfr0 & 0xf;
     if (ips > 5)
         ips = 5;    // 52-bit needs 64 KiB pages or LPA2
@@ -227,37 +235,39 @@ void mmu_early(uint64_t dtb)
 
     kernel_phys = (uint64_t)_head;      // PC-relative: the load address
     uint64_t kend = (uint64_t)_end;
-    if ((r = memmap_build(&f, dtb, kernel_phys, kend)) < 0)
-        early_fail(&f, "memory map from the device tree", r);
+    if (bi && (r = memmap_build_uefi(bi, kernel_phys, kend)) < 0)
+        early_fail(fp, "memory map from UEFI", r);
+    if (!bi && (r = memmap_build(&f, dtb, kernel_phys, kend)) < 0)
+        early_fail(fp, "memory map from the device tree", r);
     int n;
     const struct mem_region* m = memmap_regions(&n);
     if (early_pfa_init(m, n) < 0)
-        early_fail(&f, "page-frame allocator: no usable RAM", -1);
+        early_fail(fp, "page-frame allocator: no usable RAM", -1);
 
     // TTBR1: the direct map, then the kernel image with W^X.
     uint64_t text = (uint64_t)_text_end, ro = (uint64_t)_rodata_end;
     ro_start = kernel_phys;
     ro_end = ro;
     if (!(kernel_root = table_alloc()))
-        early_fail(&f, "no frame for the kernel table", -1);
+        early_fail(fp, "no frame for the kernel table", -1);
     for (int i = 0; i < n; i++)
         if (m[i].type == MEM_REGION_USABLE && map_ram(m[i].base, m[i].base + m[i].length) < 0)
-            early_fail(&f, "direct map", i);
+            early_fail(fp, "direct map", i);
     if (map_range(kernel_root, DIRECT_MAP_BASE + kernel_phys, kernel_phys, ro - kernel_phys, PROT_KRO, 0) < 0)
-        early_fail(&f, "direct map of the kernel image", -1);
+        early_fail(fp, "direct map of the kernel image", -1);
     uint64_t guard = (uint64_t)_stack_guard, sb = (uint64_t)_stack_bottom;
     // The page below the boot stack stays unmapped (a guard).
     if (map_range(kernel_root, KERNEL_VBASE, kernel_phys, text - kernel_phys, PROT_KTEXT, 0) < 0 ||
         map_range(kernel_root, KERNEL_VBASE + text - kernel_phys, text, ro - text, PROT_KRO, 0) < 0 ||
         map_range(kernel_root, KERNEL_VBASE + ro - kernel_phys, ro, guard - ro, PROT_KRW, 0) < 0 ||
         map_range(kernel_root, KERNEL_VBASE + sb - kernel_phys, sb, kend - sb, PROT_KRW, 0) < 0)
-        early_fail(&f, "kernel image map", -1);
+        early_fail(fp, "kernel image map", -1);
 
     // TTBR0: the kernel text at its own address, only for the few
     // instructions between SCTLR_EL1.M and the jump high (boot.S).
     uint64_t idmap = table_alloc();
     if (!idmap || map_range(idmap, kernel_phys, kernel_phys, text - kernel_phys, PROT_KTEXT, 0) < 0)
-        early_fail(&f, "identity map", -1);
+        early_fail(fp, "identity map", -1);
 
     // Written with the caches off: drop any stale lines before the
     // MMU turns them on (QEMU has no caches; hardware does).

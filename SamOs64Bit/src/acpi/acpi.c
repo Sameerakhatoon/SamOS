@@ -212,8 +212,47 @@ static void acpi_parse_madt(struct acpi_madt* m){
             n->lint    = p[5];
         } else if(type == 5 && len >= 12){
             info.lapic_phys = *(uint64_t*)(p + 4);
+        } else if(type == 0x0B && len >= 76 && info.gicc_count < ACPI_MAX_CPUS){
+            // GICC: UID at 8, flags at 12, MPIDR at 68
+            struct acpi_gicc* c = &info.gicc[info.gicc_count++];
+            uint32_t flags = *(uint32_t*)(p + 12);
+            c->uid     = *(uint32_t*)(p + 8);
+            c->mpidr   = *(uint64_t*)(p + 68);
+            c->enabled = (flags & 9) != 0;
+        } else if(type == 0x0C && len >= 24){
+            info.gicd_phys   = *(uint64_t*)(p + 8);
+            info.gic_version = p[20];
+        } else if(type == 0x0E && len >= 16 && info.gicr_count < ACPI_MAX_GICR){
+            info.gicr[info.gicr_count].base     = *(uint64_t*)(p + 4);
+            info.gicr[info.gicr_count++].length = *(uint32_t*)(p + 12);
         }
         p += len;
+    }
+}
+
+// SPCR: the console UART (interface type at 36, its address
+// as a GAS at 40, the GSIV at 54).
+static void acpi_parse_spcr(struct acpi_sdt_header* t){
+    uint8_t* p = (uint8_t*)t;
+    if(t->length < 58){
+        return;
+    }
+    info.have_spcr = true;
+    info.spcr_type = p[36];
+    memcpy(&info.spcr_base, p + 40, sizeof(info.spcr_base));
+    info.spcr_gsiv = *(uint32_t*)(p + 54);
+}
+
+// GTDT: GSIV and flags of the four per-CPU timers, from 48.
+static void acpi_parse_gtdt(struct acpi_sdt_header* t){
+    uint8_t* p = (uint8_t*)t;
+    if(t->length < 80){
+        return;
+    }
+    info.have_gtdt = true;
+    for(int i = 0; i < 4; i++){
+        info.gtdt_gsiv[i]  = *(uint32_t*)(p + 48 + 8 * i);
+        info.gtdt_flags[i] = *(uint32_t*)(p + 52 + 8 * i);
     }
 }
 
@@ -305,6 +344,9 @@ static void acpi_parse_fadt(struct acpi_fadt* f){
         info.reset_reg   = f->reset_reg;
         info.reset_value = f->reset_value;
     }
+    if(FADT_HAS(f, arm_boot_arch)){
+        info.arm_boot_arch = f->arm_boot_arch;
+    }
     uint64_t dsdt_phys = f->dsdt;
     if(FADT_HAS(f, x_dsdt) && f->x_dsdt){
         dsdt_phys = f->x_dsdt;
@@ -358,6 +400,12 @@ int acpi_init(uint64_t rsdp_phys){
     }
     if((t = acpi_find_table("FACP", 0))){
         acpi_parse_fadt((struct acpi_fadt*)t);
+    }
+    if((t = acpi_find_table("SPCR", 0))){
+        acpi_parse_spcr(t);
+    }
+    if((t = acpi_find_table("GTDT", 0))){
+        acpi_parse_gtdt(t);
     }
 
     acpi_log("acpi: rsdp revision ");

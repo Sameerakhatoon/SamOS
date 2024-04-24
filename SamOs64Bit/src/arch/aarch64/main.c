@@ -12,6 +12,12 @@
 // spike (samos.sched_test) still runs its kernel threads instead, and
 // a GICv2 machine (no tick) halts after hello.
 //
+// Entered from the UEFI loader (BOOTAA64.EFI), x0 is its
+// struct samos_boot_info instead of a DTB: the memory map is UEFI's
+// (memmap.c), the command line and initrd come from boot_info, and
+// the device tree is the firmware's or, with ACPI only, one built
+// from the MADT, SPCR, GTDT and FADT (acpi_dt.c).
+//
 // Test hooks in bootargs:
 //   samos.fault_test[=brk|undef|dabort|svc]  take that exception
 //       (fault_test.S); the first three dump and halt, svc returns.
@@ -22,6 +28,8 @@
 //       wxn|uexec take the matching abort there.
 #include <stdint.h>
 #include "firmware/fdt.h"
+#include "boot/boot_info.h"
+#include "arch/aarch64/acpi_dt.h"
 #include "arch/aarch64/console.h"
 #include "arch/aarch64/gicv3.h"
 #include "arch/aarch64/memmap.h"
@@ -40,7 +48,7 @@
 // One whole line even if a tick lands in the middle of it.
 #define SAY(...) do { uint64_t d_ = irq_save(); console_printf(__VA_ARGS__); irq_restore(d_); } while (0)
 
-void aarch64_main(uint64_t dtb, uint64_t boot_el);
+void aarch64_main(uint64_t arg, uint64_t boot_el);
 void fault_test_brk(void);
 void fault_test_undef(void);
 void fault_test_dabort(uint64_t addr);
@@ -180,13 +188,38 @@ static void sched_test(void)
     measure_ticks(TICK_HZ);
 }
 
-void aarch64_main(uint64_t dtb, uint64_t boot_el)
+static void uefi_report(const struct samos_boot_info* bi, uint64_t pa)
+{
+    console_printf("uefi: boot_info at 0x%lx, version %u, %lu memory map entries, kernel 0x%lx-0x%lx\n", pa,
+                   bi->version, *(const uint64_t*)phys_to_virt(bi->memory_map), bi->kernel_start, bi->kernel_end);
+    console_printf("uefi: dtb 0x%lx, acpi rsdp 0x%lx, initrd 0x%lx (%lu bytes)\n", bi->dtb, bi->acpi_rsdp,
+                   bi->initrd_base, bi->initrd_size);
+    // The screen is the aarch64 device code's (ramfb); the GOP mode is only reported.
+    if (bi->fb_format == SAMOS_FB_FORMAT_NONE)
+        console_printf("uefi: no GOP framebuffer\n");
+    else
+        console_printf("uefi: GOP framebuffer 0x%lx, %ux%u, pitch %u, format %u (not used yet)\n", bi->fb_base,
+                       bi->fb_width, bi->fb_height, bi->fb_pitch, bi->fb_format);
+    console_printf("uefi: cmdline \"%s\"\n", bi->cmdline);
+}
+
+void aarch64_main(uint64_t arg, uint64_t boot_el)
 {
     struct fdt f;
-    int r = fdt_init(&f, phys_to_virt(dtb), 0);
+    const struct samos_boot_info* bi = memmap_boot_info(arg);
+    uint64_t dtb = bi ? bi->dtb : arg;
+    int r = dtb ? fdt_init(&f, phys_to_virt(dtb), 0) : FDT_ERR_NOTFOUND;
     const char* how = pl011_init(r == 0 ? &f : 0);
 
     console_printf("\nSamOS aarch64: booting (entered at EL%lu, running at EL%lu)\n", boot_el, current_el());
+    if (bi) {
+        uefi_report(bi, arg);
+        if (r < 0 && bi->acpi_rsdp && acpi_dt_build(bi->acpi_rsdp, bi->cmdline, &f) == 0) {
+            r = 0;
+            dtb = kimage_pa(f.blob);
+            how = pl011_init(&f);
+        }
+    }
     console_printf("console: pl011 at 0x%lx (%s)\n", pl011_base(), how);
     if (r < 0) {
         console_printf("fdt: no valid device tree at 0x%lx, error %d\n", dtb, -r);
@@ -205,7 +238,7 @@ void aarch64_main(uint64_t dtb, uint64_t boot_el)
     mmu_report();
     memmap_print(&f);
 
-    const char* args = fdt_bootargs(&f);
+    const char* args = bi ? bi->cmdline : fdt_bootargs(&f);
     console_printf("bootargs: %s\n", args ? args : "(none)");
 
     char unused[2];

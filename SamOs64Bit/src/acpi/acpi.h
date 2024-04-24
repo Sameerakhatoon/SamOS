@@ -8,6 +8,11 @@
 // configuration table names in boot_info.acpi_rsdp. Every
 // table is checksum-checked and mapped through the direct map with
 // paging_map_mmio (ACPI memory is not part of the RAM direct map).
+//
+// The Arm parts as well: the MADT's GIC entries (GICC per CPU,
+// GICD, GICR ranges), the SPCR console, the GTDT timer interrupts and
+// the FADT's ARM_BOOT_ARCH (PSCI, HVC or SMC). x86 tables have none
+// of them, so on x86 they stay zero and nothing more is printed.
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -17,6 +22,25 @@
 #define ACPI_MAX_IOAPICS   8
 #define ACPI_MAX_OVERRIDES 16
 #define ACPI_MAX_LAPIC_NMI 8
+#define ACPI_MAX_GICR      8
+
+// MADT GICC (type 0x0B): one per CPU.
+struct acpi_gicc {
+    uint32_t uid;                  // ACPI processor UID
+    uint64_t mpidr;
+    bool     enabled;              // flags bit 0 (or bit 3, online capable)
+};
+
+struct acpi_gicr {
+    uint64_t base;                 // MADT GICR (type 0x0E) discovery range
+    uint32_t length;
+};
+
+#define ACPI_SPCR_PL011        0x03 // SPCR interface types
+#define ACPI_SPCR_SBSA_32BIT   0x0d
+#define ACPI_SPCR_SBSA         0x0e
+#define ACPI_ARM_PSCI          0x1  // FADT ARM_BOOT_ARCH
+#define ACPI_ARM_PSCI_HVC      0x2
 
 struct acpi_sdt_header {
     char     signature[4];
@@ -111,6 +135,22 @@ struct acpi_info {
     bool     s5_found;
     uint8_t  s5_slp_typ_a;
     uint8_t  s5_slp_typ_b;
+
+    // Arm (MADT GIC entries, SPCR, GTDT, FADT ARM_BOOT_ARCH)
+    uint64_t gicd_phys;            // 0 = no GICD entry
+    uint8_t  gic_version;          // GICD entry: 0 = not given, else 1..4
+    int      gicc_count;
+    struct acpi_gicc gicc[ACPI_MAX_CPUS];
+    int      gicr_count;
+    struct acpi_gicr gicr[ACPI_MAX_GICR];
+    bool     have_spcr;
+    uint8_t  spcr_type;            // ACPI_SPCR_*
+    struct acpi_gas spcr_base;
+    uint32_t spcr_gsiv;            // 0 = polled
+    bool     have_gtdt;
+    uint32_t gtdt_gsiv[4];         // secure EL1, non-secure EL1, virtual, EL2 timer
+    uint32_t gtdt_flags[4];        // bit 0 edge, bit 1 active low
+    uint16_t arm_boot_arch;        // ACPI_ARM_PSCI*
 };
 
 // Parse everything from the RSDP's physical address. Returns 0 or a

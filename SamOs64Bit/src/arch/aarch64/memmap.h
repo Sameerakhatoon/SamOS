@@ -18,14 +18,36 @@
 // report but not placed: nothing here allocates for a driver yet.
 // Built with the MMU off: it stores no pointers, only addresses and
 // DT node offsets, and names nothing until memmap_print.
+//
+// After a UEFI boot (x0 = struct samos_boot_info) the map is
+// the firmware's instead, from the loader's E820 table:
+//   RAM: usable, loader/boot services, ACPI tables and NVS, the
+//        loader's allocations, merged where contiguous   USABLE
+//   ACPI reclaim and NVS                              ACPI, ACPI_NVS
+//   the kernel image, the boot data area (boot_info and the E820
+//   table), the DTB copy, the initrd                   KERNEL
+// Runtime services and other firmware memory are not RAM here: the
+// direct map skips them and the PFA never sees them. The DT, if the
+// firmware gave one, only describes devices.
 
 #define MEMMAP_MAX      32
 #define MEMMAP_NOMAP    0x100   // or'ed into type: "no-map", kept out of the direct map
 
-enum memmap_source { SRC_MEMORY, SRC_KERNEL, SRC_DTB, SRC_MEMRESERVE, SRC_RESMEM, SRC_INITRD, SRC_RESMEM_DYNAMIC };
+enum memmap_source { SRC_MEMORY, SRC_KERNEL, SRC_DTB, SRC_MEMRESERVE, SRC_RESMEM, SRC_INITRD,
+                     SRC_ACPI, SRC_BOOT_DATA, SRC_RESMEM_DYNAMIC };
+
+struct samos_boot_info;
 
 // 0, or a negative FDT_ERR_* / -100 when the table is full.
 int  memmap_build(const struct fdt* f, uint64_t dtb_pa, uint64_t kernel_start, uint64_t kernel_end);
+// The same from the UEFI loader's boot_info. 0, -1 for a map
+// without RAM, -100 when the table is full.
+int  memmap_build_uefi(const struct samos_boot_info* bi, uint64_t kernel_start, uint64_t kernel_end);
+// The boot_info at physical `pa` (phys_to_virt), or NULL when
+// `pa` is something else (a DTB on a -kernel boot).
+const struct samos_boot_info* memmap_boot_info(uint64_t pa);
+// Is [base, base+size) RAM in the direct map? 1/0.
+int  memmap_ram(uint64_t base, uint64_t size);
 // The list; dynamic entries are not in it.
 const struct mem_region* memmap_regions(int* n);
 // The initrd the boot loader placed (QEMU -initrd): 0 and its

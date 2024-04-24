@@ -54,34 +54,8 @@ EFI_OUT="$ROOT/bin/SamOs.efi"
 if [ -n "${SAMOS_EFI:-}" ]; then
     cp "$SAMOS_EFI" "$EFI_OUT"
 elif [ -x "$EDK2_ROOT/BaseTools/Source/C/bin/GenFw" ]; then
-    # ~/edk2 is shared by every worktree, so serialise the symlink
-    # swap + build + copy.
-    (
-        flock 9
-        link="$EDK2_ROOT/MdeModulePkg/Application/SamOs"
-        if [ -e "$link" ] && [ ! -L "$link" ]; then
-            echo "build.sh: $link exists and is not a symlink" >&2
-            exit 1
-        fi
-        ln -sfn "$ROOT" "$link"
-        dsc="$EDK2_ROOT/MdeModulePkg/MdeModulePkg.dsc"
-        if ! grep -q 'Application/SamOs/SamOs.inf' "$dsc"; then
-            sed -i 's|^\(\s*\)MdeModulePkg/Application/HelloWorld/HelloWorld.inf|&\n\1MdeModulePkg/Application/SamOs/SamOs.inf|' "$dsc"
-        fi
-        # The module's build dir is shared too, and EDK2 rebuilds only
-        # by mtime: another worktree's newer object (from an older
-        # SamOs.c) would win over this tree's source. Start clean.
-        rm -rf "$EDK2_ROOT/Build/MdeModule/DEBUG_${EDK2_TOOLCHAIN}/X64/MdeModulePkg/Application/SamOs"
-        cd "$EDK2_ROOT"
-        export EDK_TOOLS_PATH="$EDK2_ROOT/BaseTools"
-        set +u
-        . ./edksetup.sh BaseTools >/dev/null
-        set -u
-        build -p MdeModulePkg/MdeModulePkg.dsc \
-              -m MdeModulePkg/Application/SamOs/SamOs.inf \
-              -a X64 -t "$EDK2_TOOLCHAIN" -q
-        cp "$EDK2_ROOT/Build/MdeModule/DEBUG_${EDK2_TOOLCHAIN}/X64/SamOs.efi" "$EFI_OUT"
-    ) 9>"$HOME/.samos-edk2.lock"
+    # The EDK2 build is efi-build.sh's, shared with BOOTAA64.EFI.
+    EDK2_ROOT="$EDK2_ROOT" EDK2_TOOLCHAIN="$EDK2_TOOLCHAIN" bash "$ROOT/efi-build.sh" X64 "$EFI_OUT"
 elif [ -f "$EFI_OUT" ]; then
     echo "build.sh: EDK2 not found at $EDK2_ROOT; reusing existing bin/SamOs.efi" >&2
 else

@@ -21,6 +21,14 @@
       passing one pointer (struct samos_boot_info) in rdi.
     - The GOP pixel format is checked and a usable mode is chosen.
 
+  The same file builds BOOTAA64.EFI (MDE_CPU_AARCH64). There
+  KERNEL.BIN is the arm64 Image (bin/aarch64/kernel.img), placed at
+  0x40200000 or any 2 MiB boundary; the boot data area is allocated
+  anywhere; the DTB (if the firmware gives one) is copied into kernel
+  memory; an optional \INITRD.IMG becomes the RAM disk; GOP is
+  optional. The kernel is entered as Linux's booting.rst asks, with
+  the boot_info pointer in x0: see JumpToKernel.
+
   Copyright (c) 2006 - 2018, Intel Corporation. All rights reserved.<BR>
   SPDX-License-Identifier: BSD-2-Clause-Patent
 **/
@@ -33,6 +41,7 @@
 #include <Library/MemoryAllocationLib.h>
 #include <Library/PrintLib.h>
 #include <Library/BaseMemoryLib.h>
+#include <Library/BaseLib.h>
 #include <Guid/FileInfo.h>
 #include <Guid/Acpi.h>
 #include <Protocol/LoadedImage.h>
@@ -63,6 +72,27 @@ typedef struct __attribute__((packed)) E820Entries {
 
 EFI_HANDLE        imageHandle  = NULL;
 EFI_SYSTEM_TABLE* systemTable  = NULL;
+
+#if defined(MDE_CPU_AARCH64)
+// EmbeddedPkg's gFdtTableGuid (DTB_TABLE_GUID), spelled out so the
+// module needs no EmbeddedPkg.
+STATIC EFI_GUID mFdtTableGuid = { 0xb1b621d5, 0xf19c, 0x41a5, { 0x83, 0x0b, 0xd9, 0x15, 0x2c, 0x69, 0xaa, 0xe0 } };
+
+// The arm64 Image header (Linux Documentation/arch/arm64/booting.rst).
+typedef struct {
+    UINT32 Code0;
+    UINT32 Code1;
+    UINT64 TextOffset;
+    UINT64 ImageSize;       // file plus .bss and stack, from the load address
+    UINT64 Flags;
+    UINT64 Res2, Res3, Res4;
+    UINT32 Magic;           // "ARM\x64"
+    UINT32 Res5;
+} ARM64_IMAGE_HEADER;
+
+#define ARM64_IMAGE_MAGIC     0x644d5241
+#define AARCH64_KERNEL_BASE   0x40200000ULL   // RAM base + 2 MiB on -machine virt
+#endif
 
 STATIC UINT32 EfiTypeToE820(UINT32 Type)
 {
@@ -336,6 +366,7 @@ STATIC VOID LoadCommandLine(struct samos_boot_info* Info)
     Print(L"Command line: %a\n", Info->cmdline);
 }
 
+#if !defined(MDE_CPU_AARCH64)
 STATIC EFI_STATUS AllocateFixed(EFI_PHYSICAL_ADDRESS Address, UINTN Pages, CONST CHAR16* What)
 {
     EFI_PHYSICAL_ADDRESS Base = Address;
@@ -345,6 +376,191 @@ STATIC EFI_STATUS AllocateFixed(EFI_PHYSICAL_ADDRESS Address, UINTN Pages, CONST
     }
     return Status;
 }
+#else
+// Size bytes of kernel memory at Preferred if that is free, else at
+// any Align boundary (the oversized allocation's ends are given back).
+STATIC EFI_STATUS AllocateKernelPages(UINTN Size, UINTN Align, EFI_PHYSICAL_ADDRESS Preferred,
+                                      EFI_PHYSICAL_ADDRESS* Out, CONST CHAR16* What)
+{
+    UINTN Pages = EFI_SIZE_TO_PAGES(Size);
+    EFI_PHYSICAL_ADDRESS Base = Preferred;
+    if (Preferred &&
+        !EFI_ERROR(gBS->AllocatePages(AllocateAddress, SAMOS_EFI_KERNEL_MEMORY, Pages, &Base))) {
+        *Out = Base;
+        return EFI_SUCCESS;
+    }
+    UINTN Slack = Align > EFI_PAGE_SIZE ? EFI_SIZE_TO_PAGES(Align) : 0;
+    EFI_STATUS Status = gBS->AllocatePages(AllocateAnyPages, SAMOS_EFI_KERNEL_MEMORY, Pages + Slack, &Base);
+    if (EFI_ERROR(Status)) {
+        Print(L"Error: cannot allocate %lu bytes for the %s: %r\n", (UINT64)Size, What, Status);
+        return Status;
+    }
+    EFI_PHYSICAL_ADDRESS Aligned = ALIGN_VALUE(Base, (UINT64)(Slack ? Align : EFI_PAGE_SIZE));
+    if (Aligned > Base) {
+        gBS->FreePages(Base, EFI_SIZE_TO_PAGES(Aligned - Base));
+    }
+    EFI_PHYSICAL_ADDRESS End = Aligned + EFI_PAGES_TO_SIZE(Pages);
+    EFI_PHYSICAL_ADDRESS AllocEnd = Base + EFI_PAGES_TO_SIZE(Pages + Slack);
+    if (AllocEnd > End) {
+        gBS->FreePages(End, EFI_SIZE_TO_PAGES(AllocEnd - End));
+    }
+    *Out = Aligned;
+    return EFI_SUCCESS;
+}
+
+// KERNEL.BIN is an arm64 Image: 2 MiB aligned base + text_offset,
+// image_size bytes reserved (the file, then .bss and the boot stack,
+// zeroed).
+STATIC EFI_STATUS LoadKernelImage(struct samos_boot_info* Info)
+{
+    VOID*  Buffer = NULL;
+    UINTN  Size   = 0;
+    EFI_STATUS Status = ReadFileFromCurrentFilesystem(L"kernel.bin", &Buffer, &Size, FALSE);
+    if (EFI_ERROR(Status)) {
+        Print(L"Error reading kernel: %r\n", Status);
+        return Status;
+    }
+    ARM64_IMAGE_HEADER* Header = Buffer;
+    if (Size < sizeof(*Header) || Header->Magic != ARM64_IMAGE_MAGIC) {
+        Print(L"Error: kernel.bin is not an arm64 Image\n");
+        FreePool(Buffer);
+        return EFI_LOAD_ERROR;
+    }
+    UINT64 Span = Header->TextOffset + MAX(Header->ImageSize, (UINT64)Size);
+    EFI_PHYSICAL_ADDRESS Base;
+    Status = AllocateKernelPages(Span, SIZE_2MB, AARCH64_KERNEL_BASE, &Base, L"kernel");
+    if (EFI_ERROR(Status)) {
+        FreePool(Buffer);
+        return Status;
+    }
+    SetMem((VOID*)(UINTN)Base, EFI_PAGES_TO_SIZE(EFI_SIZE_TO_PAGES(Span)), 0);
+    CopyMem((VOID*)(UINTN)(Base + Header->TextOffset), Buffer, Size);
+    FreePool(Buffer);
+    Info->kernel_start = Base + Header->TextOffset;
+    Info->kernel_end   = Base + Span;
+    Print(L"Kernel: %lu bytes at %lx, image %lx-%lx\n", (UINT64)Size, Info->kernel_start,
+          Info->kernel_start, Info->kernel_end);
+    return EFI_SUCCESS;
+}
+
+// The firmware's DTB, copied into kernel memory: the kernel reads it
+// with the MMU off and keeps it, and the original may sit in boot
+// services memory the kernel will reuse.
+STATIC VOID CopyDeviceTree(struct samos_boot_info* Info)
+{
+    for (UINTN i = 0; i < gST->NumberOfTableEntries; i++) {
+        EFI_CONFIGURATION_TABLE* Table = &gST->ConfigurationTable[i];
+        if (!CompareGuid(&Table->VendorGuid, &mFdtTableGuid)) {
+            continue;
+        }
+        UINT8* Fdt = Table->VendorTable;
+        UINT32 Magic = SwapBytes32(*(UINT32*)Fdt);
+        UINT32 Size  = SwapBytes32(*(UINT32*)(Fdt + 4));
+        EFI_PHYSICAL_ADDRESS Copy;
+        if (Magic != 0xd00dfeed || EFI_ERROR(AllocateKernelPages(Size, EFI_PAGE_SIZE, 0, &Copy, L"device tree"))) {
+            Print(L"Device tree at %p unusable, ignored\n", Fdt);
+            return;
+        }
+        CopyMem((VOID*)(UINTN)Copy, Fdt, Size);
+        Info->dtb = Copy;
+        Print(L"Device tree: %u bytes, copied to %lx\n", Size, Copy);
+        return;
+    }
+    Print(L"Device tree: none (ACPI only)\n");
+}
+
+// Optional \INITRD.IMG on the ESP: the RAM disk (QEMU's -initrd on
+// the -kernel path).
+STATIC VOID LoadInitrd(struct samos_boot_info* Info)
+{
+    VOID*  Buffer = NULL;
+    UINTN  Size   = 0;
+    EFI_PHYSICAL_ADDRESS Base;
+    if (EFI_ERROR(ReadFileFromCurrentFilesystem(L"INITRD.IMG", &Buffer, &Size, TRUE))) {
+        return;
+    }
+    if (!EFI_ERROR(AllocateKernelPages(Size, EFI_PAGE_SIZE, 0, &Base, L"initrd"))) {
+        CopyMem((VOID*)(UINTN)Base, Buffer, Size);
+        Info->initrd_base = Base;
+        Info->initrd_size = Size;
+        Print(L"Initrd: %lu bytes at %lx\n", (UINT64)Size, Base);
+    }
+    FreePool(Buffer);
+}
+
+// Enter the kernel as booting.rst asks: MMU and D-cache off at the
+// current EL (EL1, or EL2 with virtualization=on), the kernel image
+// and everything it reads or writes before its own MMU is on cleaned
+// to the point of coherency, I-cache invalidated, x0 = boot_info.
+// One asm block that touches no memory but the map it reads: any
+// store (a stack spill) after the clean would leave a dirty line
+// that could be evicted over memory the kernel has since written
+// with its caches off. The clean covers every
+// RAM range in the E820 table the kernel may use: usable,
+// reclaimable (loader and boot services) and kernel.
+STATIC VOID __attribute__((noreturn)) JumpToKernel(struct samos_boot_info* Info)
+{
+    register UINT64 X0 __asm__("x0") = (UINT64)(UINTN)Info;
+    register UINT64 X1 __asm__("x1") = Info->kernel_start;
+    register UINT64 X2 __asm__("x2") = Info->memory_map;
+    __asm__ __volatile__(
+        "msr    daifset, #0xf\n\t"
+        "mrs    x3, ctr_el0\n\t"
+        "ubfx   x3, x3, #16, #4\n\t"
+        "mov    x4, #4\n\t"
+        "lsl    x4, x4, x3\n\t"             // x4 = D-cache line (DminLine words)
+        "sub    x5, x4, #1\n\t"
+        "ldr    x3, [x2], #8\n\t"           // x3 = entries, x2 = first entry
+        "1:\n\t"
+        "cbz    x3, 4f\n\t"
+        "ldp    x6, x7, [x2]\n\t"           // base, length
+        "ldr    w8, [x2, #16]\n\t"          // type
+        "add    x2, x2, #24\n\t"
+        "sub    x3, x3, #1\n\t"
+        "cmp    w8, #1\n\t"                 // SAMOS_E820_TYPE_USABLE
+        "b.eq   2f\n\t"
+        "mov    w9, #0x1000\n\t"            // _RECLAIMABLE
+        "cmp    w8, w9\n\t"
+        "b.eq   2f\n\t"
+        "add    w9, w9, #1\n\t"             // _KERNEL
+        "cmp    w8, w9\n\t"
+        "b.ne   1b\n\t"
+        "2:\n\t"
+        "add    x7, x6, x7\n\t"
+        "bic    x6, x6, x5\n\t"
+        "3:\n\t"
+        "cmp    x6, x7\n\t"
+        "b.hs   1b\n\t"
+        "dc     civac, x6\n\t"
+        "add    x6, x6, x4\n\t"
+        "b      3b\n\t"
+        "4:\n\t"
+        "dsb    sy\n\t"
+        "mrs    x3, CurrentEL\n\t"
+        "cmp    x3, #8\n\t"                 // EL2
+        "b.ne   5f\n\t"
+        "mrs    x3, sctlr_el2\n\t"
+        "bic    x3, x3, #1\n\t"             // M
+        "bic    x3, x3, #4\n\t"             // C
+        "msr    sctlr_el2, x3\n\t"
+        "b      6f\n\t"
+        "5:\n\t"
+        "mrs    x3, sctlr_el1\n\t"
+        "bic    x3, x3, #1\n\t"
+        "bic    x3, x3, #4\n\t"
+        "msr    sctlr_el1, x3\n\t"
+        "6:\n\t"
+        "isb\n\t"
+        "ic     iallu\n\t"
+        "dsb    nsh\n\t"
+        "isb\n\t"
+        "br     x1\n\t"
+        :
+        : "r"(X0), "r"(X1), "r"(X2)
+        : "x3", "x4", "x5", "x6", "x7", "x8", "x9", "memory");
+    __builtin_unreachable();
+}
+#endif
 
 EFI_STATUS
 EFIAPI
@@ -357,6 +573,32 @@ UefiMain(IN EFI_HANDLE       ImageHandle,
 
     Print(L"SamOs UEFI bootloader.\n");
 
+#if defined(MDE_CPU_AARCH64)
+    // 1-2. The boot data area anywhere (boot_info, then the map one
+    //      page in, as at 0x20F000/0x210000 on x86), the kernel, the
+    //      DTB and the initrd.
+    EFI_PHYSICAL_ADDRESS BootData;
+    Status = AllocateKernelPages(SAMOS_BOOT_DATA_PAGES * EFI_PAGE_SIZE, EFI_PAGE_SIZE, 0, &BootData,
+                                 L"boot data area");
+    if (EFI_ERROR(Status)) {
+        return Status;
+    }
+    struct samos_boot_info* Info = (struct samos_boot_info*)(UINTN)BootData;
+    E820Entries* MemoryMapOut     = (E820Entries*)(UINTN)(BootData + EFI_PAGE_SIZE);
+    SetMem(Info, SAMOS_BOOT_DATA_PAGES * EFI_PAGE_SIZE, 0);
+    Info->magic        = SAMOS_BOOT_INFO_MAGIC;
+    Info->version      = SAMOS_BOOT_INFO_VERSION;
+    Info->size         = sizeof(struct samos_boot_info);
+    Info->memory_map   = (UINT64)(UINTN)MemoryMapOut;
+    Info->acpi_rsdp    = FindAcpiRsdp();
+    Status = LoadKernelImage(Info);
+    if (EFI_ERROR(Status)) {
+        return Status;
+    }
+    CopyDeviceTree(Info);
+    Print(L"ACPI RSDP: %lx\n", Info->acpi_rsdp);
+    LoadInitrd(Info);
+#else
     // 1. Reserve the fixed regions the kernel uses, before anything
     //    else can land there.
     Status = AllocateFixed(SAMOS_KERNEL_LOCATION,
@@ -399,13 +641,19 @@ UefiMain(IN EFI_HANDLE       ImageHandle,
     CopyMem((VOID*)(UINTN)SAMOS_KERNEL_LOCATION, KernelBuffer, KernelBufferSize);
     FreePool(KernelBuffer);
     Print(L"Kernel: %lu bytes at %lx\n", KernelBufferSize, (UINT64)SAMOS_KERNEL_LOCATION);
+#endif
 
     LoadCommandLine(Info);
 
     // 3. Framebuffer.
     Status = SetupGraphics(Info);
     if (EFI_ERROR(Status)) {
+#if defined(MDE_CPU_AARCH64)
+        // -nographic or no display device: the kernel runs on the UART.
+        Info->fb_format = SAMOS_FB_FORMAT_NONE;
+#else
         return Status;
+#endif
     }
 
     // 4. Final memory map + ExitBootServices. Size the buffer once,
@@ -452,6 +700,9 @@ UefiMain(IN EFI_HANDLE       ImageHandle,
     // 5. Hand off. Boot services are gone: no Print, no gBS. One asm
     //    statement, so the compiler can't reuse rdi between setting it
     //    and the jump.
+#if defined(MDE_CPU_AARCH64)
+    JumpToKernel(Info);
+#else
     __asm__ __volatile__(
         "cli\n\t"
         "jmp *%1\n\t"
@@ -459,4 +710,5 @@ UefiMain(IN EFI_HANDLE       ImageHandle,
         : "D"((UINT64)(UINTN)Info), "r"((UINT64)SAMOS_KERNEL_LOCATION)
         : "memory");
     __builtin_unreachable();
+#endif
 }
