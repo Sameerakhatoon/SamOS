@@ -8,6 +8,7 @@
 #      the key events. The USB mouse registers a cursor of its own and
 #      monitor `mouse_move` moves it.
 #   2. pc (PS/2 mouse present): the USB mouse drives the PS/2 cursor.
+# e2e-requires: xhci (qemu-xhci on PCI, x86 machines and OVMF; on aarch64 virt nothing assigns PCI BARs and there is no MSI)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_usb_lib.sh"

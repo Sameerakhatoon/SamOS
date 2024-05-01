@@ -22,6 +22,9 @@ int     rtc_read(struct rtc_time* t);
 // Seconds since 1970-01-01 00:00:00 UTC, or -1.
 int64_t rtc_unix_time(void);
 int64_t rtc_to_unix(const struct rtc_time* t);
+// Read the time from `fn` (seconds since 1970, < 0 on error)
+// instead of the CMOS: the ports' RTC, set before rtc_init.
+void    rtc_set_unix_source(int64_t (*fn)(void));
 // Print the time on COM1 once at boot.
 void    rtc_init(void);
 

@@ -44,6 +44,10 @@ struct trap_frame* aarch64_trap(struct trap_frame* f, uint64_t vector);
 // acknowledge and EOI; after, the EOI comes first (trap.c).
 typedef void (*irq_handler)(struct trap_frame* f);
 int  irq_register(uint32_t intid, irq_handler handler);
+// A device completion line: after trap_enable_tasks its EOI
+// follows the handler (the line must be quiet first), so the handler
+// has to return.
+int  irq_register_late(uint32_t intid, irq_handler handler);
 
 // SVC from EL1: the test hook's handler.
 void trap_set_svc_handler(void (*handler)(struct trap_frame* f, uint32_t imm));

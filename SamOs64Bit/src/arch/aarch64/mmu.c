@@ -415,7 +415,32 @@ uint64_t mmu_lookup_root(uint64_t root, uint64_t va, int* level)
 // descriptor, 0 to unmap). A valid entry that changes is broken first
 // (invalid, TLB flush by VA, then the new one: break-before-make).
 // Global entries (kernel) are flushed for every ASID, others for
-// `asid`. -1 if a 2 MiB block covers va or no table frame is left.
+// `asid`. -1 if no table frame is left.
+//
+// A 2 MiB block of the direct map that covers va (graphics_setup
+// aliases its kzalloc'd back buffer onto the framebuffer) is split
+// first into a table of the same 512 pages. The table replaces the
+// block in place, without the break: the translation of every address
+// stays the same, and this may be the block the CPU is running on
+// (its stack, the table frame itself). Then the block's TLB entries go.
+static int split_block(uint64_t* e, uint64_t va)
+{
+    uint64_t n = table_alloc();
+    if (!n)
+        return -1;
+    uint64_t* pages = phys_to_virt(n);
+    uint64_t base = *e & PTE_ADDR & ~(BLOCK_2M - 1), attrs = *e & ~PTE_ADDR & ~3ul;
+    for (int i = 0; i < 512; i++)
+        pages[i] = (base + i * PAGE_SIZE) | attrs | PTE_TABLE | PTE_VALID;
+    __asm__ volatile("dsb ishst" ::: "memory");
+    *e = n | PTE_TABLE | PTE_VALID;
+    __asm__ volatile("dsb ishst" ::: "memory");
+    for (uint64_t a = va & ~(BLOCK_2M - 1); a < (va & ~(BLOCK_2M - 1)) + BLOCK_2M; a += PAGE_SIZE)
+        __asm__ volatile("tlbi vaae1is, %0" :: "r"((a >> 12) & 0xfffffffffful) : "memory");
+    __asm__ volatile("dsb ish\n\tisb" ::: "memory");
+    return 0;
+}
+
 int mmu_set_page(uint64_t root, uint64_t va, uint64_t desc, uint32_t asid)
 {
     uint64_t* t = phys_to_virt(root);
@@ -429,7 +454,8 @@ int mmu_set_page(uint64_t root, uint64_t va, uint64_t desc, uint32_t asid)
                 return -1;
             *e = n | PTE_TABLE | PTE_VALID;
         } else if (!(*e & PTE_TABLE)) {
-            return -1;
+            if (level != 2 || split_block(e, va) < 0)
+                return -1;
         }
         t = phys_to_virt(*e & PTE_ADDR);
     }

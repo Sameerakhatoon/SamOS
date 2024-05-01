@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # tests64/run-all.sh - the single entry point for SamOS tests.
 #
-# Runs the e2e suite (tests64/e2e/[0-9]*-*.sh), then the host unit
+# Runs the e2e suite (tests64/e2e/[0-9]*-*.sh; the aarch64 device work: on x86_64, then on
+# each other arch with an e2e hook), then the host unit
 # tests (tests64/host/run.sh, host gcc, a few seconds), then the
 # non-x86 boot tests (tests64/arch/run.sh, about 10 s; skipped
 # when the cross tools are missing), and ends with one summary line
@@ -35,6 +36,34 @@ trap 'rm -rf "$log"' EXIT
 bash "$here/e2e/run-all.sh" "$@" 2>&1 | tee "$log/e2e"
 e2e=${PIPESTATUS[0]}
 e2e_line=$(grep -E '^==== [0-9]+ passed' "$log/e2e" | tail -n 1 | sed 's/^==== //; s/ ====$//')
+
+# The same e2e suite on every other arch that has a hook
+# (e2e/_arch_<arch>.sh) and whose QEMU and cross compiler are
+# installed: the hook builds its image, then e2e/run-all.sh runs with
+# E2E_ARCH set and the same arguments. Tests that need hardware the
+# arch's machine lacks are skipped by their e2e-requires line.
+arch_e2e_lines=()
+arch_e2e_status=0
+for hook in "$here"/e2e/_arch_*.sh; do
+    a=$(basename "$hook" .sh)
+    a=${a#_arch_}
+    [ "$a" = x86_64 ] && continue
+    echo
+    if ! command -v "qemu-system-$a" > /dev/null || ! command -v "$a-linux-gnu-gcc" > /dev/null; then
+        arch_e2e_lines+=("e2e $a: SKIP (no qemu-system-$a or $a-linux-gnu-gcc)")
+        continue
+    fi
+    if ! (E2E_ROOT="$here/.." && . "$hook" && e2e_arch_build) > "$log/build-$a" 2>&1; then
+        tail -n 20 "$log/build-$a"
+        arch_e2e_lines+=("e2e $a: FAIL (image build failed)")
+        arch_e2e_status=1
+        continue
+    fi
+    E2E_ARCH=$a bash "$here/e2e/run-all.sh" "$@" 2>&1 | tee "$log/e2e-$a"
+    [ "${PIPESTATUS[0]}" -eq 0 ] || arch_e2e_status=1
+    line=$(grep -E '^==== [0-9]+ passed' "$log/e2e-$a" | tail -n 1 | sed 's/^==== //; s/ ====$//')
+    arch_e2e_lines+=("e2e $a: ${line:-no summary}")
+done
 
 # The host tests are part of the one count.
 echo
@@ -74,9 +103,12 @@ fi
 echo
 echo "==== summary ===="
 echo "e2e:     ${e2e_line:-no summary (exit $e2e)}"
+for l in "${arch_e2e_lines[@]}"; do
+    echo "$l"
+done
 echo "host:    $host_line"
 echo "arch:    $arch_line"
 if [ $storage_wanted -eq 1 ]; then
     echo "storage: ${storage_line:-no summary (exit $storage)}"
 fi
-[ $e2e -eq 0 ] && [ $host -eq 0 ] && [ $arch -eq 0 ] && [ $storage -eq 0 ]
+[ $e2e -eq 0 ] && [ $arch_e2e_status -eq 0 ] && [ $host -eq 0 ] && [ $arch -eq 0 ] && [ $storage -eq 0 ]

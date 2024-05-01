@@ -11,6 +11,7 @@
 #     steered to the waiting CPU);
 #   - 191 = 0: none taken by another CPU; 187 unset: none polled;
 #   - every hash right, no fault, no lock report.
+# e2e-requires: smp virtio-pci (OVMF booting from virtio-blk-pci with four CPUs)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_virtio_lib.sh"
 
@@ -38,7 +39,7 @@ for machine in q35 pc; do
     _script() {
         e2e_wait_serial '^READERS (OK|FAIL)$' 800 || true
         sleep 1
-        printf 'pmemsave 0x6000 %d "%s"\n' "$E2E_MARKER_REGION_SIZE" "$E2E_DUMP"
+        e2e_pmemsave
         sleep 1
         printf 'quit\n'
     }

@@ -36,7 +36,7 @@ files_cmd() {
     local before
     before=$(shell_log_size)
     shell_cmd "$1"
-    if ! tail -c +"$((before + 1))" "$E2E_SERIAL" | tr -d '\r' | grep -qxF -e "> $1" -e "$1"; then
+    if ! tail -c +"$((before + 1))" "$E2E_SERIAL" | tr -d '\r' | grep -xF -e "> $1" -e "$1" > /dev/null; then
         e2e_log "retyping: $1"
         shell_cmd "$1"
     fi
@@ -58,6 +58,11 @@ files_make_disks() {
         # AHCI, so the drive numbers stay 1: and 2:.
         E2E_EXTRA_QEMU_ARGS="-drive file=$E2E_TMP/fat16.img,format=raw,if=none,id=f16 -device virtio-blk-pci,drive=f16"
         E2E_EXTRA_QEMU_ARGS+=" -drive file=$E2E_TMP/fat32.img,format=raw,if=none,id=f32 -device virtio-blk-pci,drive=f32"
+    elif [ "${FILES_BUS:-}" = virtio-mmio ]; then
+        # virtio-blk on QEMU virt's virtio-mmio slots, after the
+        # boot disk (the hook's), so again drives 1: and 2:.
+        E2E_EXTRA_QEMU_ARGS="-drive file=$E2E_TMP/fat16.img,format=raw,if=none,id=f16 -device virtio-blk-device,drive=f16"
+        E2E_EXTRA_QEMU_ARGS+=" -drive file=$E2E_TMP/fat32.img,format=raw,if=none,id=f32 -device virtio-blk-device,drive=f32"
     elif [ "${E2E_MACHINE:-pc}" = q35 ]; then
         E2E_EXTRA_QEMU_ARGS="-drive file=$E2E_TMP/fat16.img,format=raw,if=none,id=f16 -device ide-hd,drive=f16,bus=ide.1"
         E2E_EXTRA_QEMU_ARGS+=" -drive file=$E2E_TMP/fat32.img,format=raw,if=none,id=f32 -device ide-hd,drive=f32,bus=ide.2"
@@ -123,11 +128,11 @@ files_bad() { echo "  FAIL: $1"; files_fails=$((files_fails + 1)); }
 
 # files_line <log> <exact line> <what>
 files_line() {
-    if tr -d '\r' < "$1" | grep -qxF -- "$2"; then files_ok "$3"; else files_bad "$3 (no line '$2')"; fi
+    if tr -d '\r' < "$1" | grep -xF -- "$2" > /dev/null; then files_ok "$3"; else files_bad "$3 (no line '$2')"; fi
 }
 # files_re <log> <ERE> <what>
 files_re() {
-    if tr -d '\r' < "$1" | grep -Eq -- "$2"; then files_ok "$3"; else files_bad "$3 (no /$2/)"; fi
+    if tr -d '\r' < "$1" | grep -E -- "$2" > /dev/null; then files_ok "$3"; else files_bad "$3 (no /$2/)"; fi
 }
 
 files_e2e_main() {
@@ -136,11 +141,11 @@ files_e2e_main() {
 
     e2e_run_qemu 900 _files_boot1
     cp "$E2E_SERIAL" "$log1" 2>/dev/null
-    tr -d '\r' < "$log1" | grep -q '^boot1-done$' || e2e_fail "$tag: boot 1 did not finish"
+    tr -d '\r' < "$log1" | grep '^boot1-done$' > /dev/null || e2e_fail "$tag: boot 1 did not finish"
 
     e2e_run_qemu 600 _files_boot2
     cp "$E2E_SERIAL" "$log2" 2>/dev/null
-    tr -d '\r' < "$log2" | grep -q '^boot2-done$' || e2e_fail "$tag: boot 2 did not finish"
+    tr -d '\r' < "$log2" | grep '^boot2-done$' > /dev/null || e2e_fail "$tag: boot 2 did not finish"
 
     echo "boot 1 ($tag):"
     for v in 16 32; do
@@ -172,7 +177,7 @@ files_e2e_main() {
     files_line "$log2" "lfn ok" "the long-name file survived"
     files_re   "$log2" "^HOSTF16\.TXT +26$" "ls after the reboot"
     files_re   "$log2" "^SAMDIR +<DIR>$" "ls shows the directory"
-    if tr -d '\r' < "$log2" | grep -q '^GONE '; then files_bad "GONE came back"; else files_ok "rmdir'd GONE stays gone"; fi
+    if tr -d '\r' < "$log2" | grep '^GONE ' > /dev/null; then files_bad "GONE came back"; else files_ok "rmdir'd GONE stays gone"; fi
 
     echo "host (mtools, fsck.fat):"
     export MTOOLS_SKIP_CHECK=1
@@ -197,7 +202,7 @@ second line" ] && files_ok "fat$v: Linux reads NOTE.TXT" || files_bad "fat$v: Li
     fi
 
     for log in "$log1" "$log2"; do
-        if tr -d '\r' < "$log" | grep -Eq 'KERNEL PANIC|KERNEL FAULT|USER FAULT'; then
+        if tr -d '\r' < "$log" | grep -E 'KERNEL PANIC|KERNEL FAULT|USER FAULT' > /dev/null; then
             files_bad "fault in $(basename "$log")"
         fi
     done

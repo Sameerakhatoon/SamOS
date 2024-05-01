@@ -4,6 +4,7 @@
 # calibration of 0). The 8259s stay masked and the PIT tick comes
 # through IRQ0's IOAPIC entry: a sleeping task still wakes on time and
 # the shell still answers. q35.
+# e2e-requires: apic (the IOAPIC-routed PIT tick when the LAPIC timer fails)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 

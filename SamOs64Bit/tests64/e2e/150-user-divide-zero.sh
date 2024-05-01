@@ -3,6 +3,7 @@
 # program kills only that program. KTEST.ELF runs first (CMDLINE.TXT
 # samos.run=...), faults, and BLANK.ELF still runs its whole selftest
 # afterwards (files, heap, windows), so the kernel kept going.
+# e2e-requires: x86 (x86 exception names, error codes and registers in the report; aarch64-traps.sh and aarch64-user.sh check the ESR/ELR/FAR reports)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"

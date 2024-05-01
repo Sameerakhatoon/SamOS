@@ -12,6 +12,7 @@
 # under a spinlock or with atomic_inc. BLANK.ELF's user self-test and
 # the shell then run with the four CPUs scheduling. QEMU's own `info
 # cpus` lists four CPUs.
+# e2e-requires: smp (four CPUs; aarch64 starts its secondary CPUs in the aarch64 SMP work)
 . "$(dirname "$0")/_lib.sh"
 
 export E2E_SMP=4
@@ -23,7 +24,7 @@ for machine in pc q35; do
         sleep 1
         printf 'info cpus\n'
         sleep 1
-        printf 'pmemsave 0x6000 %d "%s"\n' "$E2E_MARKER_REGION_SIZE" "$E2E_DUMP"
+        e2e_pmemsave
         sleep 1
         printf 'quit\n'
     }

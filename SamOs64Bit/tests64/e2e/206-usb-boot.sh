@@ -10,6 +10,7 @@
 #   - samos.bootlog wrote the boot's output to @:/BOOTLOG.TXT on the
 #     stick, which Linux reads back with mtools (logging without
 #     serial).
+# e2e-requires: xhci (qemu-xhci on PCI, x86 machines and OVMF; on aarch64 virt nothing assigns PCI BARs and there is no MSI)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_usb_lib.sh"

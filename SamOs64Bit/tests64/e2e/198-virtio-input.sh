@@ -11,6 +11,7 @@
 #   2. q35 only, the same keyboard bound to the VGA console
 #      (display=vga0): sendkey skips it and goes to PS/2, and the shell
 #      still works with the virtio-input driver loaded (193 stays 0).
+# e2e-requires: virtio-pci ps2 (virtio-keyboard-pci next to PS/2; on aarch64 every shell test types through virtio-keyboard-device)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_virtio_lib.sh"
@@ -22,7 +23,7 @@ _vinput_mon() {
     fi
     shell_cmd 'echo typed through virtio'
     shell_cmd 'ls @:/'
-    printf 'pmemsave 0x6000 %d "%s"\n' "$E2E_MARKER_REGION_SIZE" "$E2E_DUMP"
+    e2e_pmemsave
     sleep 1
     printf 'quit\n'
 }

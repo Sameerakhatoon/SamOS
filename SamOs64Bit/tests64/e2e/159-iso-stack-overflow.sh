@@ -4,6 +4,7 @@
 # recursion in KTEST.ELF stack faults there, the process is killed and
 # the kernel keeps running. Before the isolation work the memory below the stack was
 # writable RAM, so an overflow silently corrupted it.
+# e2e-requires: x86 (x86 exception names, error codes and registers in the report; aarch64-traps.sh and aarch64-user.sh check the ESR/ELR/FAR reports)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"

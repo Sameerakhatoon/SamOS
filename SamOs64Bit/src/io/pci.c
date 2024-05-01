@@ -415,7 +415,8 @@ int pci_init(void){
         return -ENOMEM;
     }
     struct acpi_sdt_header* mcfg = acpi_find_table("MCFG", 0);
-    if(mcfg && pci_ecam_init_from_mcfg(mcfg, pci_ecam_map) == 0){
+    // Or the arch installed the device tree's ECAM window.
+    if(pci_ecam_available() || (mcfg && pci_ecam_init_from_mcfg(mcfg, pci_ecam_map) == 0)){
         serial_write("pci: config access ECAM, base ");
         serial_write_hex(g_ecam[0].phys_base);
         serial_write(", buses ");

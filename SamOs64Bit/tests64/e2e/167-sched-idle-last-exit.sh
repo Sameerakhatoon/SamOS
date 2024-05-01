@@ -7,9 +7,20 @@
 # panic (the book: "No processes to switch too" / "No more tasks"),
 # must sit in hlt with interrupts on (QEMU `info registers`: HLT=1,
 # IF set, kernel rip), and must still take a keyboard IRQ: a key with
-# no process to read it is reported on COM1.
+# no process to read it is reported on COM1. aarch64's
+# `info registers` has no HLT; the instruction before the pc
+# (x/1wx, 0xd503207f) is the wfi the CPU waits in, with PSTATE.I clear.
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
+
+_regs() {
+    printf 'info registers\n'
+    e2e_arch_has x86 && return
+    sleep 1
+    local pc
+    pc=$(tr -d '\r' < "$E2E_QEMU_LOG" | grep -aoE ' PC=[0-9a-f]+' | tail -n 1 | cut -d= -f2)
+    [ -n "$pc" ] && printf 'x/1wx 0x%x\n' $((0x$pc - 4))
+}
 
 _script() {
     if ! shell_boot; then
@@ -19,34 +30,54 @@ _script() {
     shell_type $'exit\n'
     e2e_wait_serial '^sched: no process left, idling$' 30
     sleep 2
-    printf 'info registers\n'
+    _regs
     sleep 1
-    printf 'info registers\n'
+    _regs
     sleep 1
     printf 'sendkey a\n'
     e2e_wait_serial "^keyboard: no process for key 'a'\$" 30
     sleep 1
-    printf 'info registers\n'
+    _regs
     sleep 1
-    printf 'info registers\n'
+    _regs
     sleep 1
     printf 'quit\n'
 }
 e2e_run_qemu 400 _script
 
-tr -d '\r' < "$E2E_SERIAL" | grep -Eq -- "$SHELL_BANNER" || e2e_fail "no shell"
+tr -d '\r' < "$E2E_SERIAL" | grep -E -- "$SHELL_BANNER" > /dev/null || e2e_fail "no shell"
 expect_serial '^bye$' "the shell exited"
 expect_serial '^sched: no process left, idling$' "the scheduler idles"
 expect_no_serial 'KERNEL PANIC|KERNEL FAULT|No processes|No more tasks' "no panic"
 expect_serial "^keyboard: no process for key 'a'\$" "the idle kernel took the keyboard IRQ"
 
 regs=$(tr -d '\r' < "$E2E_QEMU_LOG")
+if ! e2e_arch_has x86; then
+    # A CPU stopped in wfi (0xd503207f) has its pc just past it.
+    halted=$(printf '%s' "$regs" | grep -acE '^(0x)?[0-9a-f]+: 0xd503207f')
+    [ "$halted" -ge 1 ] || e2e_fail "CPU never stopped in wfi in 4 register dumps"
+    e2e_log "in wfi in $halted of 4 register dumps: ok"
+    printf '%s' "$regs" | grep -aE ' PC=ffffffff8[0-9a-f]+' > /dev/null \
+        || e2e_fail "pc is not in the kernel"
+    e2e_log "pc in the kernel: ok"
+    # PSTATE bit 7 (I): IRQs unmasked while waiting (as IF on x86).
+    # Only the dumps whose pc follows the wfi count (each dump's x/1wx):
+    # one taken inside the tick handler has I set legitimately.
+    for ps in $(printf '%s\n' "$regs" | awk '
+            match($0, /PSTATE=[0-9a-f]+/) { ps = substr($0, RSTART + 7, RLENGTH - 7) }
+            /^(0x)?[0-9a-f]+: 0xd503207f/ { print ps }'); do
+        [ $(( 0x$ps & 0x80 )) -eq 0 ] || e2e_fail "IRQs masked in the idle wait (PSTATE=$ps)"
+    done
+    e2e_log "IRQs unmasked in the idle wait: ok"
+    echo "PASS: e2e/167 idle after the last process exits"
+    exit 0
+fi
 # A snapshot can land while the idle CPU handles a tick, more often on
 # a loaded host. A busy-waiting idle loop would never show HLT=1.
 halted=$(printf '%s' "$regs" | grep -ao 'HLT=1' | wc -l)
 [ "$halted" -ge 1 ] || e2e_fail "CPU never halted in 4 register dumps"
 e2e_log "HLT=1 in $halted of 4 register dumps: ok"
-printf '%s' "$regs" | grep -aoE 'RIP=ffffffff8[0-9a-f]+' | head -n 1 | grep -q . \
+printf '%s' "$regs" | grep -aE 'RIP=ffffffff8[0-9a-f]+' > /dev/null \
     || e2e_fail "rip is not in the kernel"
 e2e_log "rip in the kernel: ok"
 # RFLAGS bit 9 (IF): interrupts on while halted. Only the halted dumps

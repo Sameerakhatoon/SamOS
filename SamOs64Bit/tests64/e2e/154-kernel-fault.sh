@@ -4,6 +4,7 @@
 # its frame (rsp unmapped) becomes a #DF, which runs on its own IST
 # stack and dumps too instead of triple-faulting. Also checks the
 # CR0/CR4/EFER line from cpu_init.
+# e2e-requires: x86 (#UD and #DF on the IST stack, x86 register dump)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"

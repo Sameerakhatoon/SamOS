@@ -2,6 +2,7 @@
 # e2e/152-user-pf.sh - a #PF in a user program (write to an
 # unmapped address) kills only that program, and the report carries
 # the error code and CR2. BLANK.ELF still completes its selftest.
+# e2e-requires: x86 (x86 exception names, error codes and registers in the report; aarch64-traps.sh and aarch64-user.sh check the ESR/ELR/FAR reports)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"

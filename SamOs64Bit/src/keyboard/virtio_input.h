@@ -2,7 +2,7 @@
 #define VIRTIO_INPUT_H
 // virtio-input keyboards as a second key source (virtio_input.c).
 
-// Find every virtio-input keyboard on PCI and start it. Called from
+// Find every virtio-input keyboard (PCI, virtio-mmio) and start it. Called from
 // keyboard_init, after the PS/2 keyboard.
 void virtio_input_init(void);
 

@@ -3,6 +3,7 @@
 # as interrupts: IRQ14 on GSI 14, edge, through the IOAPIC on vector
 # 82. The boot, the BLANK.ELF selftest and a shell write and read all
 # complete by interrupt. See _diskirq_lib.sh.
+# e2e-requires: ide apic (PATA IRQ14 through the IOAPIC)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_diskirq_lib.sh"

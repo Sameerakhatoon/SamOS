@@ -17,5 +17,6 @@
 #define ICC_CTLR_EL1    "S3_0_C12_C12_4"
 #define ICC_SRE_EL1     "S3_0_C12_C12_5"
 #define ICC_IGRPEN1_EL1 "S3_0_C12_C12_7"
+#define ICC_SGI1R_EL1   "S3_0_C12_C11_5"
 
 #endif

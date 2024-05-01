@@ -18,6 +18,7 @@
 #               after them, within the time limit;
 #   corruption: no child status or hash mismatch ("FAIL");
 #   leak:       "frames 0 slab 0 bad frees 0" in every round line.
+# e2e-requires: smp (four CPUs; aarch64 starts its secondary CPUs in the aarch64 SMP work)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 
@@ -54,7 +55,7 @@ log=$(tr -d '\r' < "$E2E_SERIAL")
 for r in 1 2 3 4 5 6 7 8 9 10; do
     line=$(printf '%s\n' "$log" | grep -E "^STRESS round $r " | head -n 1)
     [ -n "$line" ] || e2e_fail "round $r never finished (hang?)"
-    printf '%s\n' "$line" | grep -Eq "^STRESS round $r ok cycles 1000 reads 60 ms [0-9]+ frames 0 slab 0 bad frees 0$" \
+    printf '%s\n' "$line" | grep -E "^STRESS round $r ok cycles 1000 reads 60 ms [0-9]+ frames 0 slab 0 bad frees 0$" > /dev/null \
         || e2e_fail "round $r: $line"
     e2e_log "$line: ok"
 done
@@ -62,7 +63,7 @@ expect_serial '^STRESS OK 10 rounds in [0-9]+ ms$' "ten rounds"
 expect_serial '^ktest\.elf: exit status 0$' "ktest exited 0 to the shell"
 off=$(serial_offset 'STRESS OK 10 rounds')
 [ "$off" -ge 0 ] || e2e_fail "no STRESS OK line"
-tail -c +"$((off + 1))" "$E2E_SERIAL" | tr -d '\r' | grep -q '^> ' || e2e_fail "no shell prompt after the stress test"
+tail -c +"$((off + 1))" "$E2E_SERIAL" | tr -d '\r' | grep '^> ' > /dev/null || e2e_fail "no shell prompt after the stress test"
 e2e_log "shell prompt back after the stress test: ok"
 expect_no_serial 'STRESS .*FAIL|KERNEL PANIC|KERNEL FAULT|USER FAULT|spinlock:' "no failure or fault"
 echo "PASS: e2e/192 stress: 10 x (1000 create/exit cycles + parallel reads), no hang, corruption or leak"

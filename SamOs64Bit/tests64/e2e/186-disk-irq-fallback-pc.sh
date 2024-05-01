@@ -3,6 +3,7 @@
 # on pc: IRQ14's IOAPIC entry stays masked, the PATA driver falls back
 # to polling after three completions, the boot and the shell still
 # work.
+# e2e-requires: ide apic (IRQ14's masked IOAPIC entry)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_diskirq_lib.sh"

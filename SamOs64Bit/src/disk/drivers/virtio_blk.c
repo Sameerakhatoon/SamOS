@@ -13,16 +13,17 @@
 // followed by a flush, like AHCI's FLUSH CACHE EXT). The sector size
 // is 512 whatever BLK_SIZE says; capacity is in 512-byte sectors.
 //
-// Completion: the used ring. With an INTx line (virtio_pci.h) the wait
-// is disk_irq_wait: the line's handler reads the ISR and
-// signals; without one, or after three missed interrupts, it polls
-// the used ring until disk_poll_deadline. A request that times out
+// Completion: the used ring. With a line (virtio_bus.h: PCI INTx, or
+// An MMIO slot's interrupt) the wait is disk_irq_wait: the
+// line's handler reads the ISR and signals; without one, or after
+// three missed interrupts, it polls the used ring until
+// disk_poll_deadline. A request that times out
 // leaves the device owning the buffers, so the disk is marked broken
 // and every later request fails instead of reading a stale completion.
 
 #include "virtio_blk.h"
 #include "virtio/virtio.h"
-#include "virtio/virtio_pci.h"
+#include "virtio/virtio_bus.h"
 #include "virtio/virtio_io.h"
 #include "disk/disk.h"
 #include "disk/irqwait.h"
@@ -175,7 +176,7 @@ static void vblk_irq_signal(void* ctx){
 // has one destination and one waiter (disk_lock) at a time.
 static void vblk_irq_init(struct vblk* b){
     bool masked = disk_irq_masked_by_cmdline();
-    b->line = virtio_pci_intx(b->vdev, masked, vblk_irq_signal, b);
+    b->line = virtio_irq(b->vdev, masked, vblk_irq_signal, b);
     if(!b->line){
         serial_write("disk: virtio-blk has no IOAPIC route, polled\n");
         return;
@@ -271,7 +272,7 @@ fail:
 }
 
 static int vblk_mount(struct disk_driver* driver){
-    return virtio_pci_probe(VIRTIO_ID_BLOCK, vblk_attach, driver) > 0 ? 0 : -ENOENT;
+    return virtio_probe(VIRTIO_ID_BLOCK, vblk_attach, driver) > 0 ? 0 : -ENOENT;
 }
 
 static void vblk_unmount(struct disk* disk){

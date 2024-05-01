@@ -1,9 +1,10 @@
 // PL011 early console. See pl011.h.
 //
-// Transmit only, polled. The UART is used as the firmware (or QEMU)
-// left it: programming the baud rate needs the UART clock from the
-// device tree's clocks phandle, which a real board will need
-// but QEMU ignores. Linux's earlycon does the same.
+// Transmit polled; the aarch64 device work: receive by interrupt (arch.c). The UART is
+// used as the firmware (or QEMU) left it: programming the baud rate
+// needs the UART clock from the device tree's clocks phandle, which a
+// real board will need but QEMU ignores. Linux's earlycon does
+// the same.
 #include "arch/aarch64/pl011.h"
 #include "arch/aarch64/mmu.h"
 
@@ -69,4 +70,29 @@ void pl011_puts(const char* s)
 {
     while (*s)
         pl011_putc(*s++);
+}
+
+// Receive, for the keyboard over the serial line.
+#define PL011_FR_RXFE   (1 << 4)    // receive FIFO empty
+#define PL011_IMSC      0x38
+#define PL011_ICR       0x44
+#define PL011_RX_INTS   ((1 << 4) | (1 << 6))     // RXIM, RTIM (receive timeout)
+
+void pl011_rx_enable(void)
+{
+    if (!uart)
+        return;
+    uart[PL011_ICR / 4] = PL011_RX_INTS;
+    uart[PL011_IMSC / 4] |= PL011_RX_INTS;
+}
+
+int pl011_getc(void)
+{
+    if (!uart)
+        return -1;
+    if (uart[PL011_FR / 4] & PL011_FR_RXFE) {
+        uart[PL011_ICR / 4] = PL011_RX_INTS;
+        return -1;
+    }
+    return (int)(uart[PL011_DR / 4] & 0xff);
 }

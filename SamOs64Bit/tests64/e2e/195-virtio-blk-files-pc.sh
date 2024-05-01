@@ -5,6 +5,7 @@
 # FAT32, a reboot on the same disks, then Linux (mtools, fsck.fat)
 # reads what SamOS wrote. Both boots: virtio-blk set up both disks and
 # its completions came by interrupt.
+# e2e-requires: virtio-pci (virtio-blk-pci on pc; e2e/207 runs the same files test over virtio-mmio)
 E2E_MACHINE=pc
 FILES_BUS=virtio
 . "$(dirname "$0")/_lib.sh"

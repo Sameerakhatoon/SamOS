@@ -44,7 +44,7 @@ _keys_script() {
     sleep 1
     printf 'sendkey ret\n'
     sleep 12
-    printf 'pmemsave 0x6000 %d "%s"\n' "$E2E_MARKER_REGION_SIZE" "$E2E_DUMP"
+    e2e_pmemsave
     printf 'quit\n'
 }
 e2e_run_qemu 45 _keys_script

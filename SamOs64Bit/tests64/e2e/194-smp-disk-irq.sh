@@ -14,6 +14,7 @@
 #   - 187 unset: no wait fell back to polling, and no "completion
 #     interrupt missing" line;
 #   - every hash right ("READERS OK"), no fault, no lock report.
+# e2e-requires: smp ahci ide (four CPUs with AHCI and PATA interrupts)
 . "$(dirname "$0")/_lib.sh"
 
 export E2E_SMP=4
@@ -42,7 +43,7 @@ for machine in q35 pc; do
     _script() {
         e2e_wait_serial '^READERS (OK|FAIL)$' 800 || true
         sleep 1
-        printf 'pmemsave 0x6000 %d "%s"\n' "$E2E_MARKER_REGION_SIZE" "$E2E_DUMP"
+        e2e_pmemsave
         sleep 1
         printf 'quit\n'
     }

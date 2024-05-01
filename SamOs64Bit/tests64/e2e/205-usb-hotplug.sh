@@ -7,6 +7,7 @@
 #     (cat reports an error, nothing hangs or faults); a stick plugged
 #     in after boot is enumerated and bound but not mounted (no
 #     hot-plug mount yet).
+# e2e-requires: xhci (qemu-xhci on PCI, x86 machines and OVMF; on aarch64 virt nothing assigns PCI BARs and there is no MSI)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_usb_lib.sh"

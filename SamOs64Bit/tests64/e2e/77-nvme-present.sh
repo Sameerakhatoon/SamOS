@@ -7,6 +7,7 @@
 # kernel's PCI scan saw class 0x01:0x08. The backing image is
 # tiny (4 MiB) and lives at $E2E_TMP/nvme.img so we do not pull a
 # real disk into the test.
+# e2e-requires: nvme (an NVMe controller on PCI (no BARs assigned on aarch64 virt without firmware))
 . "$(dirname "$0")/_lib.sh"
 
 # Pre-create the backing image if it is missing.

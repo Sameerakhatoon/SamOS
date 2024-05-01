@@ -3,6 +3,7 @@
 # FADT reset register on q35 (0xCF9, value 6) and, with no reset
 # register on pc, through port 0xCF9 directly. With -no-reboot QEMU
 # exits on the reset, so the QEMU process must end by itself.
+# e2e-requires: acpi (reset through the FADT reset register and port 0xCF9)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"
@@ -18,7 +19,7 @@ acpi_run() {
         [ "${E2E_QEMU_ARGS[$i]}" = stdio ] && E2E_QEMU_ARGS[$i]=none
     done
     rm -f "$E2E_SERIAL"
-    timeout 180 qemu-system-x86_64 "${E2E_QEMU_ARGS[@]}" < /dev/null > "$E2E_QEMU_LOG" 2>&1
+    timeout 180 "$E2E_QEMU_BIN" "${E2E_QEMU_ARGS[@]}" < /dev/null > "$E2E_QEMU_LOG" 2>&1
 }
 
 acpi_run q35

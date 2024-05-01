@@ -8,13 +8,14 @@
 // focused window's process. Other event types (EV_SYN, EV_MSC, LEDs)
 // are dropped; the status queue (LEDs) is not set up.
 //
-// Interrupts: the device's INTx line (virtio_pci.h) is in the disk
-// vector range and may be shared with a virtio-blk, so its handler can
-// run inside a disk wait, under disk_lock, where keyboard_push (gfx,
-// process locks) must not be taken (docs/locking.md). The line handler
-// therefore only sends ARCH_IPI_INPUT to the BSP; a disk wait holds
-// that IPI off (x86: vector 0x48, priority class 4, under TPR 0x40),
-// and it runs once the CPU leaves the wait and opens interrupts.
+// Interrupts: the device's line (virtio_bus.h: PCI INTx, or on the ports its
+// MMIO slot's SPI) is a disk completion line and may be shared with a
+// virtio-blk, so its handler can run inside a disk wait, under
+// disk_lock, where keyboard_push (gfx, process locks) must not be
+// taken (docs/locking.md). The line handler therefore only sends
+// ARCH_IPI_INPUT to the BSP; a disk wait holds that IPI off (x86:
+// vector 0x48, priority class 4, under TPR 0x40; aarch64: an SGI under
+// the wait's ICC_PMR_EL1), and it runs once the CPU leaves the wait and opens interrupts.
 // Running every key on the BSP also keeps the PS/2 handler (IRQ1, BSP)
 // and this one from racing on the translator state.
 //
@@ -25,7 +26,7 @@
 #include "keyboard.h"
 #include "classic.h"
 #include "virtio/virtio.h"
-#include "virtio/virtio_pci.h"
+#include "virtio/virtio_bus.h"
 #include "virtio/virtio_io.h"
 #ifndef VIRTIO_HOST_TEST
 #include "cpu/smp.h"
@@ -213,7 +214,7 @@ static int vinput_attach(struct virtio_dev* d, void* ctx){
     virtio_driver_ok(d);
     virtq_kick(&v->q);
 
-    struct virtio_line* line = virtio_pci_intx(d, false, vinput_irq, v);
+    struct virtio_line* line = virtio_irq(d, false, vinput_irq, v);
     serial_write("virtio-input: ");
     serial_write(name);
     if(line){
@@ -231,7 +232,7 @@ static int vinput_attach(struct virtio_dev* d, void* ctx){
 void virtio_input_init(void){
     vinput_bsp = this_cpu();
     smp_input_register(vinput_service);
-    virtio_pci_probe(VIRTIO_ID_INPUT, vinput_attach, NULL);
+    virtio_probe(VIRTIO_ID_INPUT, vinput_attach, NULL);
 }
 
 #endif

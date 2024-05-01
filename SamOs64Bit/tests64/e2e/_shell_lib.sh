@@ -28,21 +28,33 @@ shell_key_for() {
     esac
 }
 
+shell_log_size() { stat -c %s "$E2E_SERIAL" 2>/dev/null || echo 0; }
+
+# A printable key is echoed to COM1: wait (up to 5 s) for the echo
+# before the next key, as e2e/126 does: on a loaded host the monitor
+# can deliver several sendkeys at once, faster than the guest drains
+# the keyboard's queue, and the overflow is dropped.
 shell_type() {
-    local s="$1" i
+    local s="$1" i c before t
     for ((i = 0; i < ${#s}; i++)); do
-        printf 'sendkey %s\n' "$(shell_key_for "${s:i:1}")"
+        c="${s:i:1}"
+        before=$(shell_log_size)
+        printf 'sendkey %s\n' "$(shell_key_for "$c")"
         sleep 0.15
+        [ "$c" = $'\n' ] && continue
+        t=0
+        while [ "$(shell_log_size)" -le "$before" ] && [ $t -lt 50 ]; do
+            sleep 0.1
+            t=$((t + 1))
+        done
     done
 }
-
-shell_log_size() { stat -c %s "$E2E_SERIAL" 2>/dev/null || echo 0; }
 
 # shell_wait_from <byte> <fixed string> <seconds>
 shell_wait_from() {
     local from=$1 pattern=$2 limit=$3 t=0
     while [ $t -lt $((limit * 10)) ]; do
-        if tail -c +"$((from + 1))" "$E2E_SERIAL" 2>/dev/null | grep -qF -- "$pattern"; then
+        if tail -c +"$((from + 1))" "$E2E_SERIAL" 2>/dev/null | grep -F -- "$pattern" > /dev/null; then
             return 0
         fi
         sleep 0.1
@@ -58,7 +70,7 @@ shell_wait_from() {
 shell_wait_prompt() {
     local from=$1 limit=$2 t=0
     while [ $t -lt $((limit * 10)) ]; do
-        if tail -c +"$((from + 1))" "$E2E_SERIAL" 2>/dev/null | tr -d '\r' | grep -q '^> '; then
+        if tail -c +"$((from + 1))" "$E2E_SERIAL" 2>/dev/null | tr -d '\r' | grep '^> ' > /dev/null; then
             return 0
         fi
         sleep 0.1

@@ -12,6 +12,7 @@
 #      (194 > 0, 191 and 187 unset).
 #   4. readonly=on: MODE SENSE reports write protection, the disk is
 #      read-only, a write is refused, the image is unchanged.
+# e2e-requires: xhci (qemu-xhci on PCI, x86 machines and OVMF; on aarch64 virt nothing assigns PCI BARs and there is no MSI)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_usb_lib.sh"
@@ -61,7 +62,7 @@ expect_serial '^in a usb directory$' "boot 2: the directory survived"
 expect_no_serial '^USBHELLO\.TXT' "boot 2: rm removed USBHELLO.TXT"
 
 [ "$(mtype -i "$stick" ::/NEW.TXT | tr -d '\r')" = "written through usb" ] || e2e_fail "host: NEW.TXT is not what the guest wrote"
-mtype -i "$stick" ::/DIR/F.TXT | grep -q '^in a usb directory' || e2e_fail "host: DIR/F.TXT is not what the guest wrote"
+mtype -i "$stick" ::/DIR/F.TXT | grep '^in a usb directory' > /dev/null || e2e_fail "host: DIR/F.TXT is not what the guest wrote"
 if mdir -i "$stick" ::/USBHELLO.TXT >/dev/null 2>&1; then
     e2e_fail "host: USBHELLO.TXT still there"
 fi

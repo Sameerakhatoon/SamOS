@@ -49,16 +49,28 @@ key_for() {
     esac
 }
 
+log_size() { stat -c %s "$E2E_SERIAL" 2>/dev/null || echo 0; }
+
 # Runs inside the monitor feeder: type a string, one sendkey per char.
+# A printable key is echoed to COM1: wait (up to 5 s) for the echo
+# before the next key. On a loaded host the monitor can deliver several
+# sendkeys at once, faster than the guest drains the keyboard's queue,
+# and the overflow is dropped.
 type_text() {
-    local s="$1" i
+    local s="$1" i c before t
     for ((i = 0; i < ${#s}; i++)); do
-        printf 'sendkey %s\n' "$(key_for "${s:i:1}")"
+        c="${s:i:1}"
+        before=$(log_size)
+        printf 'sendkey %s\n' "$(key_for "$c")"
         sleep 0.15
+        case "$c" in $'\n'|$'\b') continue ;; esac
+        t=0
+        while [ "$(log_size)" -le "$before" ] && [ $t -lt 50 ]; do
+            sleep 0.1
+            t=$((t + 1))
+        done
     done
 }
-
-log_size() { stat -c %s "$E2E_SERIAL" 2>/dev/null || echo 0; }
 
 # Type a command line and wait for the next prompt after it: "> " at
 # the start of a line, since help's own text contains "> " (the
@@ -68,7 +80,7 @@ run_cmd() {
     before=$(log_size)
     type_text "$1"$'\n'
     while [ $t -lt 200 ]; do
-        tail -c +"$((before + 1))" "$E2E_SERIAL" 2>/dev/null | tr -d '\r' | grep -q '^> ' && return 0
+        tail -c +"$((before + 1))" "$E2E_SERIAL" 2>/dev/null | tr -d '\r' | grep '^> ' > /dev/null && return 0
         sleep 0.1
         t=$((t + 1))
     done
@@ -114,19 +126,19 @@ _shell_script() {
 }
 e2e_run_qemu 600 _shell_script
 
-tr -d '\r' < "$E2E_SERIAL" 2>/dev/null | grep -Eq -- "$banner" \
+tr -d '\r' < "$E2E_SERIAL" 2>/dev/null | grep -E -- "$banner" > /dev/null \
     || e2e_fail "e2e/126: no shell prompt on COM1 (boot to shell did not happen)"
 
 fails=0
 expect_line() {   # exact line in the serial log (CR stripped)
-    if tr -d '\r' < "$E2E_SERIAL" | grep -qxF -- "$1"; then
+    if tr -d '\r' < "$E2E_SERIAL" | grep -xF -- "$1" > /dev/null; then
         echo "  ok: $2"
     else
         echo "  FAIL: $2 (no line '$1')"; fails=$((fails + 1))
     fi
 }
 expect_text() {
-    if tr -d '\r' < "$E2E_SERIAL" | grep -qF -- "$1"; then
+    if tr -d '\r' < "$E2E_SERIAL" | grep -F -- "$1" > /dev/null; then
         echo "  ok: $2"
     else
         echo "  FAIL: $2 (no '$1')"; fails=$((fails + 1))
@@ -149,10 +161,12 @@ expect_line 'back-at-prompt'              "prompt and keyboard came back after t
 # between the command and the child's last line, then the status.
 expect_line 'hello.elf: exit status 0'    "the shell reports hello's exit status"
 expect_line 'ktest.elf: exit status 0'    "the shell reports the sleeper's exit status"
+# awk reads to the end (no early exit): see _lib.sh on pipefail.
 if tr -d '\r' < "$E2E_SERIAL" | awk '
+        done { next }
         /^> ktest\.elf sleep 1500$/ { inside = 1; next }
-        inside && /^SLEEP 1500 ms took/ { ok = 1; exit }
-        inside && /> / { exit }
+        inside && /^SLEEP 1500 ms took/ { ok = 1; done = 1; next }
+        inside && /> / { done = 1 }
         END { exit !ok }'; then
     echo "  ok: no prompt until the sleeping child exited"
 else
@@ -164,13 +178,13 @@ if [ -s "$screen" ] && command -v python3 >/dev/null; then
     rows=$(printf '%s\n' "$text" | wc -l)
     last=$(printf '%s\n' "$text" | grep -n . | tail -n 1)
     last_row=${last%%:*}
-    if printf '%s\n' "$text" | grep -qF 'LAST-LINE' && [ "$last_row" -ge $((rows - 1)) ]; then
+    if printf '%s\n' "$text" | grep -F 'LAST-LINE' > /dev/null && [ "$last_row" -ge $((rows - 1)) ]; then
         echo "  ok: terminal scrolled (output reached the bottom row $last_row/$rows)"
     else
         echo "  FAIL: terminal scroll (last text row ${last_row:-none} of $rows)"
         fails=$((fails + 1))
     fi
-    if printf '%s\n' "$text" | head -n 3 | grep -qF 'SamOs v1.0.0'; then
+    if printf '%s\n' "$text" | sed -n '1,3p' | grep -F 'SamOs v1.0.0' > /dev/null; then
         echo "  FAIL: banner still on screen after clear + scrolling"
         fails=$((fails + 1))
     fi

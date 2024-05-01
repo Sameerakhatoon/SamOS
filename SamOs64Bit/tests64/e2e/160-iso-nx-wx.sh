@@ -5,6 +5,7 @@
 # runs each fault and are killed: executing from the stack, the heap
 # and .data (error 0x15, instruction fetch from a present NX page)
 # and writing to its own code (error 7).
+# e2e-requires: x86 (x86 exception names, error codes and registers in the report; aarch64-traps.sh and aarch64-user.sh check the ESR/ELR/FAR reports)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"

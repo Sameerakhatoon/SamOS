@@ -12,7 +12,7 @@
 //   - any other sync exception from EL0: the process is killed with
 //     ESR, ELR and FAR on the console, the CPU runs the next task;
 //   - IRQ: EOI first (the handler may switch tasks and not come back),
-//     then the handler; from EL0 the task's state is saved before and
+//     then the handler (device completion lines EOI after it); from EL0 the task's state is saved before and
 //     task_check_killed runs after;
 //   - a data abort at EL1 on a user access listed in __ex_table
 //     (uaccess.S) resumes at its fixup.
@@ -42,6 +42,7 @@
 #define EC_BRK64        0x3c
 
 static irq_handler irq_handlers[IRQ_MAX];
+static uint32_t irq_late_eoi[IRQ_MAX / 32 + 1];    // EOI after the handler
 static void (*svc_handler)(struct trap_frame* f, uint32_t imm);
 static int trap_tasks;
 
@@ -247,7 +248,11 @@ static struct trap_frame* irq(struct trap_frame* f)
         gic_eoi(intid);
         return sched_switch(f);
     }
-    gic_eoi(intid);
+    // A device completion line (arch_irq_attach_gsi) ends after
+    // its handler quietened the device; its handler always returns.
+    bool late = (irq_late_eoi[intid / 32] >> (intid % 32)) & 1;
+    if (!late)
+        gic_eoi(intid);
     bool user = trap_frame_from_user(f);
     if (user) {
         kernel_page();
@@ -257,6 +262,8 @@ static struct trap_frame* irq(struct trap_frame* f)
         h(f);
     else
         console_printf("irq: unexpected INTID %u\n", intid);
+    if (late)
+        gic_eoi(intid);
     if (user) {
         task_check_killed();
         task_page();
@@ -285,6 +292,14 @@ int irq_register(uint32_t intid, irq_handler handler)
     if (intid >= IRQ_MAX)
         return -1;
     irq_handlers[intid] = handler;
+    return 0;
+}
+
+int irq_register_late(uint32_t intid, irq_handler handler)
+{
+    if (irq_register(intid, handler) < 0)
+        return -1;
+    irq_late_eoi[intid / 32] |= 1u << (intid % 32);
     return 0;
 }
 

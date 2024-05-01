@@ -8,6 +8,7 @@
 # interrupts off. Expect "panic: stopped 3 other cpus", the panic
 # message, and QEMU's `info registers -a` showing all four CPUs halted
 # (HLT=1), twice, two seconds apart, so none is still running.
+# e2e-requires: smp (four CPUs; aarch64 starts its secondary CPUs in the aarch64 SMP work)
 . "$(dirname "$0")/_lib.sh"
 
 export E2E_SMP=4

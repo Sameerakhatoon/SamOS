@@ -4,6 +4,7 @@
 # still reaches the BLANK.ELF selftest and the shell, and the shell's
 # `reboot` (syscall 50) resets the machine, which -no-reboot turns
 # into QEMU exiting. pc.
+# e2e-requires: legacy-pic ide ps2 (the 8259s and the PIT tick)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 

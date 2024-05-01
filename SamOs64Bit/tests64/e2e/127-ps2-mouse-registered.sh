@@ -5,6 +5,7 @@
 # device, and the cursor window is attached once the window system
 # is up. IRQ12 is unmasked (the interrupt work fixed the IRQ enum and unmasks the
 # cascade), but this test does not cover packets or movement.
+# e2e-requires: ps2 (the i8042's PS/2 mouse)
 . "$(dirname "$0")/_lib.sh"
 boot_and_dump 25
 expect_stage_value 170 -eq 1 "PS/2 mouse registered with a cursor window"

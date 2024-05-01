@@ -5,6 +5,7 @@
 # host, mdir's times for both are within a few minutes of the host's
 # UTC time (QEMU's RTC runs in UTC, -rtc base=utc, and FAT stores the
 # clock's time as local time).
+# e2e-requires: ide (a FAT16 data disk on pc's IDE)
 E2E_MACHINE=pc
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
@@ -31,7 +32,7 @@ _stamp_boot() {
 before=$(date -u +%s)
 e2e_run_qemu 600 _stamp_boot
 after=$(date -u +%s)
-tr -d '\r' < "$E2E_SERIAL" | grep -q '^stamp-done$' || e2e_fail "shell did not finish"
+tr -d '\r' < "$E2E_SERIAL" | grep '^stamp-done$' > /dev/null || e2e_fail "shell did not finish"
 
 # mdir line: "STAMP    TXT        13 YYYY-MM-DD  HH:MM" (minutes only).
 check_stamp() {

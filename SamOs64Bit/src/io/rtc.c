@@ -119,7 +119,41 @@ static int rtc_read_locked(struct rtc_time* t){
     return 0;
 }
 
+// A clock that counts seconds since 1970 (aarch64: the PL031
+// of QEMU virt), set by the arch in arch_firmware_init; with one, the
+// CMOS is not read.
+static int64_t (*rtc_unix_source)(void);
+
+void rtc_set_unix_source(int64_t (*fn)(void)){
+    rtc_unix_source = fn;
+}
+
+// The civil date of a day count since 1970-01-01 (Howard Hinnant's
+// civil_from_days, the inverse of rtc_to_unix).
+static void rtc_from_unix(int64_t secs, struct rtc_time* t){
+    int64_t z = secs / 86400 + 719468, rem = secs % 86400;
+    int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+    int64_t doe = z - era * 146097;
+    int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    int64_t mp  = (5 * doy + 2) / 153;
+    t->day    = (int)(doy - (153 * mp + 2) / 5 + 1);
+    t->month  = (int)(mp < 10 ? mp + 3 : mp - 9);
+    t->year   = (int)(yoe + era * 400 + (t->month <= 2));
+    t->hour   = (int)(rem / 3600);
+    t->minute = (int)(rem / 60 % 60);
+    t->second = (int)(rem % 60);
+}
+
 int rtc_read(struct rtc_time* t){
+    if(rtc_unix_source){
+        int64_t secs = rtc_unix_source();
+        if(secs < 0){
+            return -EIO;
+        }
+        rtc_from_unix(secs, t);
+        return 0;
+    }
     spin_lock(&rtc_lock);
     int res = rtc_read_locked(t);
     spin_unlock(&rtc_lock);

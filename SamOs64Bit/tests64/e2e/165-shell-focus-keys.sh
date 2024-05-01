@@ -40,7 +40,7 @@ _script() {
 }
 e2e_run_qemu 600 _script
 
-tr -d '\r' < "$E2E_SERIAL" | grep -Eq -- "$SHELL_BANNER" || e2e_fail "no shell"
+tr -d '\r' < "$E2E_SERIAL" | grep -E -- "$SHELL_BANNER" > /dev/null || e2e_fail "no shell"
 expect_serial '^KEYS B got x$' "focused process B got x"
 expect_serial '^KEYS B events xq$' "B's window ring: x then q, in order"
 expect_serial '^KEYS A got y$' "after B exits, the focus is back on A: A got y"

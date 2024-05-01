@@ -28,9 +28,9 @@ fail=0
 words='\b(outb|outw|outl|outdw|inb|inw|inl|insb|insw|insl|insdw|lidt|idt[a-z0-9_]*|cr3|wrmsr|rdmsr)\b'
 
 # The pattern itself: it must see x86 code and not the false friends.
-printf 'outb(0x80, 0);\nidt_init();\nmov %%cr3, %%rax\n' | grep -qiE "$words" ||
+printf 'outb(0x80, 0);\nidt_init();\nmov %%cr3, %%rax\n' | grep -iE "$words" > /dev/null ||
     { echo "FAIL: hal_check: the pattern misses x86 code"; exit 1; }
-if printf 'int bits_width_per_character;\nuint32_t cr32_checksum;\n' | grep -qiE "$words"; then
+if printf 'int bits_width_per_character;\nuint32_t cr32_checksum;\n' | grep -iE "$words" > /dev/null; then
     echo "FAIL: hal_check: the pattern matches width or cr32"; exit 1
 fi
 

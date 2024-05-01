@@ -3,6 +3,7 @@
 # leaves the AHCI's IOAPIC entry masked, so no completion interrupt
 # arrives. After three completions found by polling the driver polls
 # for good, and the boot and a shell write still work. q35.
+# e2e-requires: ahci apic (the AHCI's masked IOAPIC entry)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_diskirq_lib.sh"

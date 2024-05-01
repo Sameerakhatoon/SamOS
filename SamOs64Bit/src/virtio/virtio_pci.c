@@ -242,34 +242,8 @@ int virtio_pci_probe(uint32_t device_id, int (*attach)(struct virtio_dev* d, voi
 }
 
 // ---- INTx lines ------------------------------------------------------
-// Each line is a completion slot of arch_irq_attach_gsi (x86: a vector
-// in the disk range through the IOAPIC). Built once, on the BSP, before
-// the APs start; the handlers only read. A handler gets no line number
-// from the frame, so each line has its own.
-
-#define VIRTIO_SLOT_BASE     4     // disk/irqwait.h: 0 AHCI, 2-3 PATA
-#define VIRTIO_LINES         8     // q35's PIRQ A-H, GSI 16-23
-
-static struct virtio_line virtio_lines[VIRTIO_LINES];
-static int virtio_line_count;
-
-static void virtio_line_run(struct virtio_line* l){
-    for(int c = 0; c < l->clients; c++){
-        if(l->client[c].dev->ops->isr(l->client[c].dev) & VIRTIO_ISR_QUEUE){
-            l->client[c].fn(l->client[c].ctx);
-        }
-    }
-}
-
-#define VIRTIO_LINE_HANDLER(n) \
-    static void virtio_line##n(struct trap_frame* f){ virtio_line_run(&virtio_lines[n]); }
-VIRTIO_LINE_HANDLER(0) VIRTIO_LINE_HANDLER(1) VIRTIO_LINE_HANDLER(2) VIRTIO_LINE_HANDLER(3)
-VIRTIO_LINE_HANDLER(4) VIRTIO_LINE_HANDLER(5) VIRTIO_LINE_HANDLER(6) VIRTIO_LINE_HANDLER(7)
-
-static INTERRUPT_CALLBACK_FUNCTION const virtio_line_handler[VIRTIO_LINES] = {
-    virtio_line0, virtio_line1, virtio_line2, virtio_line3,
-    virtio_line4, virtio_line5, virtio_line6, virtio_line7,
-};
+// A function's INTx GSI is its line (virtio_bus.c), routed through the
+// IOAPIC.
 
 struct virtio_line* virtio_pci_intx(struct virtio_dev* d, bool masked, void (*fn)(void* ctx), void* ctx){
     struct virtio_pci* p = vpci(d);
@@ -278,41 +252,9 @@ struct virtio_line* virtio_pci_intx(struct virtio_dev* d, bool masked, void (*fn
     if(gsi < 0){
         return NULL;
     }
-    struct virtio_line* l = NULL;
-    for(int i = 0; i < virtio_line_count; i++){
-        if(virtio_lines[i].gsi == (uint32_t)gsi){
-            l = &virtio_lines[i];
-        }
-    }
-    bool route = !l;
-    if(!l){
-        if(virtio_line_count == VIRTIO_LINES){
-            return NULL;
-        }
-        l = &virtio_lines[virtio_line_count];
-        l->gsi    = (uint32_t)gsi;
-        l->inti   = inti;
-        l->masked = masked;
-    }
-    if(l->clients == VIRTIO_LINE_CLIENTS){
-        return NULL;
-    }
-    l->client[l->clients].dev = d;
-    l->client[l->clients].fn  = fn;
-    l->client[l->clients].ctx = ctx;
-    l->clients++;
-    pci_intx_enable(p->pci);
-    if(route){
-        int n = virtio_line_count;
-        virtio_line_count++;
-        int line = arch_irq_attach_gsi(l->gsi, l->inti, VIRTIO_SLOT_BASE + n, l->masked,
-                                       virtio_line_handler[n]);
-        if(line < 0){
-            l->clients = 0;
-            virtio_line_count--;
-            return NULL;
-        }
-        l->vector = (uint8_t)line;
+    struct virtio_line* l = virtio_line_attach(d, (uint32_t)gsi, inti, masked, fn, ctx);
+    if(l){
+        pci_intx_enable(p->pci);
     }
     return l;
 }

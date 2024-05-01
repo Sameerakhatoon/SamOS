@@ -3,6 +3,7 @@
 # lands in the early IDT and dumps registers on COM1 instead of
 # resetting the machine. CMDLINE.TXT on the ESP carries
 # samos.early_fault_test, which makes kernel_main execute ud2.
+# e2e-requires: x86 (the early IDT and its x86 register dump)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"

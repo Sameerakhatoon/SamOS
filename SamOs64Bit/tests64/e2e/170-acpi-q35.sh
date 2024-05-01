@@ -5,6 +5,7 @@
 # from the DSDT) and the MCFG, and PCI config space goes through ECAM.
 # The boot then reaches the BLANK.ELF selftest over AHCI, whose
 # controller was found and set up through ECAM.
+# e2e-requires: acpi (the ACPI tables (RSDP, MADT, FADT, MCFG) of q35)
 . "$(dirname "$0")/_lib.sh"
 
 E2E_MACHINE=q35

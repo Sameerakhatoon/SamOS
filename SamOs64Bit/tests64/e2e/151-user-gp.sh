@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # e2e/151-user-gp.sh - a #GP in a user program (hlt in ring 3)
 # kills only that program; BLANK.ELF still completes its selftest.
+# e2e-requires: x86 (x86 exception names, error codes and registers in the report; aarch64-traps.sh and aarch64-user.sh check the ESR/ELR/FAR reports)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"

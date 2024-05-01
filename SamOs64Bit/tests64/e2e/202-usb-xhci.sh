@@ -11,6 +11,7 @@
 # and its output read off the USB stick. With an interrupt, marker 194
 # counts stick transfers that ended at it and 187 (polled waits) stays
 # unset; polled, 194 stays 0.
+# e2e-requires: xhci (qemu-xhci on PCI, x86 machines and OVMF; on aarch64 virt nothing assigns PCI BARs and there is no MSI)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_usb_lib.sh"

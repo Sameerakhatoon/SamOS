@@ -33,6 +33,9 @@ mem_boot_and_check() {
         "1000 process create/exit cycles with a steady heap ($ram)"
     expect_stage_value 183 -eq 0 "slab objects leaked over 1000 process cycles ($ram)"
     expect_stage_value 181 -ge "$min_mib" "frame allocator manages >= $min_mib MiB ($ram)"
-    # Loader and boot-services memory goes to the PFA.
-    expect_serial '^pfa: reclaimed [1-9][0-9]* KiB of loader memory' "loader memory reclaimed ($ram)"
+    # Loader and boot-services memory goes to the PFA. The aarch64 device work:
+    # only a UEFI boot leaves any (aarch64 boots with -kernel).
+    if e2e_arch_has uefi; then
+        expect_serial '^pfa: reclaimed [1-9][0-9]* KiB of loader memory' "loader memory reclaimed ($ram)"
+    fi
 }

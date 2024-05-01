@@ -16,5 +16,9 @@ const char* pl011_init(const struct fdt* f);
 uint64_t    pl011_base(void);
 void        pl011_putc(char c);
 void        pl011_puts(const char* s);
+// Receive interrupts on (RX and receive timeout), and the next
+// byte received, -1 when the FIFO is empty (which clears them).
+void        pl011_rx_enable(void);
+int         pl011_getc(void);
 
 #endif

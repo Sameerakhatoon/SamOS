@@ -6,9 +6,11 @@
 # bootmarker region. Everything the kernel prints also goes to COM1,
 # which QEMU writes to a per-test serial log. The library provides:
 #
-#   boot_and_dump <seconds>     - boot QEMU, dump 0x6000 markers, keep serial log
+#   boot_and_dump <seconds>     - boot QEMU, dump the markers, keep serial log
 #   e2e_qemu_args               - fill the E2E_QEMU_ARGS array (for custom runs)
 #   e2e_run_qemu <timeout> <fn> - run QEMU, piping <fn>'s output to the monitor
+#   e2e_pmemsave [file]         - (monitor script) the pmemsave line for the markers
+#   e2e_arch_has <feature>      - the arch provides it (E2E_ARCH_PROVIDES)
 #   marker_high <stage>         - high 32 bits of marker[stage]
 #   marker_low  <stage>         - low 32 bits of marker[stage]
 #   expect_stage_reached <stage> [name]
@@ -27,6 +29,38 @@
 # E2E_BOOT_BUS=virtio (boot disk on virtio-blk-pci), E2E_KEEP=1 to keep
 # E2E_TMP.
 #
+# E2E_ARCH (x86_64 by default, aarch64) picks the machine. All
+# that differs per architecture is in one hook file, _arch_<arch>.sh,
+# sourced below with E2E_ROOT set. It defines:
+#
+#   E2E_OS_IMG           the boot disk image: GPT, partition 1 at 1 MiB
+#                        (FAT16, holds CMDLINE.TXT), partition 2 the
+#                        SAMOS volume ("@:/") with the user programs
+#   E2E_QEMU_BIN         qemu-system-<arch>
+#   E2E_ARCH_PROVIDES    feature words; run-all.sh skips a test whose
+#                        "# e2e-requires:" line names one not listed
+#   e2e_arch_build       build the kernel, programs and E2E_OS_IMG
+#                        (tests64/run-all.sh runs it once before a
+#                        non-default arch's suite)
+#   e2e_arch_check       e2e_fail unless the image (E2E_IMAGE) and
+#                        whatever else QEMU needs are there
+#   e2e_arch_qemu_args   append the machine, CPU, firmware or kernel,
+#                        command line and the boot disk (E2E_IMAGE,
+#                        snapshot=on) to E2E_QEMU_ARGS; the memory,
+#                        CPUs, monitor, serial and the rest are added
+#                        here
+#   e2e_arch_marker_addr print the physical address of the boot marker
+#                        region (it may read E2E_SERIAL: it is called
+#                        once the guest has booted)
+#
+# Tests drive the guest through the QEMU monitor (sendkey, pmemsave,
+# screendump) and read the first serial port back, on every arch.
+#
+# Tests run with pipefail: a reader that stops early (grep -q, grep -m,
+# head, awk exit) after a pipe can kill the writer with SIGPIPE, and
+# the pipeline then fails although the match is there. Use
+# `grep ... > /dev/null` and readers that read to the end.
+#
 # Magic layout (see src/bootmarker.h):
 #   bits 63..32 : 0xB007C0DE (BOOT_MARKER_MAGIC_PREFIX)
 #   bits 31..24 : stage id
@@ -38,8 +72,12 @@
 set -uo pipefail
 
 E2E_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-E2E_OS_IMG="$(cd "$E2E_ROOT/.." 2>/dev/null && pwd)/bin/os.img"
-E2E_OVMF="${E2E_OVMF:-/usr/share/ovmf/OVMF.fd}"
+E2E_ARCH="${E2E_ARCH:-x86_64}"
+if [ ! -f "$E2E_ROOT/tests64/e2e/_arch_$E2E_ARCH.sh" ]; then
+    echo "FAIL: no e2e hook for E2E_ARCH=$E2E_ARCH (tests64/e2e/_arch_$E2E_ARCH.sh)" >&2
+    exit 1
+fi
+. "$E2E_ROOT/tests64/e2e/_arch_$E2E_ARCH.sh"
 
 E2E_TMP="$(mktemp -d "${TMPDIR:-/tmp}/samos-e2e.XXXXXX")"
 if [ "${E2E_KEEP:-0}" != 1 ]; then
@@ -64,11 +102,10 @@ e2e_fail() {
 
 E2E_BOOT_MODE=uefi
 E2E_IMAGE="${E2E_IMAGE:-$E2E_OS_IMG}"
-# Kept for older tests that call it directly. UEFI + bin/os.img (or
-# a per-test copy in E2E_IMAGE) is the only way to boot.
+# Kept for older tests that call it directly: the arch hook checks the
+# image (bin/os.img or a per-test copy in E2E_IMAGE) and its firmware.
 e2e_select_image() {
-    [ -f "$E2E_IMAGE" ] || e2e_fail "missing $E2E_IMAGE (run ./build.sh)"
-    [ -f "$E2E_OVMF" ]  || e2e_fail "missing OVMF firmware $E2E_OVMF (apt install ovmf)"
+    e2e_arch_check
 }
 
 # Build the standard QEMU command line into the E2E_QEMU_ARGS array.
@@ -76,30 +113,17 @@ e2e_qemu_args() {
     e2e_select_image
     local smp=${E2E_SMP:-1} accel=tcg
     [ "$smp" -gt 1 ] && accel=tcg,thread=multi
-    E2E_QEMU_ARGS=(
-        -machine "${E2E_MACHINE:-pc}"
-        -cpu Skylake-Server
+    E2E_QEMU_ARGS=()
+    e2e_arch_qemu_args
+    E2E_QEMU_ARGS+=(
         -m "${E2E_MEM:-512M}"
         -smp "$smp"
         -accel "$accel"
-        -bios "$E2E_OVMF"
         -display none
         -monitor stdio
         -serial "file:$E2E_SERIAL"
         -no-reboot
     )
-    if [ "${E2E_BOOT_BUS:-}" = virtio ]; then
-        # Boot from virtio-blk (OVMF's VirtioBlkDxe); the kernel
-        # then reads everything through virtio_blk.c.
-        E2E_QEMU_ARGS+=(-drive "file=$E2E_IMAGE,format=raw,if=none,id=os,snapshot=on"
-                        -device virtio-blk-pci,drive=os,bootindex=0)
-    elif [ "${E2E_MACHINE:-pc}" = q35 ]; then
-        # q35 has AHCI, not IDE: attach the image to the ICH9 AHCI port.
-        E2E_QEMU_ARGS+=(-drive "file=$E2E_IMAGE,format=raw,if=none,id=os,snapshot=on"
-                        -device ide-hd,drive=os,bus=ide.0)
-    else
-        E2E_QEMU_ARGS+=(-drive "file=$E2E_IMAGE,format=raw,if=ide,snapshot=on")
-    fi
     if [ -n "${E2E_EXTRA_QEMU_ARGS:-}" ]; then
         # shellcheck disable=SC2206
         local extra=($E2E_EXTRA_QEMU_ARGS)
@@ -114,8 +138,21 @@ e2e_run_qemu() {
     local limit=$1 fn=$2
     e2e_qemu_args
     rm -f "$E2E_SERIAL"
-    "$fn" | timeout "$limit" qemu-system-x86_64 "${E2E_QEMU_ARGS[@]}" \
+    "$fn" | timeout "$limit" "$E2E_QEMU_BIN" "${E2E_QEMU_ARGS[@]}" \
         > "$E2E_QEMU_LOG" 2>&1 || true
+}
+
+# e2e_arch_has <feature>: the arch hook lists it in E2E_ARCH_PROVIDES,
+# for a check inside a test that only one machine can make.
+e2e_arch_has() {
+    case " $E2E_ARCH_PROVIDES " in *" $1 "*) return 0 ;; esac
+    return 1
+}
+
+# e2e_pmemsave [file]: in a monitor script, the command that dumps the
+# marker region to <file> (default E2E_DUMP).
+e2e_pmemsave() {
+    printf 'pmemsave %s %d "%s"\n' "$(e2e_arch_marker_addr)" "$E2E_MARKER_REGION_SIZE" "${1:-$E2E_DUMP}"
 }
 
 # e2e_wait_serial <ERE> <max-seconds>: poll the serial log until it
@@ -123,7 +160,7 @@ e2e_run_qemu() {
 e2e_wait_serial() {
     local re=$1 limit=$2 waited=0
     while [ "$waited" -lt $((limit * 2)) ]; do
-        if tr -d '\r' 2>/dev/null < "$E2E_SERIAL" | grep -Eq -- "$re"; then
+        if tr -d '\r' 2>/dev/null < "$E2E_SERIAL" | grep -E -- "$re" > /dev/null; then
             return 0
         fi
         sleep 0.5
@@ -162,7 +199,7 @@ boot_and_dump() {
         else
             sleep "$seconds"
         fi
-        printf 'pmemsave 0x6000 %d "%s"\n' "$E2E_MARKER_REGION_SIZE" "$E2E_DUMP"
+        e2e_pmemsave
         printf 'quit\n'
     }
 
@@ -189,9 +226,13 @@ boot_and_dump() {
 }
 
 # expect_serial <extended-regex> [name]
+# Grep reads all its input (no -q): with pipefail, a grep that
+# quits at the first match can leave tr writing into a closed pipe, and
+# the pipeline then fails with SIGPIPE although the line is there (a
+# long log, a loaded host). expect_no_serial would pass on such a match.
 expect_serial() {
     local re=$1 name=${2:-serial matches /$1/}
-    if tr -d '\r' 2>/dev/null < "$E2E_SERIAL" | grep -Eq -- "$re"; then
+    if tr -d '\r' 2>/dev/null < "$E2E_SERIAL" | grep -E -- "$re" > /dev/null; then
         e2e_log "$name: ok"
     else
         e2e_fail "$name: serial log has no match for /$re/"
@@ -201,7 +242,7 @@ expect_serial() {
 # expect_no_serial <extended-regex> [name]
 expect_no_serial() {
     local re=$1 name=${2:-serial lacks /$1/}
-    if tr -d '\r' 2>/dev/null < "$E2E_SERIAL" | grep -Eq -- "$re"; then
+    if tr -d '\r' 2>/dev/null < "$E2E_SERIAL" | grep -E -- "$re" > /dev/null; then
         e2e_fail "$name: serial log unexpectedly matches /$re/"
     fi
     e2e_log "$name: ok"

@@ -6,6 +6,7 @@
 # kills (128 + 9). Also: getpid differs between parent and child, a
 # status pointer into the kernel is -EFAULT and does not reap the
 # child, kill of a reaped pid is -ESRCH, wait with no child -ECHILD.
+# e2e-requires: x86 (the #DE child and x86 fault statuses; aarch64-user.sh parent checks the same waitpid statuses)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"

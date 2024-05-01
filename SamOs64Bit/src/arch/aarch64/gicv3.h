@@ -31,4 +31,15 @@ void     gic_eoi(uint32_t intid);   // ICC_EOIR1_EL1: priority drop and deactiva
 // binding (<type number flags>, type 0 SPI, 1 PPI); -1 if absent.
 int      gic_dt_intid(const struct fdt* f, int node, int index);
 
+// Device lines (arch_irq_attach_gsi) and IPIs. Priorities are
+// GIC values (lower is more urgent); the SPI routing and the SGI
+// target take an MPIDR_EL1 value.
+void     gic_set_priority(uint32_t intid, uint8_t priority);
+void     gic_set_edge(uint32_t intid, int edge);     // SPIs: edge (1) or level (0)
+void     gic_route(uint32_t intid, uint64_t mpidr);
+void     gic_send_sgi(uint32_t sgi, uint64_t mpidr);
+// The flags cell of `node`'s interrupt `index` (1 edge rising, 4 level
+// high, ...), 0 if absent.
+uint32_t gic_dt_flags(const struct fdt* f, int node, int index);
+
 #endif

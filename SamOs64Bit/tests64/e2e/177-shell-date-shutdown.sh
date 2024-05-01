@@ -3,6 +3,7 @@
 # (syscall 48, the RTC) prints today's UTC date, and `shutdown`
 # (syscall 49, ACPI S5) powers QEMU off: the QEMU process ends by
 # itself before the monitor would quit it. q35.
+# e2e-requires: acpi (shutdown through ACPI S5 (the date half needs the CMOS RTC too))
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 

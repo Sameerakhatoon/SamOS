@@ -16,6 +16,7 @@
 #define GICD_ISENABLER      0x0100
 #define GICD_ICENABLER      0x0180
 #define GICD_ICPENDR        0x0280
+#define GICD_ICFGR          0x0c00
 #define GICD_IPRIORITYR     0x0400
 #define GICD_IROUTER        0x6000      // 64-bit per INTID, SPIs only
 #define GICD_CTLR_G1        (1u << 0)   // EnableGrp1 (NS view) / EnableGrp0 (DS)
@@ -233,4 +234,57 @@ int gic_dt_intid(const struct fdt* f, int node, int index)
     p += index * cells * 4;
     uint32_t type = be32(p), num = be32(p + 4);
     return (int)(num + (type == 1 ? GIC_INTID_PPI : GIC_INTID_SPI));
+}
+
+// Device lines and SGIs.
+
+void gic_set_priority(uint32_t intid, uint8_t priority)
+{
+    if (intid < GIC_INTID_SPI)
+        *(volatile uint8_t*)(gicr + GICR_SGI + GICR_IPRIORITYR + intid) = priority;
+    else if (intid < gic_lines)
+        *(volatile uint8_t*)(gicd + GICD_IPRIORITYR + intid) = priority;
+}
+
+// GICD_ICFGR: two bits per INTID, the upper one set for edge.
+void gic_set_edge(uint32_t intid, int edge)
+{
+    if (intid < GIC_INTID_SPI || intid >= gic_lines)
+        return;
+    uint64_t reg = gicd + GICD_ICFGR + intid / 16 * 4;
+    uint32_t bit = 2u << (2 * (intid % 16));
+    wr32(reg, edge ? rd32(reg) | bit : rd32(reg) & ~bit);
+}
+
+static uint64_t mpidr_route(uint64_t mpidr)
+{
+    return (mpidr & 0xff00ffffffull);           // Aff3, Aff2.Aff1.Aff0; IRM 0
+}
+
+void gic_route(uint32_t intid, uint64_t mpidr)
+{
+    if (intid >= GIC_INTID_SPI && intid < gic_lines)
+        wr64(gicd + GICD_IROUTER + 8 * intid, mpidr_route(mpidr));
+}
+
+// ICC_SGI1R_EL1: INTID [27:24], Aff3 [55:48], Aff2 [39:32], Aff1
+// [23:16], RS [47:44] (Aff0 / 16) and the target list [15:0] (Aff0 % 16).
+void gic_send_sgi(uint32_t sgi, uint64_t mpidr)
+{
+    uint64_t aff0 = mpidr & 0xff;
+    uint64_t v = ((uint64_t)(sgi & 0xf) << 24) | (((mpidr >> 32) & 0xff) << 48) | (((mpidr >> 16) & 0xff) << 32) |
+                 (((mpidr >> 8) & 0xff) << 16) | ((aff0 >> 4) << 44) | (1ull << (aff0 & 0xf));
+    __asm__ volatile("dsb ishst" ::: "memory");
+    sysreg_write(ICC_SGI1R_EL1, v);
+    isb();
+}
+
+uint32_t gic_dt_flags(const struct fdt* f, int node, int index)
+{
+    uint32_t len;
+    const uint8_t* p = fdt_getprop(f, node, "interrupts", &len);
+    uint32_t cells = intid_cells ? intid_cells : 3;
+    if (!p || cells < 3 || (uint32_t)(index + 1) * cells * 4 > len)
+        return 0;
+    return be32(p + index * cells * 4 + 8);
 }

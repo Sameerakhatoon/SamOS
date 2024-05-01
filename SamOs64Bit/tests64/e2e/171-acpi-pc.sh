@@ -2,6 +2,7 @@
 # e2e/171-acpi-pc.sh - on pc (i440fx) the ACPI tables are
 # parsed the same way, there is no MCFG, so PCI config space stays on
 # ports 0xCF8/0xCFC, and the FADT has no reset register.
+# e2e-requires: acpi (the ACPI tables of pc)
 . "$(dirname "$0")/_lib.sh"
 
 E2E_MACHINE=pc

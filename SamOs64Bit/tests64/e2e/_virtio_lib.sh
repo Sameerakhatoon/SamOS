@@ -10,12 +10,12 @@ virtio_blk_serial_check() {
     local log=$1 tag=$2 id
     shift 2
     for id in "$@"; do
-        tr -d '\r' < "$log" | grep -Eq "^virtio-blk: disk $id, [0-9]+ MiB, flush, queue [0-9]+\$" \
+        tr -d '\r' < "$log" | grep -E "^virtio-blk: disk $id, [0-9]+ MiB, flush, queue [0-9]+\$" > /dev/null \
             || e2e_fail "$tag: no virtio-blk disk $id in $(basename "$log")"
     done
-    tr -d '\r' < "$log" | grep -Eq '^disk: virtio-blk completions by interrupt, GSI [0-9]+ level active-high, vector (8[4-9]|9[0-5])$' \
+    tr -d '\r' < "$log" | grep -E '^disk: virtio-blk completions by interrupt, GSI [0-9]+ level active-high, vector (8[4-9]|9[0-5])$' > /dev/null \
         || e2e_fail "$tag: virtio-blk line not routed through the IOAPIC in $(basename "$log")"
-    if tr -d '\r' < "$log" | grep -Eq 'completion interrupt missing|has no IOAPIC route|virtio-blk: request timed out'; then
+    if tr -d '\r' < "$log" | grep -E 'completion interrupt missing|has no IOAPIC route|virtio-blk: request timed out' > /dev/null; then
         e2e_fail "$tag: virtio-blk fell back to polling or timed out in $(basename "$log")"
     fi
     e2e_log "$tag: virtio-blk disks $* by interrupt ($(basename "$log"))"

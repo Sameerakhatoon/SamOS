@@ -4,6 +4,7 @@
 # SLP_TYP. CMDLINE.TXT samos.shutdown_test calls it at the end of the
 # kernel boot. QEMU must end by itself (no monitor quit, timeout not
 # reached) on pc and q35, without the QEMU-port fallback.
+# e2e-requires: acpi (power-off through the FADT PM1a block and \_S5)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"
@@ -21,7 +22,7 @@ acpi_run() {
         [ "${E2E_QEMU_ARGS[$i]}" = stdio ] && E2E_QEMU_ARGS[$i]=none
     done
     rm -f "$E2E_SERIAL"
-    timeout 180 qemu-system-x86_64 "${E2E_QEMU_ARGS[@]}" < /dev/null > "$E2E_QEMU_LOG" 2>&1
+    timeout 180 "$E2E_QEMU_BIN" "${E2E_QEMU_ARGS[@]}" < /dev/null > "$E2E_QEMU_LOG" 2>&1
 }
 
 for m in pc q35; do

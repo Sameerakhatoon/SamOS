@@ -9,6 +9,7 @@
 # and 2. Before the start handshake the late AP would have run on with the slot and
 # stack of the next processor. Then the SMP self-test and BLANK.ELF's
 # self-test run on the three CPUs.
+# e2e-requires: smp (four CPUs; aarch64 starts its secondary CPUs in the aarch64 SMP work)
 . "$(dirname "$0")/_lib.sh"
 
 export E2E_SMP=4
@@ -21,7 +22,7 @@ MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.
 _script() {
     e2e_wait_serial '^e2e: user selftest done' 300 || true
     sleep 1
-    printf 'pmemsave 0x6000 %d "%s"\n' "$E2E_MARKER_REGION_SIZE" "$E2E_DUMP"
+    e2e_pmemsave
     sleep 1
     printf 'quit\n'
 }

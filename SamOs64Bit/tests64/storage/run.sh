@@ -132,7 +132,7 @@ set_cmd() {
 }
 
 result_done() {
-    mtype -i "$(spec "$1")" "::$2" 2>/dev/null | grep -q '^DONE '
+    mtype -i "$(spec "$1")" "::$2" 2>/dev/null | grep '^DONE ' > /dev/null
 }
 
 run_qemu() {

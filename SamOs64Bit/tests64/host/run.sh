@@ -36,7 +36,7 @@ gcc -O0 -g -Wall -Wno-format-security -I"$root/src" -o "$out/keyboard_test" \
 # riscv64 trees in fixtures/.
 gcc -ffreestanding -fno-builtin -O2 -std=gnu99 -Wall -Wextra -Werror -I"$root/src" \
     -c "$root/src/firmware/fdt.c" -o "$out/fdt_free.o"
-if nm -u "$out/fdt_free.o" | grep -q .; then
+if nm -u "$out/fdt_free.o" | grep . > /dev/null; then
     echo "FAIL: fdt.c needs external symbols:"; nm -u "$out/fdt_free.o"; exit 1
 fi
 gcc -O1 -g -std=gnu99 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all \

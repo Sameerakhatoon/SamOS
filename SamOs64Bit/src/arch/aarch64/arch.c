@@ -9,10 +9,24 @@
 // handed out. kheap_init's PFA (memory/pfa.c) then manages RAM from
 // that map, the same code as on x86 (the hardware layer memory map note).
 //
-// One CPU (the aarch64 SMP work starts the others): no IPIs, no device interrupt lines
-// yet, no port I/O and no legacy PCI configuration mechanism.
+// One CPU (the aarch64 SMP work starts the others), no port I/O and no legacy PCI
+// configuration mechanism.
+//
+// Devices. arch_firmware_init lists the device tree's
+// virtio-mmio slots (virtio_bus.h), highest address first, for
+// virtio-blk and virtio-input, and sets up the screen: QEMU's ramfb,
+// a framebuffer in RAM from the PFA described to QEMU through fw_cfg,
+// handed to graphics_setup in boot_info as x86's loader hands over
+// the GOP's. Device completion lines
+// (arch_irq_attach_gsi) are GIC SPIs at priority PRIO_COMPLETION with
+// their EOI after the handler; a disk wait sets ICC_PMR_EL1 so that
+// only they are taken (x86: the LAPIC TPR). IPIs are SGIs 0-3 (the
+// enum arch_ipi), which the wait holds off like the timer. Bytes
+// received on the PL011 are keys (keyboard_push), as PS/2 keys are on
+// x86.
 
 #include "arch/arch.h"
+#include "acpi/acpi.h"
 #include "arch/aarch64/console.h"
 #include "arch/aarch64/gicv3.h"
 #include "arch/aarch64/memmap.h"
@@ -25,15 +39,22 @@
 #include "boot/boot_info.h"
 #include "bootmarker.h"
 #include "cpu/percpu.h"
+#include "cpu/smp.h"
 #include "disk/drivers/ramdisk.h"
 #include "firmware/fdt.h"
+#include "firmware/ramfb.h"
 #include "graphics/graphics.h"
+#include "io/pci.h"
+#include "io/rtc.h"
 #include "io/serial.h"
 #include "kernel.h"
+#include "keyboard/keyboard.h"
 #include "memory/memory.h"
+#include "memory/pfa.h"
 #include "string/string.h"
 #include "status.h"
 #include "task/task.h"
+#include "virtio/virtio_mmio_fdt.h"
 
 #define E820_MAX        64
 #define EARLY_RUNS      32
@@ -42,11 +63,16 @@
 #define ID_PAN_SHIFT    20          // ID_AA64MMFR1_EL1.PAN
 #define SCTLR_SPAN      (1ul << 23) // 0: PSTATE.PAN set on every exception to EL1
 
-// No screen until the aarch64 device work (ramfb or virtio-gpu): a framebuffer format the
-// graphics code refuses, so it draws into RAM only.
+// Without a ramfb device: a framebuffer format the graphics code
+// refuses, so it draws into RAM only.
 #define FB_FORMAT_NONE  2
-#define FB_WIDTH        640
-#define FB_HEIGHT       480
+#define FB_WIDTH        1024
+#define FB_HEIGHT       768
+#define FB_BYTES        (FB_WIDTH * FB_HEIGHT * 4)
+
+#define PRIO_COMPLETION 0x80        // device completion lines; everything else 0xa0
+#define PMR_DISK_WAIT   0x90        // a disk wait takes only the completion lines
+#define IPI_SGIS        4           // SGI n is enum arch_ipi n
 
 struct samos_boot_info* samos_boot_info_ptr;
 struct graphics_info default_graphics_info;
@@ -65,6 +91,7 @@ static int dt_ok;
 static int gic_ok;
 static uint64_t boot_counter;
 static int psci_smc;                // PSCI through smc, else hvc
+static struct ramfb_dma ramfb_dma;
 
 // ------------------------------------------------------------------
 // The hand-over: boot_info, the memory map, this CPU, kernel_main
@@ -291,10 +318,55 @@ void arch_task_return(struct trap_frame* frame)
 // Interrupt controller: GICv3 (main.c brought it up before hello)
 // ------------------------------------------------------------------
 
+// SGI n is IPI n (enum arch_ipi).
+#define SGI_HANDLER(n) \
+    static void sgi##n(struct trap_frame* f) { smp_handle_ipi((enum arch_ipi)n, f); }
+SGI_HANDLER(0) SGI_HANDLER(1) SGI_HANDLER(2) SGI_HANDLER(3)
+static INTERRUPT_CALLBACK_FUNCTION const sgi_handler[IPI_SGIS] = { sgi0, sgi1, sgi2, sgi3 };
+
+// Bytes from the serial line are keys. A terminal sends CR for Enter
+// and DEL for Backspace; the PS/2 driver pushes CR and BS, so DEL
+// becomes BS, and LF (from a pipe) CR.
+static void uart_irq(struct trap_frame* f)
+{
+    int c;
+    while ((c = pl011_getc()) >= 0) {
+        if (c == '\n')
+            c = '\r';
+        else if (c == 0x7f)
+            c = 0x08;
+        keyboard_push((char)c);
+    }
+}
+
+static void uart_rx_init(void)
+{
+    int node = fdt_stdout_node(&dt);
+    if (node < 0 || !fdt_node_is_compatible(&dt, node, "arm,pl011"))
+        node = fdt_find_compatible(&dt, -1, "arm,pl011");
+    int intid = node >= 0 && pl011_base() ? gic_dt_intid(&dt, node, 0) : -1;
+    if (intid < GIC_INTID_SPI) {
+        serial_write("console: no PL011 interrupt, no keys from the serial line\n");
+        return;
+    }
+    gic_set_edge((uint32_t)intid, (gic_dt_flags(&dt, node, 0) & 3) != 0);
+    irq_register((uint32_t)intid, uart_irq);
+    pl011_rx_enable();
+    gic_enable((uint32_t)intid);
+    console_printf("console: PL011 receive on INTID %d, bytes are keys\n", intid);
+}
+
 void arch_irq_init(void)
 {
     if (!gic_ok && dt_ok)
         gic_ok = gic_init(&dt) == 0;
+    if (!gic_ok)
+        return;
+    for (uint32_t i = 0; i < IPI_SGIS; i++) {
+        irq_register(i, sgi_handler[i]);
+        gic_enable(i);
+    }
+    uart_rx_init();
 }
 
 void aarch64_gic_ready(void)
@@ -304,49 +376,73 @@ void aarch64_gic_ready(void)
 
 bool arch_irq_routable(void)
 {
-    return false;       // Device lines through arch_irq_attach_gsi
+    return gic_ok;
 }
 
+// IRQ numbers here are INTIDs. The SGIs are the IPIs', so the ISA
+// numbers the PS/2 drivers ask for (1, 12) are refused.
 int arch_irq_register(int irq, INTERRUPT_CALLBACK_FUNCTION handler)
 {
+    if (irq < GIC_INTID_PPI)
+        return -EINVARG;
     return irq_register((uint32_t)irq, handler) < 0 ? -EINVARG : 0;
 }
 
 void arch_irq_unmask(int irq)
 {
-    gic_enable((uint32_t)irq);
+    if (irq >= GIC_INTID_PPI)
+        gic_enable((uint32_t)irq);
 }
 
 void arch_irq_mask(int irq)
 {
-    gic_disable((uint32_t)irq);
+    if (irq >= GIC_INTID_PPI)
+        gic_disable((uint32_t)irq);
 }
 
+// `gsi` is the SPI's INTID (virtio_bus.c: the slot's device tree
+// interrupt); the slot only bounds the count, as x86's vector range.
 int arch_irq_attach_gsi(uint32_t gsi, uint16_t flags, unsigned slot, bool masked,
                         INTERRUPT_CALLBACK_FUNCTION handler)
 {
-    return -EINVARG;
+    if (!gic_ok || gsi < GIC_INTID_SPI || slot > 15 || irq_register_late(gsi, handler) < 0)
+        return -EINVARG;
+    gic_disable(gsi);
+    gic_set_priority(gsi, PRIO_COMPLETION);
+    gic_set_edge(gsi, (flags & ACPI_INTI_TRIGGER_MASK) == ACPI_INTI_TRIGGER_EDGE);
+    gic_route(gsi, this_cpu()->arch.mpidr);
+    if (!masked)
+        gic_enable(gsi);
+    return (int)gsi;
 }
 
 int arch_irq_set_cpu(uint32_t gsi, struct cpu* c)
 {
-    return -EINVARG;
+    if (!gic_ok || gsi < GIC_INTID_SPI)
+        return -EINVARG;
+    gic_route(gsi, c->arch.mpidr);
+    return 0;
 }
 
-// No completion lines yet: the window just opens IRQs for a moment.
+// ICC_PMR_EL1 is PMR_DISK_WAIT meanwhile, so only the completion lines
+// are taken. The state is the old PMR and DAIF.
 uint64_t arch_irq_wait_begin(void)
 {
-    return arch_irq_save();
+    uint64_t daif = arch_irq_save();
+    uint64_t pmr = sysreg_read(ICC_PMR_EL1);
+    sysreg_write(ICC_PMR_EL1, PMR_DISK_WAIT);
+    return pmr << 32 | daif;
 }
 
 void arch_irq_wait_window(void)
 {
-    __asm__ volatile("msr daifclr, #2\n\tnop\n\tmsr daifset, #2" ::: "memory");
+    __asm__ volatile("msr daifclr, #2\n\tnop\n\tmsr daifset, #2\n\tyield" ::: "memory");
 }
 
 void arch_irq_wait_end(uint64_t state)
 {
-    arch_irq_restore(state);
+    sysreg_write(ICC_PMR_EL1, state >> 32);
+    arch_irq_restore((uint32_t)state);
 }
 
 // ------------------------------------------------------------------
@@ -395,7 +491,7 @@ void udelay(TIME_MICROSECONDS microseconds)
 }
 
 // ------------------------------------------------------------------
-// CPUs and IPIs: one CPU until the aarch64 SMP work (PSCI CPU_ON, SGIs)
+// CPUs and IPIs: one CPU until the aarch64 SMP work (PSCI CPU_ON); IPIs are SGIs
 // ------------------------------------------------------------------
 
 int arch_start_cpus(void)
@@ -405,6 +501,8 @@ int arch_start_cpus(void)
 
 void arch_send_ipi(struct cpu* target, enum arch_ipi ipi)
 {
+    if (gic_ok && (unsigned)ipi < IPI_SGIS)
+        gic_send_sgi((uint32_t)ipi, target->arch.mpidr);
 }
 
 bool arch_stop_other_cpus(void)
@@ -413,11 +511,102 @@ bool arch_stop_other_cpus(void)
 }
 
 // ------------------------------------------------------------------
-// Firmware: the device tree. The initrd becomes the RAM disk.
+// Firmware: the device tree. The initrd becomes the RAM disk, the
+// virtio-mmio slots go to virtio_bus.c, fw_cfg gives the ramfb screen.
 // ------------------------------------------------------------------
+
+// A virtio-mmio node's SPI, and its trigger as MPS INTI flags (device
+// tree flags 1 and 2 are edges, 4 and 8 levels).
+static int dt_virtio_irq(const struct fdt* f, int node, uint16_t* inti)
+{
+    uint32_t flags = gic_dt_flags(f, node, 0);
+    *inti = ACPI_INTI_POLARITY_HIGH | ((flags & 3) ? ACPI_INTI_TRIGGER_EDGE : ACPI_INTI_TRIGGER_LEVEL);
+    return gic_dt_intid(f, node, 0);
+}
+
+static void ramfb_init(void)
+{
+    int node = fdt_find_compatible(&dt, -1, "qemu,fw-cfg-mmio");
+    struct fdt_region reg;
+    if (node < 0 || fdt_reg_cpu(&dt, node, 0, &reg) < 0) {
+        serial_write("ramfb: no fw_cfg in the device tree, no screen\n");
+        return;
+    }
+    void* fw = paging_map_mmio(reg.base, reg.size, PAGING_CACHE_DISABLED);
+    void* fb = pfa_alloc_frames(FB_BYTES / PAGE_SIZE);
+    if (!fw || !fb) {
+        serial_write("ramfb: no memory for the framebuffer, no screen\n");
+        return;
+    }
+    uint64_t fb_pa = virt_to_phys(fb);
+    for (uint32_t i = 0; i < FB_WIDTH * FB_HEIGHT; i++)
+        ((uint32_t*)fb)[i] = 0x0000ff00;        // green, as SamOs.c leaves the GOP
+    int r =ramfb_setup(fw, &ramfb_dma, kimage_pa(&ramfb_dma), fb_pa, FB_WIDTH, FB_HEIGHT);
+    if (r < 0) {
+        pfa_free_frames(fb);
+        console_printf("ramfb: not available (%d, -device ramfb?), no screen\n", r);
+        return;
+    }
+    boot_info.fb_base = fb_pa;
+    boot_info.fb_size = FB_BYTES;
+    boot_info.fb_width = FB_WIDTH;
+    boot_info.fb_height = FB_HEIGHT;
+    boot_info.fb_pitch = FB_WIDTH;
+    boot_info.fb_format = SAMOS_FB_FORMAT_BGRX;
+    default_graphics_info.framebuffer = (struct framebuffer_pixel*)fb_pa;
+    console_printf("ramfb: %ux%u XRGB8888 framebuffer at pa 0x%lx\n", FB_WIDTH, FB_HEIGHT, fb_pa);
+}
+
+// The PCIe host's ECAM window ("pci-host-ecam-generic", QEMU virt),
+// mapped whole for io/pci.c. Enumeration only: nothing assigned the
+// BARs, and pci_intx_gsi knows no route on this host bridge.
+static void pci_ecam_dt_init(void)
+{
+    int node = fdt_find_compatible(&dt, -1, "pci-host-ecam-generic");
+    struct fdt_region reg;
+    if (node < 0 || fdt_reg_cpu(&dt, node, 0, &reg) < 0)
+        return;
+    uint32_t len;
+    const uint8_t* range = fdt_getprop(&dt, node, "bus-range", &len);
+    uint32_t first = 0, last = (uint32_t)(reg.size >> 20) - 1;
+    if (range && len == 8) {
+        first = (uint32_t)range[0] << 24 | range[1] << 16 | range[2] << 8 | range[3];
+        last = (uint32_t)range[4] << 24 | range[5] << 16 | range[6] << 8 | range[7];
+    }
+    if (last > 255 || first > last || ((uint64_t)(last - first + 1) << 20) > reg.size)
+        return;
+    void* v = paging_map_mmio(reg.base, reg.size, PAGING_CACHE_DISABLED);
+    if (v)
+        pci_ecam_install_range(0, reg.base, (uint8_t)first, (uint8_t)last, v);
+}
+
+// The PL031 real-time clock: RTCDR counts seconds since 1970.
+static volatile uint32_t* pl031;
+
+static int64_t pl031_unix_time(void)
+{
+    return pl031[0];
+}
+
+static void pl031_init(void)
+{
+    int node = fdt_find_compatible(&dt, -1, "arm,pl031");
+    struct fdt_region reg;
+    if (node < 0 || fdt_reg_cpu(&dt, node, 0, &reg) < 0)
+        return;
+    pl031 = paging_map_mmio(reg.base, reg.size, PAGING_CACHE_DISABLED);
+    if (pl031)
+        rtc_set_unix_source(pl031_unix_time);
+}
 
 void arch_firmware_init(void)
 {
+    pci_ecam_dt_init();
+    pl031_init();
+    int slots = virtio_mmio_scan_fdt(&dt, dt_virtio_irq, true);
+    console_printf("virtio-mmio: %d slot(s) in the device tree\n", slots);
+    ramfb_init();
+
     uint64_t base, size;
     if (memmap_initrd(&base, &size) == 0) {
         serial_write("initrd: ");

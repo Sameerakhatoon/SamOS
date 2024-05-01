@@ -34,13 +34,13 @@ diskirq_check() {
     local boot_dump="$E2E_TMP/markers-boot.bin"
     _diskirq_mon() {
         shell_boot || { printf 'quit\n'; return 0; }
-        printf 'pmemsave 0x6000 %d "%s"\n' "$E2E_MARKER_REGION_SIZE" "$boot_dump"
+        e2e_pmemsave "$boot_dump"
         sleep 1
         shell_cmd 'echo diskirq written > 1:/DIRQ.TXT'
         shell_cmd 'cat 1:/DIRQ.TXT'
         printf 'info pic\n'
         printf 'info irq\n'
-        printf 'pmemsave 0x6000 %d "%s"\n' "$E2E_MARKER_REGION_SIZE" "$E2E_DUMP"
+        e2e_pmemsave
         sleep 1
         printf 'quit\n'
     }
@@ -67,7 +67,7 @@ diskirq_check() {
     local entry
     entry=$(grep -E "^ *pin $gsi 0x" "$E2E_QEMU_LOG" | head -n 1)
     [ -n "$entry" ] || e2e_fail "$m: no IOAPIC pin $gsi in info pic"
-    echo "$entry" | grep -Eq "vec=$vec +active-hi $trig " || e2e_fail "$m: IOAPIC pin $gsi is not vector $vec $trig: $entry"
+    echo "$entry" | grep -E "vec=$vec +active-hi $trig " > /dev/null || e2e_fail "$m: IOAPIC pin $gsi is not vector $vec $trig: $entry"
     local raised
     raised=$(sed -n '/IRQ statistics for ioapic/,/IRQ statistics for/p' "$E2E_QEMU_LOG" | tr -d '\r' \
              | sed -nE "s/^ *$gsi: ([0-9]+).*/\1/p" | head -n 1)
@@ -77,14 +77,14 @@ diskirq_check() {
     if [ "$mode" = irq ]; then
         expect_serial "$report\$" "$m: $name routed through the IOAPIC"
         expect_no_serial 'completion interrupt missing' "$m: no fallback to polling"
-        echo "$entry" | grep -q masked && e2e_fail "$m: IOAPIC pin $gsi masked: $entry"
+        echo "$entry" | grep masked > /dev/null && e2e_fail "$m: IOAPIC pin $gsi masked: $entry"
         [ "$at_boot" -ge 10 ] || e2e_fail "$m: only $at_boot completions by interrupt during the boot"
         [ "$after" -gt "$at_boot" ] || e2e_fail "$m: the shell's file I/O took no interrupt ($at_boot -> $after)"
         [ "$polled" -eq 0 ] || e2e_fail "$m: $polled completions found by polling"
     else
         expect_serial "$report, line masked \(samos.disk_irq_masked\)\$" "$m: line routed but masked"
         expect_serial "^disk: $name completion interrupt missing, polling from now on\$" "$m: driver fell back to polling"
-        echo "$entry" | grep -q masked || e2e_fail "$m: IOAPIC pin $gsi not masked: $entry"
+        echo "$entry" | grep masked > /dev/null || e2e_fail "$m: IOAPIC pin $gsi not masked: $entry"
         [ "$after" -eq 0 ] || e2e_fail "$m: $after completions by interrupt with the line masked"
         [ "$polled" -eq 3 ] || e2e_fail "$m: $polled waits gave up, expected 3 before polling for good"
     fi

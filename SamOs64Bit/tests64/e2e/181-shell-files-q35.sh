@@ -5,6 +5,7 @@
 # (mtools, fsck.fat) reads what SamOS wrote; SamOS reads a file Linux
 # wrote. Error cases: mkdir existing, rmdir non-empty, rm a
 # directory, cat a missing file. See _files_lib.sh.
+# e2e-requires: ahci (q35's AHCI data disks)
 E2E_MACHINE=q35
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"

@@ -9,6 +9,7 @@
 # measures the sleep with uptime: it must not wake early, and must
 # wake while both spinners still run (see the check at the end).
 # The TSC line shows the CPUID max-leaf check and the PIT calibration.
+# e2e-requires: x86 (the TSC calibrated against the PIT)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"

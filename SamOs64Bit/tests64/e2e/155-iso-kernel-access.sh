@@ -10,6 +10,7 @@
 #   - write to physical 0x100000 at its old identity address, which
 #     every process used to map user-writable:
 #     not mapped at all now, error 6
+# e2e-requires: x86 (x86 exception names, error codes and registers in the report; aarch64-traps.sh and aarch64-user.sh check the ESR/ELR/FAR reports)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"
