@@ -109,6 +109,22 @@ user_programs:
 	$(MAKE) -C ./programs/simple all
 	$(MAKE) -C ./programs/ktest  all
 
+# The user stdlib as a sysroot for another compiler
+# (SamCompiler's -target=samos-x86_64): include/ holds the stdlib
+# headers, lib/ crt0.o (_start, c_start), libsamos.a (the syscall
+# stubs and the libc) and user.ld (the programs' linker script).
+SYSROOT = $(BUILD)/x86_64/sysroot
+all: sysroot
+.PHONY: sysroot
+sysroot: user_programs
+	rm -rf $(SYSROOT)
+	mkdir -p $(SYSROOT)/include $(SYSROOT)/lib
+	cp ./programs/stdlib/src/*.h $(SYSROOT)/include/
+	$(LD) -r ./programs/stdlib/build/start.asm.o ./programs/stdlib/build/start.o -o $(SYSROOT)/lib/crt0.o
+	x86_64-elf-ar rcs $(SYSROOT)/lib/libsamos.a $(addprefix ./programs/stdlib/build/,samos.asm.o samos.o \
+	    stdlib.o stdio.o string.o memory.o file.o)
+	cp ./programs/shell/linker.ld $(SYSROOT)/lib/user.ld
+
 # Lecture 200 - mirror clean targets across user programs.
 user_programs_clean:
 	$(MAKE) -C ./programs/stdlib clean
@@ -221,6 +237,8 @@ USER_LIBC   = $(addprefix $(USER_DIR)/libc/,start.S.o samos.S.o start.o samos.o 
 USER_ELFS   = $(addprefix $(USER_DIR)/,blank.elf hello.elf shell.elf rvtest.elf)
 USER_LD     = ./programs/stdlib/arch/$(ARCH)/linker.ld
 USER_ALL    = ./bin/$(ARCH)/initrd.img
+SYSROOT_CRT0 = $(USER_DIR)/libc/start.S.o $(USER_DIR)/libc/start.o
+SYSROOT_LIBS = $(filter-out $(SYSROOT_CRT0),$(USER_LIBC))
 endif
 
 all: ./bin/$(ARCH)/kernel.img $(USER_STUBS) $(USER_ALL)
@@ -244,6 +262,8 @@ STDLIB_OBJS = $(USER_STUBS) $(addprefix $(USER_BUILD)/stdlib/src/,start.o samos.
     string.o memory.o file.o)
 USER_ELFS   = $(addprefix $(USER_BUILD)/,blank.elf hello.elf ktest.elf shell.elf)
 RAMDISK     = ./bin/aarch64/ramdisk.img
+SYSROOT_CRT0 = $(BUILD)/user/start.o $(USER_BUILD)/stdlib/src/start.o
+SYSROOT_LIBS = $(filter-out $(SYSROOT_CRT0),$(STDLIB_OBJS))
 
 all: $(RAMDISK)
 
@@ -286,6 +306,19 @@ $(OSIMG): ./bin/aarch64/kernel.img $(USER_ELFS) ./hello.txt ./assets/sysfont.bmp
 	bash ./tools/arch-osimg.sh $@ ./bin/aarch64/kernel.img $(USER_BUILD)
 	@echo "make: $@ ($$(du -h $@ | cut -f1) on disk)"
 endif
+
+# The port's user stdlib as a sysroot for SamCompiler's
+# -target=samos-<arch>, laid out as on x86 (the x86 sysroot rule).
+SYSROOT = $(BUILD)/sysroot
+all: $(SYSROOT)/lib/libsamos.a
+
+$(SYSROOT)/lib/libsamos.a: $(SYSROOT_CRT0) $(SYSROOT_LIBS) $(USER_LD)
+	rm -rf $(SYSROOT)
+	mkdir -p $(SYSROOT)/include $(SYSROOT)/lib
+	cp ./programs/stdlib/src/*.h $(SYSROOT)/include/
+	$(CROSS)ld -r $(SYSROOT_CRT0) -o $(SYSROOT)/lib/crt0.o
+	$(AR) rcs $@ $(SYSROOT_LIBS)
+	cp $(USER_LD) $(SYSROOT)/lib/user.ld
 
 shared_check: $(BUILD)/libsamos.a
 
