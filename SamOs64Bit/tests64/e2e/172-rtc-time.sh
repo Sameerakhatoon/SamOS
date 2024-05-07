@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# e2e-requires: x86 (the CMOS RTC)
 # e2e/172-rtc-time.sh - the CMOS RTC gives the wall-clock
 # time. QEMU starts its RTC from the host clock in UTC, so the unix
 # time the kernel prints at boot lies between the host time before

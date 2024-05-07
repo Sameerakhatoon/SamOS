@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# e2e-requires: pci (PCI enumeration; riscv64 has no PCI host bridge driver yet)
 # e2e/05-pci.sh - pci_init enumerated at least one device.
 # Under QEMU `-machine pc` we expect ~5: host bridge, ISA bridge,
 # IDE controller, VGA, etc.

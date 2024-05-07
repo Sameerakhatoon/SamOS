@@ -45,5 +45,7 @@ void sbi_set_timer(uint64_t stime);
 void sbi_shutdown(void);
 // SRST cold reboot. Returns only if it fails.
 void sbi_reboot(void);
+// IPI extension: raise sip.SSIP on the harts base + bit n of mask.
+void sbi_send_ipi(unsigned long mask, unsigned long base);
 
 #endif

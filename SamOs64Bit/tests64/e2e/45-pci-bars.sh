@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# e2e-requires: pci (PCI enumeration; riscv64 has no PCI host bridge driver yet)
 # e2e/45-pci-bars.sh - L181 PCI scan populated at least one device
 # with a non-zero BAR address or size.
 . "$(dirname "$0")/_lib.sh"

@@ -5,7 +5,7 @@
 # runs each fault and are killed: executing from the stack, the heap
 # and .data (error 0x15, instruction fetch from a present NX page)
 # and writing to its own code (error 7).
-# e2e-requires: x86 (x86 exception names, error codes and registers in the report; aarch64-traps.sh and aarch64-user.sh check the ESR/ELR/FAR reports)
+# e2e-requires: x86|riscv64 (the x86 and riscv64 fault reports; aarch64-traps.sh and aarch64-user.sh check the ESR/ELR/FAR reports)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"
@@ -17,10 +17,21 @@ MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.
 
 boot_and_dump 40
 expect_serial '^BSS OK$' ".bss zeroed and writable"
-expect_serial '^USER FAULT: #PF in @:/KTEST.ELF: rip 0x00000000003f[0-9a-f]{4} error 0x0000000000000015 cr2 0x00000000003f[0-9a-f]{4}$' "stack is NX"
-expect_serial '^USER FAULT: #PF in @:/KTEST.ELF: rip 0x00000000100[0-9a-f]{5} error 0x0000000000000015 cr2 0x00000000100[0-9a-f]{5}$' "heap is NX"
-expect_serial '^USER FAULT: #PF in @:/KTEST.ELF: rip 0x00000000004[0-9a-f]{5} error 0x0000000000000015 cr2 0x00000000004[0-9a-f]{5}$' ".data is NX"
-expect_serial '^USER FAULT: #PF in @:/KTEST.ELF: rip 0x00000000004[0-9a-f]{5} error 0x0000000000000007 cr2 0x00000000004[0-9a-f]{5}$' "code is read-only"
+case "$E2E_ARCH" in
+riscv64)
+    # An instruction page fault (scause 12) with sepc = stval =
+    # the data page, a store page fault (15) on the code.
+    F='^USER FAULT: scause 0xc \(instruction page fault\) in @:/KTEST.ELF:'
+    expect_serial "$F sepc (0x3f[0-9a-f]{4}) stval \\1\$" "stack is NX"
+    expect_serial "$F sepc (0x100[0-9a-f]{5}) stval \\1\$" "heap is NX"
+    expect_serial "$F sepc (0x4[0-9a-f]{5}) stval \\1\$" ".data is NX"
+    expect_serial '^USER FAULT: scause 0xf \(store page fault\) in @:/KTEST.ELF: sepc 0x4[0-9a-f]{5} stval 0x4[0-9a-f]{5}$' "code is read-only" ;;
+*)
+    expect_serial '^USER FAULT: #PF in @:/KTEST.ELF: rip 0x00000000003f[0-9a-f]{4} error 0x0000000000000015 cr2 0x00000000003f[0-9a-f]{4}$' "stack is NX"
+    expect_serial '^USER FAULT: #PF in @:/KTEST.ELF: rip 0x00000000100[0-9a-f]{5} error 0x0000000000000015 cr2 0x00000000100[0-9a-f]{5}$' "heap is NX"
+    expect_serial '^USER FAULT: #PF in @:/KTEST.ELF: rip 0x00000000004[0-9a-f]{5} error 0x0000000000000015 cr2 0x00000000004[0-9a-f]{5}$' ".data is NX"
+    expect_serial '^USER FAULT: #PF in @:/KTEST.ELF: rip 0x00000000004[0-9a-f]{5} error 0x0000000000000007 cr2 0x00000000004[0-9a-f]{5}$' "code is read-only" ;;
+esac
 [ "$(tr -d '\r' < "$E2E_SERIAL" | grep -c '^process killed$')" -ge 4 ] \
     || e2e_fail "expected four killed processes"
 expect_no_serial 'KTEST survived|BSS FAIL' "nothing ran from a data page"

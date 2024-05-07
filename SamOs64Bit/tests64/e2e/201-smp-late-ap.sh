@@ -9,7 +9,7 @@
 # and 2. Before the start handshake the late AP would have run on with the slot and
 # stack of the next processor. Then the SMP self-test and BLANK.ELF's
 # self-test run on the three CPUs.
-# e2e-requires: smp (four CPUs; aarch64 starts its secondary CPUs in the aarch64 SMP work)
+# e2e-requires: smp (four CPUs; aarch64 starts its secondary CPUs in the aarch64 SMP work, riscv64 its harts in the riscv64 SMP work)
 . "$(dirname "$0")/_lib.sh"
 
 export E2E_SMP=4

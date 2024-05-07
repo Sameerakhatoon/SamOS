@@ -10,23 +10,42 @@
 #   - write to physical 0x100000 at its old identity address, which
 #     every process used to map user-writable:
 #     not mapped at all now, error 6
-# e2e-requires: x86 (x86 exception names, error codes and registers in the report; aarch64-traps.sh and aarch64-user.sh check the ESR/ELR/FAR reports)
+# e2e-requires: x86|riscv64 (the x86 and riscv64 fault reports; aarch64-traps.sh and aarch64-user.sh check the ESR/ELR/FAR reports)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"
 E2E_IMAGE="$E2E_TMP/os.img"
-printf 'samos.run=KTEST.ELF kwrite ffffffff80105000;KTEST.ELF kwrite ffff800000006000;KTEST.ELF kread ffff800000100000;KTEST.ELF kexec ffffffff80105000;KTEST.ELF kwrite 100000\n' \
-    > "$E2E_TMP/CMDLINE.TXT"
+case "$E2E_ARCH" in
+riscv64)
+    # The kernel is at 0xffffffff80200000 (pa 0x80200000), the
+    # Sv48 direct map at 0xffff800000000000; its text alias and free
+    # RAM are present, supervisor-only. Under Sv39 those direct-map
+    # addresses are not canonical, which faults the same way. The low
+    # half has no kernel mapping at all (the riscv64 MMU work removed the identity map).
+    printf 'samos.run=KTEST.ELF kwrite ffffffff80201000;KTEST.ELF kwrite ffff800080200000;KTEST.ELF kread ffff800080400000;KTEST.ELF kexec ffffffff80201000;KTEST.ELF kwrite 80200000\n' ;;
+*)
+    printf 'samos.run=KTEST.ELF kwrite ffffffff80105000;KTEST.ELF kwrite ffff800000006000;KTEST.ELF kread ffff800000100000;KTEST.ELF kexec ffffffff80105000;KTEST.ELF kwrite 100000\n' ;;
+esac > "$E2E_TMP/CMDLINE.TXT"
 MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.TXT" ::/CMDLINE.TXT \
     || e2e_fail "mcopy CMDLINE.TXT"
 
 boot_and_dump 40
-F='^USER FAULT: #PF in @:/KTEST.ELF: rip 0x00000000004[0-9a-f]+'
-expect_serial "$F error 0x0000000000000007 cr2 0xffffffff80105000$" "write to the kernel image refused"
-expect_serial "$F error 0x0000000000000007 cr2 0xffff800000006000$" "write through the direct map refused"
-expect_serial "$F error 0x0000000000000005 cr2 0xffff800000100000$" "read through the direct map refused"
-expect_serial '^USER FAULT: #PF in @:/KTEST.ELF: rip 0xffffffff80105000 error 0x0000000000000015 cr2 0xffffffff80105000$' "jump into kernel text refused"
-expect_serial "$F error 0x0000000000000006 cr2 0x0000000000100000$" "old identity map of the kernel is gone"
+case "$E2E_ARCH" in
+riscv64)
+    F='^USER FAULT: scause 0x[df] \((load|store) page fault\) in @:/KTEST.ELF: sepc 0x4[0-9a-f]+'
+    expect_serial "$F stval 0xffffffff80201000$" "write to the kernel image refused"
+    expect_serial "$F stval 0xffff800080200000$" "write through the direct map refused"
+    expect_serial '^USER FAULT: scause 0xd \(load page fault\) in @:/KTEST.ELF: sepc 0x4[0-9a-f]+ stval 0xffff800080400000$' "read through the direct map refused"
+    expect_serial '^USER FAULT: scause 0xc \(instruction page fault\) in @:/KTEST.ELF: sepc 0xffffffff80201000 stval 0xffffffff80201000$' "jump into kernel text refused"
+    expect_serial "$F stval 0x80200000$" "no kernel mapping in the low half" ;;
+*)
+    F='^USER FAULT: #PF in @:/KTEST.ELF: rip 0x00000000004[0-9a-f]+'
+    expect_serial "$F error 0x0000000000000007 cr2 0xffffffff80105000$" "write to the kernel image refused"
+    expect_serial "$F error 0x0000000000000007 cr2 0xffff800000006000$" "write through the direct map refused"
+    expect_serial "$F error 0x0000000000000005 cr2 0xffff800000100000$" "read through the direct map refused"
+    expect_serial '^USER FAULT: #PF in @:/KTEST.ELF: rip 0xffffffff80105000 error 0x0000000000000015 cr2 0xffffffff80105000$' "jump into kernel text refused"
+    expect_serial "$F error 0x0000000000000006 cr2 0x0000000000100000$" "old identity map of the kernel is gone" ;;
+esac
 [ "$(tr -d '\r' < "$E2E_SERIAL" | grep -c '^process killed$')" -ge 5 ] \
     || e2e_fail "expected five killed processes"
 expect_no_serial 'KTEST survived' "no access went through"

@@ -213,9 +213,9 @@ static int parent_test(void)
     expect("exit(42) status", status, 42);
 
     expect("main returning 7", run("rvtest.elf ret 7"), 7);
-    expect("illegal instruction is 128 + 2", run("rvtest.elf fault illegal"), 128 + 2);
-    expect("load page fault is 128 + 13", run("rvtest.elf fault load"), 128 + 13);
-    expect("store page fault is 128 + 15", run("rvtest.elf fault store"), 128 + 15);
+    expect("illegal instruction is 128 + 6", run("rvtest.elf fault illegal"), 128 + 6);
+    expect("load page fault is 128 + 14", run("rvtest.elf fault load"), 128 + 14);
+    expect("store page fault is 128 + 14", run("rvtest.elf fault store"), 128 + 14);
 
     // Other syscalls with a pointer they may not use.
     expect("fopen of a kernel path", samos_fopen((const char*)KERNEL_PTR, "r") < 0, 1);

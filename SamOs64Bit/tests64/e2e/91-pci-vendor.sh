@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# e2e-requires: pci (PCI enumeration; riscv64 has no PCI host bridge driver yet)
 # e2e/91-pci-vendor.sh - PCI scan populated a vendor field that
 # is not 0x0000 / 0xFFFF (the no-device sentinels).
 . "$(dirname "$0")/_lib.sh"

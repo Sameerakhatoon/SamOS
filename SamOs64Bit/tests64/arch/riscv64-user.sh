@@ -19,7 +19,7 @@
 #   3. sched: two CPU-bound RVTEST.ELF spin tasks that never yield
 #      interleave their lines (behaviour, not host speed: each one's
 #      lines start before the other's end).
-#   4. parent: waitpid gets exit(42), main's 7, 128 + scause for an
+#   4. parent: waitpid gets exit(42), main's 7, x86's 128 + vector for an
 #      illegal instruction and load/store page faults, 137 for a kill;
 #      bad pointers to waitpid, fopen, fstat and fread fail (-EFAULT
 #      for waitpid); the wrong-machine ELF gives -EBADEXEC.
@@ -147,9 +147,9 @@ for mode in sv48 sv39; do
     boot parent "samos.run=RVTEST.ELF parent" '^PARENT (OK|FAIL)'
     expect '^PARENT exit\(42\) status ok 42$' "waitpid returns exit(42)"
     expect '^PARENT main returning 7 ok 7$' "waitpid returns main's 7"
-    expect '^PARENT illegal instruction is 128 \+ 2 ok 130$' "a child's illegal instruction: 130"
-    expect '^PARENT load page fault is 128 \+ 13 ok 141$' "a child's load page fault: 141"
-    expect '^PARENT store page fault is 128 \+ 15 ok 143$' "a child's store page fault: 143"
+    expect '^PARENT illegal instruction is 128 \+ 6 ok 134$' "a child's illegal instruction: 134 (x86's #UD)"
+    expect '^PARENT load page fault is 128 \+ 14 ok 142$' "a child's load page fault: 142 (x86's #PF)"
+    expect '^PARENT store page fault is 128 \+ 14 ok 142$' "a child's store page fault: 142"
     expect '^PARENT killed status is 128 \+ 9 ok 137$' "a killed child: 137"
     expect '^PARENT waitpid into the kernel ok -20$' "waitpid with a kernel pointer: -EFAULT"
     expect '^PARENT waitpid into an unmapped page ok -20$' "waitpid with an unmapped pointer: -EFAULT"

@@ -14,13 +14,17 @@ FILES_BUS=virtio-mmio
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_files_lib.sh"
 
+# riscv64's slots are level PLIC sources.
+trigger=edge
+[ "$E2E_ARCH" = riscv64 ] && trigger=level
+
 mmio_serial_check() {
     local log=$1 tag=$2 id
     for id in 0 1 2; do
         tr -d '\r' < "$log" | grep -E "^virtio-blk: disk $id, [0-9]+ MiB, flush, queue [0-9]+\$" > /dev/null \
             || e2e_fail "$tag: no virtio-blk disk $id in $(basename "$log")"
     done
-    [ "$(tr -d '\r' < "$log" | grep -Ec '^disk: virtio-blk completions by interrupt, GSI [0-9]+ edge active-high, vector [0-9]+$')" -eq 3 ] \
+    [ "$(tr -d '\r' < "$log" | grep -Ec "^disk: virtio-blk completions by interrupt, GSI [0-9]+ $trigger active-high, vector [0-9]+\$")" -eq 3 ] \
         || e2e_fail "$tag: not three virtio-blk lines by interrupt in $(basename "$log")"
     if tr -d '\r' < "$log" | grep -E 'completion interrupt missing|has no IOAPIC route|virtio-blk: request timed out' > /dev/null; then
         e2e_fail "$tag: virtio-blk fell back to polling or timed out in $(basename "$log")"

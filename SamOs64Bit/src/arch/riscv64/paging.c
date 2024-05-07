@@ -109,7 +109,7 @@ int paging_map(struct paging_desc* desc, void* virt, void* phys, int flags)
     if (kva) {
         kmem_lock();   // the kernel half is shared (docs/locking.md)
     }
-    uint64_t* e = pt_entry(desc->mm.root, va, 0, present);
+    uint64_t* e = present ? pt_entry_split(desc->mm.root, va) : pt_entry(desc->mm.root, va, 0, false);
     int res = 0;
     if (e) {
         *e = present ? ((pa >> 2) & 0x003ffffffffffc00ul) | pte | PTE_V : 0;

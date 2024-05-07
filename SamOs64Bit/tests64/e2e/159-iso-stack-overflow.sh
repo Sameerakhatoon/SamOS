@@ -4,7 +4,7 @@
 # recursion in KTEST.ELF stack faults there, the process is killed and
 # the kernel keeps running. Before the isolation work the memory below the stack was
 # writable RAM, so an overflow silently corrupted it.
-# e2e-requires: x86 (x86 exception names, error codes and registers in the report; aarch64-traps.sh and aarch64-user.sh check the ESR/ELR/FAR reports)
+# e2e-requires: x86|riscv64 (the x86 and riscv64 fault reports; aarch64-traps.sh and aarch64-user.sh check the ESR/ELR/FAR reports)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"
@@ -15,8 +15,14 @@ MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.
 
 boot_and_dump 40
 expect_serial 'KTEST stack: recursing$' "KTEST started recursing"
-# error 6 = user write to a not-present page, cr2 inside the guard page
-expect_serial '^USER FAULT: #PF in @:/KTEST.ELF: rip 0x00000000004[0-9a-f]+ error 0x0000000000000006 cr2 0x00000000003fa[0-9a-f]{3}$' "#PF in the guard page"
+case "$E2E_ARCH" in
+riscv64)
+    # A store (the call's frame) into the guard page
+    expect_serial '^USER FAULT: scause 0xf \(store page fault\) in @:/KTEST.ELF: sepc 0x4[0-9a-f]+ stval 0x3fa[0-9a-f]{3}$' "store page fault in the guard page" ;;
+*)
+    # error 6 = user write to a not-present page, cr2 inside the guard page
+    expect_serial '^USER FAULT: #PF in @:/KTEST.ELF: rip 0x00000000004[0-9a-f]+ error 0x0000000000000006 cr2 0x00000000003fa[0-9a-f]{3}$' "#PF in the guard page" ;;
+esac
 expect_serial '^process killed$' "overflowing process killed"
 expect_no_serial 'KTEST survived' "the recursion did not continue"
 expect_no_serial 'KERNEL PANIC|KERNEL FAULT' "no kernel panic"

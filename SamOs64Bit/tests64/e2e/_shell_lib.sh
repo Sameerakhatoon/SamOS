@@ -98,7 +98,7 @@ shell_cmd() {
 
 serial_offset() {
     local text=$1 from=${2:-0} off
-    off=$(tr -d '\r' < "$E2E_SERIAL" | tail -c +"$((from + 1))" | grep -boF -- "$text" | head -n 1 | cut -d: -f1)
+    off=$(tr -d '\r' < "$E2E_SERIAL" | tail -c +"$((from + 1))" | grep -aboF -- "$text" | head -n 1 | cut -d: -f1)
     if [ -z "$off" ]; then
         echo -1
     else

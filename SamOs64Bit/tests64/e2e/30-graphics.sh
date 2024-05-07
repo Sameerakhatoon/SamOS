@@ -9,7 +9,7 @@
 boot_and_dump 20
 expect_stage_value 37 -eq 1 "graphics_screen_info() non-NULL"
 expect_stage_value 38 -eq 1 "screen width + height > 0"
-line=$(tr -d '\r' < "$E2E_SERIAL" | grep -E '^graphics: framebuffer [0-9]+x[0-9]+ pitch' | head -n 1)
+line=$(tr -d '\r' < "$E2E_SERIAL" | grep -aE '^graphics: framebuffer [0-9]+x[0-9]+ pitch' | head -n 1)
 [[ $line =~ ^graphics:\ framebuffer\ ([0-9]+)x([0-9]+)\ pitch\ ([0-9]+),\ mapped\ ([0-9]+)\ KiB\ of\ ([0-9]+)\ KiB$ ]] \
     || e2e_fail "no framebuffer size line (got '$line')"
 w=${BASH_REMATCH[1]} h=${BASH_REMATCH[2]} pitch=${BASH_REMATCH[3]}

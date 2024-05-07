@@ -71,6 +71,19 @@
 #define SLOT_FPCR    (REGS_GPRS + 2 * REGS_VECS)
 #define FPCR_BITS    0x07c00000ul    // AHP, DN, FZ, RMode
 #define FPSR_BITS    0x0800009ful    // QC, IDC, IXC..IOC
+#elif defined(__riscv)
+// x1-x31 (slot 0 a0 after the ecall, slot 10 a0 at it), then
+// f0-f31 one slot each (counted as 16 pairs) and fcsr
+// (arch/riscv64/regs.S). a7 is the syscall number.
+#define REGS_GPRS    32
+#define REGS_VECS    16
+#define SLOT_ARG0    10
+#define SLOT_ARG1    11
+#define SLOT_NR      17
+#define VEC_NAME     "f"
+#define REGS_EXTRA   1
+#define SLOT_FCSR    (REGS_GPRS + 2 * REGS_VECS)
+#define FCSR_BITS    0x7Ful          // fflags, frm 0-3
 #else
 #define REGS_GPRS    15          // rax..r15
 #define REGS_VECS    16          // xmm0-15
@@ -101,6 +114,17 @@ static const char* slot_name(int i)
     }
     snprintf(name, sizeof(name), i == SLOT_ARG0 ? "x0 in" : "x%d", i);
     return name;
+#elif defined(__riscv)
+    static char name[8];
+    if (i >= SLOT_FCSR) {
+        return "fcsr";
+    }
+    if (i >= REGS_GPRS) {
+        snprintf(name, sizeof(name), "f%d", i - REGS_GPRS);
+    } else {
+        snprintf(name, sizeof(name), i == SLOT_ARG0 ? "a0 in" : i == 0 ? "a0" : "x%d", i);
+    }
+    return name;
 #else
     const char* names[15] = {
         "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8",
@@ -118,7 +142,7 @@ static void regs_set_call(unsigned long* in, unsigned long cmd, unsigned long a0
     in[SLOT_ARG0] = a0;
     in[SLOT_ARG1] = a1;
     in[0] = ret;
-#if defined(__aarch64__)
+#if defined(__aarch64__) || defined(__riscv)
     in[SLOT_NR] = cmd;
 #endif
 }
@@ -141,9 +165,11 @@ static int regs_check(unsigned long seed, int round, const char* what,
     for (int i = 0; i < REGS_SLOTS; i++) {
         if (in[i] != out[i]) {
             char xmm[8] = "";
+#if !defined(__riscv)
             if (i >= REGS_GPRS && i < REGS_GPRS + 2 * REGS_VECS) {
                 snprintf(xmm, sizeof(xmm), "%d%s", (i - REGS_GPRS) / 2, (i - REGS_GPRS) % 2 ? ".hi" : ".lo");
             }
+#endif
             say("REGS FAIL %lu round %d after %s: %s%s expected %p got %p\n", seed, round, what,
                 slot_name(i), xmm, (void*)in[i], (void*)out[i]);
             return 1;
@@ -164,6 +190,8 @@ static int regs_test(unsigned long seed)
 #if defined(__aarch64__)
         in[SLOT_FPCR] &= FPCR_BITS;          // only bits that read back
         in[SLOT_FPCR + 1] &= FPSR_BITS;
+#elif defined(__riscv)
+        in[SLOT_FCSR] &= FCSR_BITS;
 #endif
 
         // A syscall that returns straight through the trap frame.
@@ -497,7 +525,7 @@ static int parent_test(void)
     parent_expect("exit(42) status", status, 42);
 
     parent_expect("main returning 7", parent_run("ktest.elf exit 7", &pid), 7);
-#if defined(__aarch64__)
+#if defined(__aarch64__) || defined(__riscv)
     // No divide trap here; a fault's status uses x86's numbers.
     parent_expect("undefined instruction is 128 + 6", parent_run("ktest.elf ud", &pid), 128 + 6);
 #else
@@ -1029,6 +1057,8 @@ static int readers_test(int argc, char** argv)
 
 #if defined(__aarch64__)
 #define RET_BYTES 0xC0, 0x03, 0x5F, 0xD6           // ret (0xd65f03c0)
+#elif defined(__riscv)
+#define RET_BYTES 0x67, 0x80, 0x00, 0x00           // ret (jalr x0, 0(ra))
 #else
 #define RET_BYTES 0xC3                             // ret
 #endif
@@ -1089,6 +1119,9 @@ int main(int argc, char** argv)
 #if defined(__aarch64__)
         print("KTEST gp: masking IRQs at EL0\n");
         __asm__ volatile("msr daifset, #2");
+#elif defined(__riscv)
+        print("KTEST gp: reading sstatus in U-mode\n");
+        __asm__ volatile("csrr t0, sstatus" ::: "t0");
 #else
         print("KTEST gp: executing hlt in ring 3\n");
         __asm__ volatile("hlt");
@@ -1100,6 +1133,9 @@ int main(int argc, char** argv)
 #if defined(__aarch64__)
         print("KTEST ud: udf\n");
         __asm__ volatile("udf #0");
+#elif defined(__riscv)
+        print("KTEST ud: illegal instruction\n");
+        __asm__ volatile(".word 0");
 #else
         print("KTEST ud: ud2\n");
         __asm__ volatile("ud2");

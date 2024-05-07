@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# e2e-requires: pci (PCI enumeration; riscv64 has no PCI host bridge driver yet)
 # e2e/74-pci-host-bridge.sh - PCI scan found a host bridge
 # (class 6, subclass 0). QEMU -machine pc always exposes one.
 . "$(dirname "$0")/_lib.sh"

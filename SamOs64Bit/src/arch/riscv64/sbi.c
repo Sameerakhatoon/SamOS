@@ -109,3 +109,10 @@ void sbi_reboot(void)
         sbi_call(SBI_EXT_SRST, 0, 1, 0, 0);
     }
 }
+
+// IPI extension: a supervisor software interrupt on each hart in
+// `mask`, hart ids counted from `base`.
+void sbi_send_ipi(unsigned long mask, unsigned long base)
+{
+    sbi_call(SBI_EXT_IPI, 0, (long)mask, (long)base, 0);
+}

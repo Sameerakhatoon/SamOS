@@ -149,6 +149,39 @@ uint64_t* pt_entry(uint64_t root, uint64_t va, int level, bool alloc)
     return &t[vpn(va, level)];
 }
 
+// The 4 KiB PTE for `va`, as pt_entry(.., 0, true), but a
+// megapage or gigapage in the way is split into a table of the next
+// size down with the same flags (it maps the same addresses, so no
+// fence is needed for the others). paging_map's path: graphics_setup
+// aliases a kzalloc'd buffer, which may sit in the direct map, onto
+// the framebuffer.
+uint64_t* pt_entry_split(uint64_t root, uint64_t va)
+{
+    uint64_t* t = table_at(root);
+    for (int l = mmu_levels - 1; l > 0; l--) {
+        uint64_t* e = &t[vpn(va, l)];
+        if (!(*e & PTE_V) || (*e & PTE_RWX)) {
+            if (!(*e & PTE_V) && sealed && root == kernel_root && l == mmu_levels - 1) {
+                return 0;
+            }
+            uint64_t n = pt_alloc();
+            if (!n) {
+                return 0;
+            }
+            if (*e & PTE_V) {
+                uint64_t child = 1ul << (12 + 9 * (l - 1)), pa = pte_pa(*e), flags = *e & 0x3FF;
+                uint64_t* c = table_at(n);
+                for (int i = 0; i < 512; i++) {
+                    c[i] = ((pa + i * child) >> 2 & PTE_PPN_MASK) | flags;
+                }
+            }
+            *e = pte_make(n, 0);
+        }
+        t = table_at(pte_pa(*e));
+    }
+    return &t[vpn(va, 0)];
+}
+
 // Map [va, va + size) to pa with the largest pages (up to 1 GiB) that
 // alignment and existing tables allow. `replace`: an existing leaf is
 // overwritten (the direct map grows over the boot pass's 4 KiB pages);

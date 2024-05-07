@@ -12,7 +12,7 @@
 # under a spinlock or with atomic_inc. BLANK.ELF's user self-test and
 # the shell then run with the four CPUs scheduling. QEMU's own `info
 # cpus` lists four CPUs.
-# e2e-requires: smp (four CPUs; aarch64 starts its secondary CPUs in the aarch64 SMP work)
+# e2e-requires: smp (four CPUs; aarch64 starts its secondary CPUs in the aarch64 SMP work, riscv64 its harts in the riscv64 SMP work)
 . "$(dirname "$0")/_lib.sh"
 
 export E2E_SMP=4

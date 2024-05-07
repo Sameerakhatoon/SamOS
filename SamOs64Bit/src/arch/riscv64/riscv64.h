@@ -21,6 +21,8 @@ __attribute__((noreturn)) void riscv64_halt(void);
 int riscv64_cpu_node(const struct fdt* f, uint64_t hartid);
 // The device tree riscv64_main parsed.
 const struct fdt* riscv64_fdt(void);
+// The console UART's PLIC source, or -1.
+int riscv64_uart_irq(void);
 
 #define csr_read(csr) ({ uint64_t v_; __asm__ volatile("csrr %0, " #csr : "=r"(v_)); v_; })
 #define csr_write(csr, v) __asm__ volatile("csrw " #csr ", %0" : : "rK"((uint64_t)(v)) : "memory")

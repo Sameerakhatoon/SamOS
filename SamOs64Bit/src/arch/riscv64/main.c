@@ -215,6 +215,13 @@ static void mmu_tests(const char* args)
 
 // ---- UART receive interrupt -------------------------------------
 
+// The UART's PLIC source is its `interrupts` cell (10 on QEMU virt);
+// arch_irq_init takes it for the keyboard path.
+int riscv64_uart_irq(void)
+{
+    return uart_node < 0 ? -1 : (int)fdt_getprop_u32(&fdt, uart_node, "interrupts", 0);
+}
+
 static unsigned uart_irq;
 static volatile char rx_line[64];
 static volatile int rx_len;
@@ -233,10 +240,9 @@ static void uart_interrupt(struct trap_frame* frame)
     }
 }
 
-// The UART's PLIC source is its `interrupts` cell (10 on QEMU virt).
 static void uart_irq_init(void)
 {
-    uart_irq = uart_node < 0 ? 0 : fdt_getprop_u32(&fdt, uart_node, "interrupts", 0);
+    uart_irq = riscv64_uart_irq() < 0 ? 0 : riscv64_uart_irq();
     if (plic_register_handler(uart_irq, uart_interrupt) != 0) {
         console_printf("uart: no interrupt in the device tree\n");
         return;
@@ -431,7 +437,7 @@ void riscv64_main(uint64_t hartid, uint64_t dtb)
 {
     percpu_init(hartid);
     sbi_init();
-    console_printf("\nSamOS riscv64 (S-R4)\n");
+    console_printf("\nSamOS riscv64 (S-R5)\n");
     console_printf("boot hart: %lu\n", hartid);
     console_printf("dtb: 0x%lx\n", dtb);
     sbi_print_info();
@@ -459,6 +465,9 @@ void riscv64_main(uint64_t hartid, uint64_t dtb)
     riscv64_bringup = cmdline_has(args, "samos.bringup");
     build_boot_info(args);
     if (!riscv64_bringup) {
+        // Where the e2e harness reads the boot markers (pmemsave).
+        console_printf("boot: kernel_main, boot markers at pa 0x%lx\n",
+                       kernel_image_pa((const void*)riscv64_boot_markers));
         kernel_main();
     }
 

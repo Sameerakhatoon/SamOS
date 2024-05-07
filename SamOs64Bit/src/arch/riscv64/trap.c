@@ -15,6 +15,8 @@
 #include "arch/riscv64/riscv64.h"
 #include "arch/riscv64/timer.h"
 #include "arch/riscv64/trap.h"
+#include "cpu/percpu.h"
+#include "cpu/smp.h"
 #include "isr80h/isr80h.h"
 #include "kernel.h"
 #include "task/process.h"
@@ -137,12 +139,27 @@ static void riscv64_clock(struct trap_frame* frame)
     }
 }
 
+// An IPI is sip.SSIP (set by this hart or by the SBI for
+// another), with the kinds in this hart's ipi_pending (arch_send_ipi).
+// Clear the bit first: one sent while the handlers run comes back.
+static void software_interrupt(struct trap_frame* f)
+{
+    csr_clear(sip, SIE_SSIE);
+    uint32_t pending = __atomic_exchange_n(&this_cpu()->arch.ipi_pending, 0, __ATOMIC_ACQ_REL);
+    for (int ipi = 0; pending; ipi++, pending >>= 1) {
+        if (pending & 1) {
+            smp_handle_ipi((enum arch_ipi)ipi, f);
+        }
+    }
+}
+
 static void interrupt(struct trap_frame* f)
 {
     uint64_t code = f->scause & ~SCAUSE_INTERRUPT;
     switch (code) {
     case IRQ_S_TIMER: riscv64_clock(f); break;
     case IRQ_S_EXT: plic_handle(f); break;
+    case IRQ_S_SOFT: software_interrupt(f); break;
     default:
         // Nothing raises the others yet; mask one so it cannot storm.
         console_printf("trap: unexpected %s (scause 0x%lx), masked\n", cause_name(f->scause), f->scause);
@@ -154,15 +171,30 @@ static void interrupt(struct trap_frame* f)
     }
 }
 
+// The x86 vector of the same kind of fault, so the parent's
+// status is the same on every arch (as aarch64 does): page
+// faults 14, illegal instruction 6 (#UD), misaligned 17 (#AC),
+// breakpoint 3, anything else 13 (#GP).
+static int fault_vector(uint64_t scause)
+{
+    switch (scause) {
+    case 12: case 13: case 15: return 14;
+    case 2: return 6;
+    case 0: case 4: case 6: return 17;
+    case 3: return 3;
+    default: return 13;
+    }
+}
+
 // As on x86, a fault in U-mode kills only that process. The
-// parent's wait sees 128 + scause (x86: 128 + the vector).
+// parent's wait sees 128 + the x86 vector (fault_vector).
 static void user_fault(struct trap_frame* f)
 {
     kernel_page();
     struct process* process = task_current()->process;
     console_printf("\nUSER FAULT: scause 0x%lx (%s) in %s: sepc 0x%lx stval 0x%lx\nprocess killed\n",
                    f->scause, cause_name(f->scause), process->filename, f->sepc, f->stval);
-    process_exit(process, PROCESS_EXIT_FAULT_BASE + (int)f->scause);
+    process_exit(process, PROCESS_EXIT_FAULT_BASE + fault_vector(f->scause));
     task_next();
 }
 

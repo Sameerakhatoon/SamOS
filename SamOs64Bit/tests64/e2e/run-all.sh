@@ -18,7 +18,7 @@
 #     # e2e-requires: <feature>... (<reason>)
 # and is skipped, with its reason, when the hook's E2E_ARCH_PROVIDES
 # lacks one of the features. x86_64 provides every feature but
-# virtio-mmio.
+# virtio-mmio. A word "a|b" needs either one.
 set -u
 cd "$(dirname "$0")"
 
@@ -37,12 +37,17 @@ provides=$(E2E_ROOT="$(cd ../.. && pwd)" bash -c '. "./_arch_$E2E_ARCH.sh" && ec
 }
 
 # missing_feature <test>: the first feature the test needs that this
-# arch does not provide, or nothing.
+# arch does not provide, or nothing. A word "a|b" is met by any
+# one of its alternatives (x86|riscv64: a test with lines for both).
 missing_feature() {
-    local need f
+    local need f alt
     need=$(sed -n 's/^# e2e-requires: *\([^(]*\).*/\1/p' "$1" | head -n 1)
     for f in $need; do
-        case " $provides " in *" $f "*) ;; *) echo "$f"; return ;; esac
+        for alt in ${f//|/ }; do
+            case " $provides " in *" $alt "*) continue 2 ;; esac
+        done
+        echo "$f"
+        return
     done
 }
 

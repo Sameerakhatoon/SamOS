@@ -51,7 +51,7 @@ SHARED_OBJS = kernel.o kernel_selftest.o string/string.o \
     loader/formats/elf.o loader/formats/elfloader.o \
     lib/vector/vector.o lib/spinlock/spinlock.o cpu/smp.o cpu/smp_selftest.o \
     virtio/virtio.o virtio/virtio_pci.o virtio/virtio_mmio.o virtio/virtio_bus.o disk/drivers/virtio_blk.o \
-    keyboard/virtio_input.o disk/drivers/ramdisk.o \
+    keyboard/virtio_input.o keyboard/serial_input.o disk/drivers/ramdisk.o \
     usb/xhci.o usb/usb_hid.o disk/drivers/usb_msc.o
 
 # Freestanding, warnings are errors, no unused-parameter noise.
@@ -194,7 +194,8 @@ PORT_OBJS = arch/riscv64/boot.S.o arch/riscv64/main.o arch/riscv64/sbi.o \
     arch/riscv64/console.o arch/riscv64/trap.o arch/riscv64/uart16550.o \
     arch/riscv64/timer.o arch/riscv64/plic.o arch/riscv64/kthread.o \
     arch/riscv64/mmu.o arch/riscv64/paging.o arch/riscv64/arch.o arch/riscv64/fpu.S.o \
-    arch/riscv64/uaccess.o arch/riscv64/uaccess.S.o arch/riscv64/mmu_test.o firmware/fdt.o
+    arch/riscv64/uaccess.o arch/riscv64/uaccess.S.o arch/riscv64/mmu_test.o firmware/fdt.o \
+    virtio/virtio_mmio_fdt.o firmware/ramfb.o
 # The kernel is the shared one (kernel_main): every shared
 # object is linked, except task/uaccess.o, which uaccess.c replaces
 # (SUM and the fixup table).
@@ -223,10 +224,11 @@ USER_STUBS   = $(patsubst ./programs/stdlib/arch/$(ARCH)/%.S,$(BUILD)/user/%.o,$
 
 # The port's user programs: the shared stdlib (programs/stdlib/
 # src) over the arch's stubs and start, BLANK.ELF and HELLO.ELF from
-# programs/, the shell, and RVTEST.ELF (programs/rvtest, the user-mode
-# probes). WRONGM.ELF is RVTEST.ELF with e_machine set to EM_X86_64,
-# for the loader's machine check. No disk driver before the riscv64 device work, so they
-# reach the kernel as a FAT16 image (label SAMOS) for QEMU's -initrd.
+# programs/, the shell, RVTEST.ELF (programs/rvtest, the user-mode
+# probes) and KTEST.ELF (the e2e probes). WRONGM.ELF is RVTEST.ELF with e_machine set to EM_X86_64,
+# for the loader's machine check. They reach the kernel as a FAT16 image
+# (label SAMOS) for QEMU's -initrd, with HELLO.TXT and the system font
+# (the shell's cat, the terminal on ramfb), as on aarch64.
 ifdef USER_ARCH_CFLAGS
 USER_DIR    = $(BUILD)/user
 USER_CFLAGS = -g -ffreestanding -fno-builtin -nostdlib -nostartfiles -nodefaultlibs $(NOPIC) \
@@ -234,9 +236,9 @@ USER_CFLAGS = -g -ffreestanding -fno-builtin -nostdlib -nostartfiles -nodefaultl
     -I./programs/stdlib/src $(USER_ARCH_CFLAGS)
 USER_LIBC   = $(addprefix $(USER_DIR)/libc/,start.S.o samos.S.o start.o samos.o stdlib.o stdio.o \
     string.o memory.o file.o)
-USER_ELFS   = $(addprefix $(USER_DIR)/,blank.elf hello.elf shell.elf rvtest.elf)
+USER_ELFS   = $(addprefix $(USER_DIR)/,blank.elf hello.elf shell.elf rvtest.elf ktest.elf)
 USER_LD     = ./programs/stdlib/arch/$(ARCH)/linker.ld
-USER_ALL    = ./bin/$(ARCH)/initrd.img
+USER_ALL    = ./bin/$(ARCH)/initrd.img ./bin/$(ARCH)/os.img
 SYSROOT_CRT0 = $(USER_DIR)/libc/start.S.o $(USER_DIR)/libc/start.o
 SYSROOT_LIBS = $(filter-out $(SYSROOT_CRT0),$(USER_LIBC))
 endif
@@ -361,12 +363,13 @@ $(USER_DIR)/blank.elf: ./programs/blank/blank.c
 $(USER_DIR)/hello.elf: ./programs/hello/src/hello.c
 $(USER_DIR)/shell.elf: ./programs/shell/src/shell.c
 $(USER_DIR)/rvtest.elf: ./programs/rvtest/rvtest.c ./programs/rvtest/regs.S
+$(USER_DIR)/ktest.elf: ./programs/ktest/ktest.c ./programs/ktest/arch/riscv64/regs.S
 $(USER_ELFS): $(USER_LIBC) $(USER_LD)
 	$(CC) $(USER_CFLAGS) -I./programs/shell/src -T $(USER_LD) -Wl,-z,max-page-size=0x1000 \
 	    -Wl,--build-id=none -static -o $@ $(filter %.c %.S,$^) $(USER_LIBC) -lgcc
 
 # mtools on the image file, as build.sh does for x86 (8.3 names).
-./bin/$(ARCH)/initrd.img: $(USER_ELFS)
+./bin/$(ARCH)/initrd.img: $(USER_ELFS) ./hello.txt ./assets/sysfont.bmp
 	@mkdir -p $(@D)
 	cp $(USER_DIR)/rvtest.elf $(USER_DIR)/wrongm.elf
 	printf '\076\000' | dd of=$(USER_DIR)/wrongm.elf bs=1 seek=18 conv=notrunc status=none
@@ -376,7 +379,15 @@ $(USER_ELFS): $(USER_LIBC) $(USER_LD)
 	    MTOOLS_SKIP_CHECK=1 MTOOLS_NO_VFAT=1 mcopy -i $@ $$f ::/$$(basename $$f | tr a-z A-Z) \
 	        || { rm -f $@; exit 1; }; \
 	done
+	MTOOLS_SKIP_CHECK=1 mcopy -i $@ ./hello.txt ::/HELLO.TXT
+	MTOOLS_SKIP_CHECK=1 mcopy -i $@ ./assets/sysfont.bmp ::/SYSFONT.BMP
 	@echo "make: $@ ($$(stat -c%s $@) bytes)"
+
+# The boot disk for virtio-blk, laid out as x86's bin/os.img (the
+# e2e suite's image on riscv64, as on aarch64).
+./bin/$(ARCH)/os.img: ./bin/$(ARCH)/kernel.img $(USER_ELFS) ./hello.txt ./assets/sysfont.bmp ./tools/arch-osimg.sh
+	bash ./tools/arch-osimg.sh $@ ./bin/$(ARCH)/kernel.img $(USER_DIR)
+	@echo "make: $@ ($$(du -h $@ | cut -f1) on disk)"
 endif
 
 clean:

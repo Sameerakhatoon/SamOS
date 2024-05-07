@@ -65,7 +65,15 @@ _boot_with_format 2
 expect_serial '^graphics: framebuffer format 2 not supported, no screen output$' "bitmask format refused"
 read -r red blue green total < <(_count_pixels)
 e2e_log "fb_format=2: red $red, blue $blue, green $green of $total"
-[ "$green" -eq "$total" ] \
-    || e2e_fail "refused format: the kernel drew on the screen (green $green of $total)"
+case " $E2E_ARCH_PROVIDES " in
+*" uefi "*)
+    [ "$green" -eq "$total" ] \
+        || e2e_fail "refused format: the kernel drew on the screen (green $green of $total)" ;;
+*)
+    # No loader fill: the screen keeps what it started as, black
+    # on riscv64's ramfb, all green on aarch64's.
+    { [ "$green" -eq "$total" ] || [ $((red + blue + green)) -eq 0 ]; } \
+        || e2e_fail "refused format: the kernel drew on the screen (red $red, blue $blue, green $green)" ;;
+esac
 
 echo "PASS: e2e/161 framebuffer pixel format"

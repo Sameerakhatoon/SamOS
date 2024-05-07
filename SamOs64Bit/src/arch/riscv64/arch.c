@@ -14,20 +14,30 @@
 #include "arch/riscv64/timer.h"
 #include "boot/boot_info.h"
 #include "cpu/percpu.h"
+#include "acpi/acpi.h"
+#include "arch/riscv64/uart16550.h"
 #include "disk/drivers/ramdisk.h"
 #include "firmware/fdt.h"
+#include "firmware/ramfb.h"
 #include "graphics/graphics.h"
 #include "kernel.h"
+#include "keyboard/serial_input.h"
+#include "virtio/virtio_mmio_fdt.h"
+#include "memory/pfa.h"
 #include "memory/heap/kheap.h"
 #include "memory/memory.h"
 #include "string/string.h"
 #include "status.h"
 
 #define TRAP_STACK_SIZE (16 * 1024)
+// The ramfb mode.
+#define RAMFB_WIDTH     1024
+#define RAMFB_HEIGHT    768
 
 // Set by riscv64_main before kernel_main (main.c).
 struct samos_boot_info* samos_boot_info_ptr;
-// No framebuffer until the riscv64 device work (ramfb): all zero, graphics runs headless.
+// ramfb's, when QEMU has one (arch_firmware_init); else all zero
+// and graphics runs headless.
 struct graphics_info default_graphics_info;
 // The e2e boot markers (bootmarker.h): RAM does not start at 0 here.
 volatile uint64_t riscv64_boot_markers[256];
@@ -148,31 +158,53 @@ void arch_task_return(struct trap_frame* frame)
 
 static bool plic_up;
 
+// The console UART's receive interrupt: every byte goes to the
+// keyboard layer (keyboard/serial_input.c).
+static void uart_rx_interrupt(struct trap_frame* frame)
+{
+    int c;
+    while ((c = uart16550_getc()) >= 0) {
+        serial_input_rx((char)c);
+    }
+}
+
+// And the software interrupt (the IPI, arch_send_ipi), and the
+// UART's receive line as a keyboard.
 void arch_irq_init(void)
 {
     const struct fdt* f = riscv64_fdt();
     plic_up = plic_init(f, riscv64_cpu_node(f, this_cpu()->arch.hart_id)) == 0;
+    csr_set(sie, SIE_SSIE);
+    int uart_irq = riscv64_uart_irq();
+    if (plic_up && uart_irq > 0 && plic_register_handler(uart_irq, uart_rx_interrupt) == 0) {
+        serial_input_init();
+        plic_enable(uart_irq);
+        uart16550_enable_rx_irq();
+        console_printf("uart: keys from plic irq %d\n", uart_irq);
+    }
 }
 
-// No GSI routing for PCI INTx yet.
+// Device lines (arch_irq_attach_gsi) are PLIC sources.
 bool arch_irq_routable(void)
 {
-    return false;
+    return plic_up;
 }
 
+// The shared callers' IRQ numbers are x86 ISA lines (IRQ_KEYBOARD,
+// IRQ_PS2_MOUSE); this board has none, and the same numbers here are
+// PLIC sources of other devices (1-8: the virtio-mmio slots). Device
+// lines come through arch_irq_attach_gsi.
 int arch_irq_register(int irq, INTERRUPT_CALLBACK_FUNCTION handler)
 {
-    return plic_up ? plic_register_handler(irq, handler) : -EIO;
+    return -EIO;
 }
 
 void arch_irq_unmask(int irq)
 {
-    plic_enable(irq);
 }
 
 void arch_irq_mask(int irq)
 {
-    plic_disable(irq);
 }
 
 // A device-tree interrupt is a PLIC source; the slot only names the
@@ -268,8 +300,17 @@ int arch_start_cpus(void)
     return 1;
 }
 
+// The kind goes into the target's ipi_pending, then its
+// sip.SSIP: this hart sets its own (virtio-input and the UART hand
+// their keys over this way), another through the SBI.
 void arch_send_ipi(struct cpu* target, enum arch_ipi ipi)
 {
+    __atomic_fetch_or(&target->arch.ipi_pending, 1u << ipi, __ATOMIC_RELEASE);
+    if (target == this_cpu()) {
+        csr_set(sip, SIE_SSIE);
+    } else {
+        sbi_send_ipi(1, target->arch.hart_id);
+    }
 }
 
 bool arch_stop_other_cpus(void)
@@ -281,14 +322,79 @@ bool arch_stop_other_cpus(void)
 // Firmware, port I/O, PCI configuration space, power
 // ------------------------------------------------------------------
 
+// A virtio-mmio node's PLIC source, its one `interrupts` cell, raised
+// level-triggered.
+static int virtio_plic_source(const struct fdt* f, int node, uint16_t* inti)
+{
+    uint32_t irq = fdt_getprop_u32(f, node, "interrupts", 0);
+    *inti = ACPI_INTI_TRIGGER_LEVEL | ACPI_INTI_POLARITY_HIGH;
+    return irq ? (int)irq : -1;
+}
+
+// ramfb (firmware/ramfb.h) as the screen when QEMU has one
+// (-device ramfb): frames from the frame allocator, a page for the
+// fw_cfg DMA request, the result in boot_info's fb_* and
+// default_graphics_info. 0, or < 0 with nothing kept.
+static int ramfb_init(const struct fdt* f)
+{
+    struct fdt_region reg;
+    int node = fdt_find_compatible(f, -1, "qemu,fw-cfg-mmio");
+    if (node < 0 || fdt_reg_cpu(f, node, 0, &reg) != 0) {
+        return -ENOENT;
+    }
+    volatile void* fw_cfg = paging_map_mmio(reg.base, reg.size, PAGING_CACHE_DISABLED);
+    uint64_t size = (uint64_t)RAMFB_WIDTH * RAMFB_HEIGHT * 4;
+    void* frames = pfa_alloc_frames((size + 4095) / 4096);
+    struct ramfb_dma* dma = kpage_zalloc(4096);
+    int res = -ENOMEM;
+    if (fw_cfg && frames && dma) {
+        memset(frames, 0, size);      // in the direct map; black before QEMU shows it
+        res = ramfb_setup(fw_cfg, dma, paging_kernel_virt_to_phys(dma), paging_kernel_virt_to_phys(frames),
+                          RAMFB_WIDTH, RAMFB_HEIGHT);
+    }
+    kfree(dma);
+    if (res < 0) {
+        if (frames) {
+            pfa_free_frames(frames);
+        }
+        return res;
+    }
+    struct samos_boot_info* bi = samos_boot_info_ptr;
+    bi->fb_base   = paging_kernel_virt_to_phys(frames);
+    bi->fb_size   = size;
+    bi->fb_width  = RAMFB_WIDTH;
+    bi->fb_height = RAMFB_HEIGHT;
+    bi->fb_pitch  = RAMFB_WIDTH;
+    bi->fb_format = SAMOS_FB_FORMAT_BGRX;
+    default_graphics_info.framebuffer = (void*)bi->fb_base;
+    default_graphics_info.horizontal_resolution = RAMFB_WIDTH;
+    default_graphics_info.vertical_resolution = RAMFB_HEIGHT;
+    default_graphics_info.pixels_per_scanline = RAMFB_WIDTH;
+    return 0;
+}
+
 // The device tree is parsed already (riscv64_main); what the shared
 // kernel needs from it before the disks is the initrd, its RAM disk.
+// And the virtio-mmio slots (the drivers probe them later), and
+// the screen: graphics_setup comes next and reads boot_info's fb_* and
+// default_graphics_info.
 void arch_firmware_init(void)
 {
+    const struct fdt* f = riscv64_fdt();
     uint64_t base, size;
     if (mmu_initrd(&base, &size) == 0) {
         console_printf("initrd: 0x%lx, %lu KiB\n", base, size >> 10);
         ramdisk_attach(base, size);
+    }
+    // riscv64 virt plugs the first -device into the highest slot, as
+    // arm virt does (virtio_mmio_fdt.h).
+    int slots = virtio_mmio_scan_fdt(f, virtio_plic_source, true);
+    console_printf("virtio: %d mmio slot(s) in the device tree\n", slots);
+    int res = ramfb_init(f);
+    if (res == 0) {
+        console_printf("ramfb: %ux%u at 0x%lx\n", RAMFB_WIDTH, RAMFB_HEIGHT, samos_boot_info_ptr->fb_base);
+    } else {
+        console_printf("ramfb: none (%d), no screen\n", res);
     }
 }
 
@@ -316,4 +422,17 @@ void arch_shutdown_fallback(void)
 void arch_reboot_fallback(void)
 {
     sbi_reboot();
+}
+
+// Without Zbb gcc turns __builtin_bswap32/64 (firmware/ramfb.c)
+// into libgcc calls, and the cross toolchain's libgcc is lp64d, which
+// does not link into this lp64 kernel; these come first.
+uint32_t __bswapsi2(uint32_t v)
+{
+    return v >> 24 | (v >> 8 & 0xFF00) | (v << 8 & 0xFF0000) | v << 24;
+}
+
+uint64_t __bswapdi2(uint64_t v)
+{
+    return (uint64_t)__bswapsi2((uint32_t)v) << 32 | __bswapsi2((uint32_t)(v >> 32));
 }

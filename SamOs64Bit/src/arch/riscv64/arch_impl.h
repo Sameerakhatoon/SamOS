@@ -106,6 +106,7 @@ void arch_fpu_restore(const struct arch_fpu_state* s);
 struct arch_cpu {
     uint64_t hart_id;          // for SBI HSM hart_start and IPIs
     uint8_t* kernel_stack;     // top of the trap stack for traps from U-mode
+    volatile uint32_t ipi_pending;  // 1 << enum arch_ipi, taken by the software interrupt
 };
 
 static inline void* arch_cpu_self(void){

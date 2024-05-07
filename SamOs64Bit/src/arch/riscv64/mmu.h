@@ -98,6 +98,8 @@ uint64_t mmu_kernel_root(void);   // physical
 // `root` (tables above created when `alloc`, NULL if a leaf is in the
 // way or a sealed root entry would be needed), and the leaf for `va`.
 uint64_t* pt_entry(uint64_t root, uint64_t va, int level, bool alloc);
+// The 4 KiB PTE for `va`, splitting a larger leaf in the way.
+uint64_t* pt_entry_split(uint64_t root, uint64_t va);
 uint64_t  pt_lookup(uint64_t root, uint64_t va, int* level);
 uint64_t  make_satp(uint64_t root, uint64_t asid);
 // Map `size` bytes of device registers at `pa` RW, never executable,
