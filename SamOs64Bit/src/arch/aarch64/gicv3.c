@@ -9,6 +9,7 @@
 #include "arch/aarch64/console.h"
 #include "arch/aarch64/mmu.h"
 #include "arch/aarch64/sysreg.h"
+#include "cpu/percpu.h"
 
 #define GICD_CTLR           0x0000
 #define GICD_TYPER          0x0004
@@ -42,11 +43,25 @@
 
 #define PRIORITY_DEFAULT    0xa0a0a0a0u
 #define MAX_RD_REGIONS      4
+#define MAX_RD_FRAMES       64
+#define GICD_CTLR_DS        (1u << 6)   // one security state: Group 0 is ours
 
 static uint64_t gicd;           // distributor (virtual: Device memory)
-static uint64_t gicr;           // this CPU's redistributor (RD_base, virtual)
+static uint64_t gicr;           // the boot CPU's redistributor (RD_base, virtual)
 static uint32_t gic_lines;      // INTIDs the distributor implements
 static uint32_t intid_cells;    // #interrupt-cells
+// Every redistributor frame and its affinity, for the other CPUs.
+static uint64_t rd_frame[MAX_RD_FRAMES];
+static uint32_t rd_aff[MAX_RD_FRAMES];
+static int rd_frames;
+
+// SGIs and PPIs live in each CPU's own redistributor: struct
+// cpu's (arch_start_cpus sets it), the boot CPU's before it has one.
+static uint64_t this_gicr(void)
+{
+    struct cpu* c = arch_cpu_self();
+    return c && c->arch.gicr ? c->arch.gicr : gicr;
+}
 
 static inline uint32_t rd32(uint64_t a) { return *(volatile uint32_t*)a; }
 static inline void wr32(uint64_t a, uint32_t v) { *(volatile uint32_t*)a = v; }
@@ -85,6 +100,11 @@ static int find_redistributor(const struct fdt* f, int node, uint32_t aff, int* 
                 gicr = rd;
                 found = *count;
             }
+            if (*count < MAX_RD_FRAMES) {
+                rd_frame[*count] = rd;
+                rd_aff[*count] = hi;
+                rd_frames = *count + 1;
+            }
             (*count)++;
             if (lo & GICR_TYPER_LAST)
                 break;
@@ -121,7 +141,7 @@ static void distributor_init(uint32_t aff)
     wait_clear(gicd + GICD_CTLR, GICD_CTLR_RWP);
 }
 
-static void redistributor_init(void)
+static void redistributor_init(uint64_t gicr)
 {
     // Wake it: a sleeping redistributor forwards nothing to the CPU.
     wr32(gicr + GICR_WAKER, rd32(gicr + GICR_WAKER) & ~GICR_WAKER_SLEEP);
@@ -179,7 +199,7 @@ int gic_init(const struct fdt* f)
         return -1;
     }
     distributor_init(aff);
-    redistributor_init();
+    redistributor_init(gicr);
     if (cpu_interface_init() < 0) {
         console_printf("gic: ICC_SRE_EL1.SRE reads 0, system register interface disabled\n");
         return -1;
@@ -190,10 +210,28 @@ int gic_init(const struct fdt* f)
     return 0;
 }
 
+// Another CPU's half of gic_init: the redistributor frame
+// arch_start_cpus found for it (gic_redistributor) and its CPU
+// interface. 0, or -1 without the system register interface.
+int gic_init_cpu(void)
+{
+    redistributor_init(this_gicr());
+    return cpu_interface_init();
+}
+
+uint64_t gic_redistributor(uint64_t mpidr)
+{
+    uint32_t aff = (uint32_t)(((mpidr >> 8) & 0xff000000) | (mpidr & 0xffffff));
+    for (int i = 0; i < rd_frames; i++)
+        if (rd_aff[i] == aff)
+            return rd_frame[i];
+    return 0;
+}
+
 void gic_enable(uint32_t intid)
 {
     if (intid < GIC_INTID_SPI)
-        wr32(gicr + GICR_SGI + GICR_ISENABLER0, 1u << intid);
+        wr32(this_gicr() + GICR_SGI + GICR_ISENABLER0, 1u << intid);
     else if (intid < gic_lines)
         wr32(gicd + GICD_ISENABLER + intid / 32 * 4, 1u << (intid % 32));
 }
@@ -201,8 +239,8 @@ void gic_enable(uint32_t intid)
 void gic_disable(uint32_t intid)
 {
     if (intid < GIC_INTID_SPI) {
-        wr32(gicr + GICR_SGI + GICR_ICENABLER0, 1u << intid);
-        wait_clear(gicr + GICR_CTLR, GICR_CTLR_RWP);
+        wr32(this_gicr() + GICR_SGI + GICR_ICENABLER0, 1u << intid);
+        wait_clear(this_gicr() + GICR_CTLR, GICR_CTLR_RWP);
     } else if (intid < gic_lines) {
         wr32(gicd + GICD_ICENABLER + intid / 32 * 4, 1u << (intid % 32));
         wait_clear(gicd + GICD_CTLR, GICD_CTLR_RWP);
@@ -241,7 +279,7 @@ int gic_dt_intid(const struct fdt* f, int node, int index)
 void gic_set_priority(uint32_t intid, uint8_t priority)
 {
     if (intid < GIC_INTID_SPI)
-        *(volatile uint8_t*)(gicr + GICR_SGI + GICR_IPRIORITYR + intid) = priority;
+        *(volatile uint8_t*)(this_gicr() + GICR_SGI + GICR_IPRIORITYR + intid) = priority;
     else if (intid < gic_lines)
         *(volatile uint8_t*)(gicd + GICD_IPRIORITYR + intid) = priority;
 }
@@ -276,6 +314,32 @@ void gic_send_sgi(uint32_t sgi, uint64_t mpidr)
                  (((mpidr >> 8) & 0xff) << 16) | ((aff0 >> 4) << 44) | (1ull << (aff0 & 0xf));
     __asm__ volatile("dsb ishst" ::: "memory");
     sysreg_write(ICC_SGI1R_EL1, v);
+    isb();
+}
+
+// The panic stop as a Group 0 SGI, which the CPU takes as an
+// FIQ: the kernel masks only IRQs (DAIF.I) around locks and in spin
+// loops, so an FIQ reaches a CPU that an IRQ could not (x86: the NMI).
+// Group 0 belongs to EL1 only with one security state (GICD_CTLR.DS,
+// QEMU virt without secure=on); with TF-A it is EL3's, false then.
+int gic_fiq_sgi(uint32_t sgi)
+{
+    if (!(rd32(gicd + GICD_CTLR) & GICD_CTLR_DS))
+        return 0;
+    uint64_t sgi_base = this_gicr() + GICR_SGI;
+    wr32(sgi_base + GICR_IGROUPR0, rd32(sgi_base + GICR_IGROUPR0) & ~(1u << sgi));
+    *(volatile uint8_t*)(sgi_base + GICR_IPRIORITYR + sgi) = 0;
+    wr32(sgi_base + GICR_ISENABLER0, 1u << sgi);
+    sysreg_write(ICC_IGRPEN0_EL1, 1);
+    isb();
+    return 1;
+}
+
+// ICC_SGI0R_EL1 with IRM (bit 40): every CPU but this one.
+void gic_send_fiq_others(uint32_t sgi)
+{
+    __asm__ volatile("dsb ishst" ::: "memory");
+    sysreg_write(ICC_SGI0R_EL1, ((uint64_t)(sgi & 0xf) << 24) | (1ull << 40));
     isb();
 }
 

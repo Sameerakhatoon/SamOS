@@ -21,12 +21,34 @@
 // samos.double_fault_test's bad sp) cannot push it and would fault
 // again for ever, so it goes to bad_stack instead.
 
+//
+// Several CPUs: the stack bound and the fresh stack are this
+// CPU's (struct cpu through TPIDR_EL1, which is 0 until the boot CPU
+// has one: then the boot stack's). FIQs are the panic stop only
+// (Group 0 SGI, smp.c's arch_stop_other_cpus): their entries never
+// return, and trap_entry unmasks them as soon as the frame is saved,
+// so a CPU stops even inside a handler with IRQs masked.
+
 #define FRAME_SIZE  288         // sizeof(struct trap_frame)
 #define F_X30       240         // x30, then sp at 248
 #define F_SP        248
 #define F_ELR       256         // elr, spsr
 #define F_ESR       272         // esr, far
 #define VECTOR_EL0  8           // first lower-EL entry
+#define CPU_STACK_BOTTOM 496    // offsetof(struct cpu, arch.stack_bottom), checked in arch.c
+#define CPU_KERNEL_STACK 504    // offsetof(struct cpu, arch.kernel_stack)
+
+    // \reg = this CPU's kernel stack field at \off, or the boot stack's
+    // \sym before TPIDR_EL1 is set.
+    .macro  cpu_stack reg, off, sym
+    mrs     \reg, tpidr_el1
+    cbz     \reg, 1f
+    ldr     \reg, [\reg, #\off]
+    b       2f
+1:  adrp    \reg, \sym
+    add     \reg, \reg, :lo12:\sym
+2:
+    .endm
 
     .macro  vent_dump idx
     .balign 0x80
@@ -52,8 +74,7 @@ aarch64_vectors:
     vent_dump  3
     .balign 0x80                // 4: sync, EL1h
     msr     sp_el0, x0
-    adrp    x0, _stack_bottom
-    add     x0, x0, #:lo12:_stack_bottom
+    cpu_stack x0, CPU_STACK_BOTTOM, _stack_bottom
     add     x0, x0, #FRAME_SIZE
     cmp     sp, x0
     mrs     x0, sp_el0
@@ -63,11 +84,13 @@ aarch64_vectors:
     mov     x1, #4
     b       trap_entry
     vent_frame 5                // IRQ, EL1h
-    vent_dump  6
+    .balign 0x80                // 6: FIQ, EL1h: the panic stop
+    b       aarch64_fiq
     vent_dump  7
     vent_frame 8                // sync, EL0 (svc, faults)
     vent_frame 9                // IRQ, EL0
-    vent_dump  10
+    .balign 0x80                // 10: FIQ, EL0
+    b       aarch64_fiq
     vent_dump  11
     vent_dump  12
     vent_dump  13
@@ -101,6 +124,7 @@ trap_entry:
     mrs     x2, esr_el1
     mrs     x3, far_el1
     stp     x2, x3, [sp, #F_ESR]
+    msr     daifclr, #1             // FIQ: the panic stop may come now
     mov     x0, sp
     bl      aarch64_trap
 
@@ -135,8 +159,7 @@ trap_entry:
 
 exception_common:
     // Fresh stack: the fault may have been a bad SP. Nothing returns.
-    adrp    x5, _stack_top
-    add     x5, x5, :lo12:_stack_top
+    cpu_stack x5, CPU_KERNEL_STACK, _stack_top
     mov     sp, x5
     mrs     x1, esr_el1
     mrs     x2, elr_el1
@@ -151,8 +174,7 @@ exception_common:
 // on a fresh stack, with the bad SP, and halt.
 bad_stack:
     mov     x5, sp
-    adrp    x0, _stack_top
-    add     x0, x0, :lo12:_stack_top
+    cpu_stack x0, CPU_KERNEL_STACK, _stack_top
     mov     sp, x0
     mrs     x0, esr_el1
     mrs     x1, elr_el1

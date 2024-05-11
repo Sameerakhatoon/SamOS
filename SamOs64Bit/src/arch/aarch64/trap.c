@@ -20,7 +20,9 @@
 #include "arch/aarch64/console.h"
 #include "arch/aarch64/gicv3.h"
 #include "arch/aarch64/sched.h"
+#include "arch/aarch64/sysreg.h"
 #include "arch/arch.h"
+#include "cpu/smp.h"
 #include "kernel.h"
 #include "isr80h/isr80h.h"
 #include "task/task.h"
@@ -47,6 +49,7 @@ static void (*svc_handler)(struct trap_frame* f, uint32_t imm);
 static int trap_tasks;
 
 void aarch64_exception(uint64_t vector, uint64_t esr, uint64_t elr, uint64_t far, uint64_t spsr);
+void aarch64_fiq(void) __attribute__((noreturn));
 void aarch64_bad_stack(uint64_t esr, uint64_t elr, uint64_t far, uint64_t spsr, uint64_t sp);
 
 struct ex_entry {
@@ -311,6 +314,19 @@ void trap_set_svc_handler(void (*handler)(struct trap_frame* f, uint32_t imm))
 void trap_enable_tasks(void)
 {
     trap_tasks = 1;
+}
+
+// Vectors.S entries 6 and 10: an FIQ is the panic stop, a
+// Group 0 SGI from arch_stop_other_cpus. No frame was saved, so
+// nothing returns.
+void aarch64_fiq(void)
+{
+    uint32_t intid = (uint32_t)sysreg_read(ICC_IAR0_EL1) & 0xffffff;
+    if (intid < GIC_INTID_SPURIOUS)
+        sysreg_write(ICC_EOIR0_EL1, intid);
+    smp_nmi_stop();
+    console_printf("\nexception: FIQ (INTID %u) without a panic, halted\n", intid);
+    aarch64_halt();
 }
 
 // The unexpected entries (vectors.S exception_common): no frame.

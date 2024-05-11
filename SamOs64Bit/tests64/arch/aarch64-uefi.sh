@@ -11,12 +11,15 @@
 #           command line arrive; kernel_main runs HELLO.ELF with its
 #           arguments and BLANK.ELF's selftest at EL0.
 #   acpi:   the default acpi=on (AAVMF then gives ACPI and no DTB), -smp
-#           2: the MADT GICD/GICR/GICC entries, SPCR, GTDT and FADT are
+#           4: the MADT GICD/GICR/GICC entries, SPCR, GTDT and FADT are
 #           read and the kernel runs on the DT built from them, up to
 #           the same user programs. Its GIC, UART and timer must be the
-#           ones the dt boot found in QEMU's DT.
+#           ones the dt boot found in QEMU's DT. With SMP, the three
+#           other CPUs start from the MADT's GICCs with PSCI CPU_ON
+#           over the FADT's conduit (hvc), and the SMP self-test passes.
 #   el2:    virtualization=on: AAVMF runs at EL2, the loader turns the
-#           EL2 MMU off and the kernel drops to EL1 as on -kernel.
+#           EL2 MMU off and the kernel drops to EL1 as on -kernel. -smp
+#           2: the second CPU starts at EL2 too, through PSCI over smc.
 #   gop:    -device ramfb: AAVMF's GOP mode lands in boot_info.
 # The -kernel boots stay in the other aarch64-*.sh tests.
 set -uo pipefail
@@ -165,21 +168,26 @@ expect dt '^console: pl011 at 0x9000000 \(stdout-path\)$' "console from the DT"
 user_ran dt
 
 # ---- ACPI only ---------------------------------------------------------
-boot acpi "" "-smp 2" "$done_re"
+boot acpi "" "-smp 4" "$done_re"
 dump acpi
 expect acpi '^Device tree: none \(ACPI only\)$' "AAVMF gives no DTB with ACPI"
 expect acpi '^uefi: dtb 0x0, acpi rsdp 0x[1-9a-f][0-9a-f]*, initrd' "boot_info: the RSDP, no DTB"
-expect acpi '^acpi: [0-9]+ tables, madt gicd 0x8000000 \(version 3\), 1 gicr range\(s\) at 0x80a0000, 2 gicc \(2 enabled\)$' \
+expect acpi '^acpi: [0-9]+ tables, madt gicd 0x8000000 \(version 3\), 1 gicr range\(s\) at 0x80a0000, 4 gicc \(4 enabled\)$' \
     "MADT: GICD, GICR range, one GICC per CPU"
 expect acpi '^acpi: spcr interface 3 at 0x9000000 \(mmio\), gsiv 33$' "SPCR: the PL011 console"
 expect acpi '^acpi: gtdt el1 timer gsiv 30, virtual timer gsiv 27$' "GTDT: the timer PPIs"
 expect acpi '^acpi: fadt arm_boot_arch 0x3 \(psci via hvc\)$' "FADT: PSCI via HVC"
 expect acpi '^acpi: device tree built from the tables, [0-9]+ bytes$' "a DT from the tables"
 expect acpi '^console: pl011 at 0x9000000 \(stdout-path\)$' "console from SPCR"
-expect acpi '^gic: redistributor at 0x80a0000 \(frame 0 of 2, affinity 0x0\)$' "GIC from the MADT, two redistributor frames"
+expect acpi '^gic: redistributor at 0x80a0000 \(frame 0 of 4, affinity 0x0\)$' "GIC from the MADT, four redistributor frames"
 expect acpi '^timer: .*EL1 physical timer INTID 30 \(DT interrupts\)$' "timer INTID from the GTDT"
 expect acpi '^memmap: 0x[0-9a-f]+-0x[0-9a-f]+ acpi$' "the ACPI tables reserved"
 user_ran acpi
+for cpu in 1 2 3; do
+    expect acpi "^smp: cpu $cpu mpidr 0x$cpu online\$" "CPU $cpu from the MADT started by PSCI CPU_ON"
+done
+expect acpi '^smp: 4 cpus online$' "four CPUs online"
+expect acpi '^smp selftest: call, tlb shootdown, lock and atomic counts ok$' "SMP self-test: IPIs, broadcast TLB flush, locks"
 for what in 'gic: GICv3 distributor at' 'gic: redistributor at' 'console: pl011 at' 'timer: .*EL1 physical timer INTID'; do
     a="$(grep -aE "^$what" "$tmp/acpi.log.txt" | head -1 | sed -E 's/ \(frame.*//')"
     d="$(grep -aE "^$what" "$tmp/dt.log.txt" | head -1 | sed -E 's/ \(frame.*//')"
@@ -188,9 +196,11 @@ for what in 'gic: GICv3 distributor at' 'gic: redistributor at' 'console: pl011 
 done
 
 # ---- AAVMF at EL2 ------------------------------------------------------
-boot el2 ",acpi=off,virtualization=on" "" "$done_re"
+boot el2 ",acpi=off,virtualization=on" "-smp 2" "$done_re"
 expect el2 '^SamOS aarch64: booting \(entered at EL2, running at EL1\)$' "entered at EL2, dropped to EL1"
 expect el2 "$done_re" "user programs at EL0"
+expect el2 '^smp: cpu 1 mpidr 0x1 online$' "the second CPU, entered at EL2, online at EL1"
+expect el2 '^smp selftest: call, tlb shootdown, lock and atomic counts ok$' "SMP self-test at EL1 under EL2 entry"
 no_crash el2
 
 # ---- GOP ---------------------------------------------------------------

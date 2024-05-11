@@ -18,5 +18,10 @@
 #define ICC_SRE_EL1     "S3_0_C12_C12_5"
 #define ICC_IGRPEN1_EL1 "S3_0_C12_C12_7"
 #define ICC_SGI1R_EL1   "S3_0_C12_C11_5"
+// Group 0 (FIQ): the panic stop.
+#define ICC_SGI0R_EL1   "S3_0_C12_C11_7"
+#define ICC_IAR0_EL1    "S3_0_C12_C8_0"
+#define ICC_EOIR0_EL1   "S3_0_C12_C8_1"
+#define ICC_IGRPEN0_EL1 "S3_0_C12_C12_6"
 
 #endif

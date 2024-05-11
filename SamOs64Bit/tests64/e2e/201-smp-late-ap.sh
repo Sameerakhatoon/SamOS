@@ -28,11 +28,15 @@ _script() {
 }
 e2e_run_qemu 400 _script
 
-expect_serial '^smp: apic 1 did not start \(samos.smp_late_ap\)$' "the BSP gave up on APIC 1"
-expect_serial '^smp: apic 1 answered late and parked$' "the late AP parked"
-expect_no_serial '^smp: cpu [0-9]+ apic 1 online$' "the late AP never came online"
-expect_serial '^smp: cpu 1 apic 2 online$' "APIC 2 took slot 1"
-expect_serial '^smp: cpu 2 apic 3 online$' "APIC 3 took slot 2"
+# aarch64 names a CPU by its MPIDR; the late one turns itself
+# off (PSCI CPU_OFF) instead of being held by INIT.
+unit=apic ids=(1 2 3)
+[ "$E2E_ARCH" = aarch64 ] && unit=mpidr ids=(0x1 0x2 0x3)
+expect_serial "^smp: $unit ${ids[0]} did not start \(samos.smp_late_ap\)$" "the BSP gave up on $unit ${ids[0]}"
+expect_serial "^smp: $unit ${ids[0]} answered late and parked$" "the late AP parked"
+expect_no_serial "^smp: cpu [0-9]+ $unit ${ids[0]} online$" "the late AP never came online"
+expect_serial "^smp: cpu 1 $unit ${ids[1]} online$" "$unit ${ids[1]} took slot 1"
+expect_serial "^smp: cpu 2 $unit ${ids[2]} online$" "$unit ${ids[2]} took slot 2"
 expect_serial '^smp: 3 cpus online$' "three CPUs online"
 expect_stage_value 188 -eq 3 "marker 188 (CPUs online)"
 expect_serial '^smp selftest: call, tlb shootdown, lock and atomic counts ok$' "SMP self-test on three CPUs"

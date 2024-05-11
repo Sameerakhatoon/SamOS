@@ -224,6 +224,13 @@ void arch_send_ipi(struct cpu* target, enum arch_ipi ipi);
 // Panic: stop every other CPU (x86: NMI). False when that cannot be
 // done (one CPU, no APIC).
 bool arch_stop_other_cpus(void);
+// 1 when the arch's paging flushes every CPU's TLB itself
+// (aarch64: tlbi ...is, which the hardware broadcasts): its paging
+// never calls smp_tlb_shootdown, so no ARCH_IPI_TLB is sent. The
+// shootdown still works by IPI for a caller that wants one.
+#ifndef ARCH_TLB_BROADCAST
+#define ARCH_TLB_BROADCAST 0
+#endif
 
 // ------------------------------------------------------------------
 // I/O space and device discovery

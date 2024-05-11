@@ -237,7 +237,7 @@ uint64_t paging_desc_ttbr0(struct paging_desc* desc)
 void arch_tlb_flush_local(uint64_t va)
 {
     if (va)
-        __asm__ volatile("dsb nshst\n\ttlbi vaae1, %0\n\tdsb nsh\n\tisb" :: "r"((va >> 12) & 0xfffffffffful) : "memory");
+        __asm__ volatile("dsb nshst\n\ttlbi vaae1, %0\n\tdsb nsh\n\tisb" :: "r"(TLBI_VA(va)) : "memory");
     else
         __asm__ volatile("dsb nshst\n\ttlbi vmalle1\n\tdsb nsh\n\tisb" ::: "memory");
 }

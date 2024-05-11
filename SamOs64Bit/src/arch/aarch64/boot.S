@@ -15,30 +15,14 @@
 #define SPSR_EL1H_DAIF  0x3c5           // EL1h (SP_EL1), D A I F masked
 #define CPACR_FPEN      (3 << 20)       // no FP/SIMD traps at EL1 and EL0
 
-    .section .text.head, "ax"
-    .global _head_entry
-_head_entry:
-    // 64-byte Image header. code0 branches over it.
-    b       primary_entry           // code0
-    .long   0                       // code1
-    .quad   0                       // text_offset: load at 2 MiB aligned base + 0
-    .quad   _kernel_size            // image_size, including .bss and the stack
-    .quad   0x2                     // flags: little endian, 4K pages, base near RAM start
-    .quad   0                       // res2
-    .quad   0                       // res3
-    .quad   0                       // res4
-    .ascii  "ARM\x64"               // magic
-    .long   0                       // res5 (no PE/COFF header)
-
-primary_entry:
-    mov     x19, x0                 // DTB, kept in a callee-saved register
-    mrs     x20, CurrentEL
-    lsr     x20, x20, #2            // boot EL, passed to C for the banner
-    cmp     x20, #2
-    b.ne    in_el1
-
     // Entered at EL2 (-machine virt,virtualization=on): configure
-    // EL1 and eret into it. The kernel does not use EL2 (yet).
+    // EL1 and eret into `target`. The kernel does not use EL2 (yet).
+    // A macro: secondary CPUs (PSCI CPU_ON) start at the same
+    // EL as the boot CPU did.
+    .macro  drop_to_el1 target
+    mrs     x1, CurrentEL
+    cmp     x1, #(2 << 2)
+    b.ne    \target
     mov     x1, #HCR_EL2_RW
     msr     hcr_el2, x1
     mrs     x1, cnthctl_el2
@@ -69,12 +53,58 @@ primary_entry:
     msr     sctlr_el1, x1
     mov     x1, #SPSR_EL1H_DAIF
     msr     spsr_el2, x1
-    adr     x1, in_el1
+    adr     x1, \target
     msr     elr_el2, x1
     eret
+    .endm
+
+    // The MMU on with mmu_early's tables (and a secondary
+    // CPU with mmu_secondary_prepare's), then a jump to the linked,
+    // higher-half `target`.
+    .macro  mmu_on target
+    adrp    x1, mmu_boot_ttbr0
+    ldr     x1, [x1, :lo12:mmu_boot_ttbr0]
+    msr     ttbr0_el1, x1
+    adrp    x1, mmu_boot_ttbr1
+    ldr     x1, [x1, :lo12:mmu_boot_ttbr1]
+    msr     ttbr1_el1, x1
+    adrp    x1, mmu_boot_sctlr
+    ldr     x1, [x1, :lo12:mmu_boot_sctlr]
+    isb
+    tlbi    vmalle1
+    ic      iallu
+    dsb     nsh
+    isb
+    msr     sctlr_el1, x1
+    isb
+    ldr     x1, =\target
+    br      x1
+    .endm
+
+    .section .text.head, "ax"
+    .global _head_entry
+_head_entry:
+    // 64-byte Image header. code0 branches over it.
+    b       primary_entry           // code0
+    .long   0                       // code1
+    .quad   0                       // text_offset: load at 2 MiB aligned base + 0
+    .quad   _kernel_size            // image_size, including .bss and the stack
+    .quad   0x2                     // flags: little endian, 4K pages, base near RAM start
+    .quad   0                       // res2
+    .quad   0                       // res3
+    .quad   0                       // res4
+    .ascii  "ARM\x64"               // magic
+    .long   0                       // res5 (no PE/COFF header)
+
+primary_entry:
+    mov     x19, x0                 // DTB, kept in a callee-saved register
+    mrs     x20, CurrentEL
+    lsr     x20, x20, #2            // boot EL, passed to C for the banner
+    drop_to_el1 in_el1
 
 in_el1:
     msr     daifset, #0xf
+    msr     tpidr_el1, xzr          // No struct cpu yet (vectors.S)
     ldr     x1, =SCTLR_EL1_RES1
     msr     sctlr_el1, x1
     mov     x1, #CPACR_FPEN
@@ -102,23 +132,7 @@ in_el1:
     // the load address, fetched through mmu_early's identity map.
     mov     x0, x19
     bl      mmu_early
-    adrp    x1, mmu_boot_ttbr0
-    ldr     x1, [x1, :lo12:mmu_boot_ttbr0]
-    msr     ttbr0_el1, x1
-    adrp    x1, mmu_boot_ttbr1
-    ldr     x1, [x1, :lo12:mmu_boot_ttbr1]
-    msr     ttbr1_el1, x1
-    adrp    x1, mmu_boot_sctlr
-    ldr     x1, [x1, :lo12:mmu_boot_sctlr]
-    isb
-    tlbi    vmalle1
-    ic      iallu
-    dsb     nsh
-    isb
-    msr     sctlr_el1, x1
-    isb
-    ldr     x1, =boot_high
-    br      x1
+    mmu_on  boot_high
 
 boot_high:
     // Running at KERNEL_VBASE: a fresh stack and the vectors at their
@@ -136,4 +150,41 @@ boot_high:
 halt:
     msr     daifset, #0xf
     wfi
+    b       halt
+
+// A secondary CPU, started by PSCI CPU_ON (arch.c's
+// arch_start_cpus) with x0 = its struct cpu_start (a kernel virtual
+// address), the MMU and caches off, at the EL the boot CPU was entered
+// at. The boot CPU's set-up with mmu_secondary_prepare's tables, then
+// aarch64_secondary_main(start) on the stack the record names.
+    .global aarch64_secondary_entry
+aarch64_secondary_entry:
+    mov     x19, x0
+    drop_to_el1 secondary_el1
+
+secondary_el1:
+    msr     daifset, #0xf
+    msr     tpidr_el1, xzr
+    ldr     x1, =SCTLR_EL1_RES1
+    msr     sctlr_el1, x1
+    mov     x1, #CPACR_FPEN
+    msr     cpacr_el1, x1
+    adr     x1, aarch64_vectors
+    msr     vbar_el1, x1
+    adrp    x1, mmu_boot_mair
+    ldr     x1, [x1, :lo12:mmu_boot_mair]
+    msr     mair_el1, x1
+    adrp    x1, mmu_boot_tcr
+    ldr     x1, [x1, :lo12:mmu_boot_tcr]
+    msr     tcr_el1, x1
+    mmu_on  secondary_high
+
+secondary_high:
+    ldr     x1, =aarch64_vectors
+    msr     vbar_el1, x1
+    isb
+    ldr     x1, [x19, #8]           // start->stack_top
+    mov     sp, x1
+    mov     x0, x19
+    bl      aarch64_secondary_main
     b       halt

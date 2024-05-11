@@ -9,8 +9,8 @@
 // handed out. kheap_init's PFA (memory/pfa.c) then manages RAM from
 // that map, the same code as on x86 (the hardware layer memory map note).
 //
-// One CPU (the aarch64 SMP work starts the others), no port I/O and no legacy PCI
-// configuration mechanism.
+// No port I/O and no legacy PCI configuration mechanism. The
+// other CPUs start with PSCI CPU_ON (arch_start_cpus, below).
 //
 // Devices. arch_firmware_init lists the device tree's
 // virtio-mmio slots (virtio_bus.h), highest address first, for
@@ -37,6 +37,7 @@
 #include "arch/aarch64/timer.h"
 #include "arch/aarch64/trap.h"
 #include "boot/boot_info.h"
+#include "boot/cmdline.h"
 #include "bootmarker.h"
 #include "cpu/percpu.h"
 #include "cpu/smp.h"
@@ -49,6 +50,7 @@
 #include "io/serial.h"
 #include "kernel.h"
 #include "keyboard/keyboard.h"
+#include "memory/heap/kheap.h"
 #include "memory/memory.h"
 #include "memory/pfa.h"
 #include "string/string.h"
@@ -78,7 +80,7 @@ struct samos_boot_info* samos_boot_info_ptr;
 struct graphics_info default_graphics_info;
 uint64_t aarch64_boot_markers[BM_STAGE_MAX] __attribute__((aligned(4096)));
 
-extern char _head[], _end[], _stack_top[];
+extern char _head[], _end[], _stack_bottom[], _stack_top[];
 void aarch64_task_return(struct trap_frame* f, uint64_t kernel_stack_top) __attribute__((noreturn));
 
 static struct samos_boot_info boot_info;
@@ -92,6 +94,8 @@ static int gic_ok;
 static uint64_t boot_counter;
 static int psci_smc;                // PSCI through smc, else hvc
 static struct ramfb_dma ramfb_dma;
+
+static void cpu_irqs_init(void);
 
 // ------------------------------------------------------------------
 // The hand-over: boot_info, the memory map, this CPU, kernel_main
@@ -185,7 +189,9 @@ void aarch64_enter_kernel(const struct fdt* f, uint64_t dtb_pa, const char* boot
     c->online = 1;
     c->arch.mpidr = sysreg_read("mpidr_el1") & 0xff00ffffffull;
     c->hw_id = (uint32_t)c->arch.mpidr;
+    c->arch.stack_bottom = (uint8_t*)_stack_bottom;
     c->arch.kernel_stack = (uint8_t*)_stack_top;
+    c->arch.gicr = gic_redistributor(c->arch.mpidr);
     sysreg_write("tpidr_el1", (uint64_t)c);
 
     if (build_memory_map() < 0) {
@@ -362,10 +368,9 @@ void arch_irq_init(void)
         gic_ok = gic_init(&dt) == 0;
     if (!gic_ok)
         return;
-    for (uint32_t i = 0; i < IPI_SGIS; i++) {
+    for (uint32_t i = 0; i < IPI_SGIS; i++)
         irq_register(i, sgi_handler[i]);
-        gic_enable(i);
-    }
+    cpu_irqs_init();
     uart_rx_init();
 }
 
@@ -450,7 +455,7 @@ void arch_irq_wait_end(uint64_t state)
 // ------------------------------------------------------------------
 
 // Every CPU has its own EL1 physical timer, so true (SMP needs that;
-// arch_start_cpus has no other CPU to start before the aarch64 SMP work).
+// each other CPU starts its own, timer_start_cpu).
 bool arch_timer_start(uint32_t hz)
 {
     timer_start(hz, task_clock);
@@ -491,12 +496,212 @@ void udelay(TIME_MICROSECONDS microseconds)
 }
 
 // ------------------------------------------------------------------
-// CPUs and IPIs: one CPU until the aarch64 SMP work (PSCI CPU_ON); IPIs are SGIs
+// CPUs and IPIs: PSCI CPU_ON, IPIs are SGIs, the panic stop a
+// Group 0 SGI (an FIQ)
 // ------------------------------------------------------------------
+//
+// arch_start_cpus (boot CPU, from kernel_main once everything exists)
+// walks the device tree's /cpus (QEMU's, or acpi_dt.c's from the MADT:
+// the same shape) and starts each other "psci" CPU with CPU_ON at
+// aarch64_secondary_entry (boot.S), x0 = its start record. One at a
+// time: the record names its struct cpu and a fresh kernel stack;
+// boot.S drops to EL1, turns the MMU on with the kernel's tables and
+// mmu_secondary_prepare's identity map of the text, and calls
+// aarch64_secondary_main, which sets TPIDR_EL1, PAN, the kernel's
+// TTBR0, its redistributor and CPU interface, its own timer, and
+// enters the scheduler.
+//
+// The start handshake lives in the record, not in the slot: a CPU that
+// answers after the boot CPU gave up on it finds GAVE_UP, says PARKED
+// and turns itself off (PSCI CPU_OFF), so it never touches the slot
+// the next CPU gets (x86 holds such an AP with INIT instead).
+
+#define PSCI_CPU_OFF      0x84000002
+#define PSCI_CPU_ON       0xc4000003
+#define SGI_STOP          15            // Group 0: the panic stop
+#define AP_STACK          0x10000       // as the boot stack (linker.ld)
+#define AP_START_WINDOW_US 5000000
+#define AP_WAIT           0
+#define AP_CLAIMED        1
+#define AP_GAVE_UP        2
+#define AP_PARKED         3
+
+// boot.S reads stack_top at offset 8.
+struct cpu_start {
+    struct cpu*       cpu;
+    uint64_t          stack_top;
+    volatile uint32_t state;
+};
+_Static_assert(__builtin_offsetof(struct cpu_start, stack_top) == 8, "boot.S cpu_start layout");
+// vectors.S CPU_STACK_BOTTOM, CPU_KERNEL_STACK
+_Static_assert(__builtin_offsetof(struct cpu, arch.stack_bottom) == 496, "vectors.S struct cpu offsets");
+_Static_assert(__builtin_offsetof(struct cpu, arch.kernel_stack) == 504, "vectors.S struct cpu offsets");
+
+extern char aarch64_secondary_entry[];
+void aarch64_secondary_main(struct cpu_start* s) __attribute__((noreturn));
+
+static int fiq_stop;                // the panic stop SGI is Group 0 (gic_fiq_sgi)
+
+static int64_t psci_call3(uint64_t fn, uint64_t a1, uint64_t a2, uint64_t a3)
+{
+    register uint64_t x0 __asm__("x0") = fn;
+    register uint64_t x1 __asm__("x1") = a1;
+    register uint64_t x2 __asm__("x2") = a2;
+    register uint64_t x3 __asm__("x3") = a3;
+    if (psci_smc)
+        __asm__ volatile("smc #0" : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3) :: "memory");
+    else
+        __asm__ volatile("hvc #0" : "+r"(x0), "+r"(x1), "+r"(x2), "+r"(x3) :: "memory");
+    return (int64_t)x0;
+}
+
+static void pan_on(void)
+{
+    if ((sysreg_read("id_aa64mmfr1_el1") >> ID_PAN_SHIFT) & 0xf) {
+        __asm__ volatile(".inst 0xd500419f" ::: "memory");     // msr pan, #1
+        isb();
+    }
+}
+
+// This CPU's interrupts: SGIs (IPIs), the stop SGI as an FIQ, FIQs
+// unmasked for good (only the stop uses Group 0).
+static void cpu_irqs_init(void)
+{
+    for (uint32_t i = 0; i < IPI_SGIS; i++)
+        gic_enable(i);
+    fiq_stop = gic_fiq_sgi(SGI_STOP);
+    __asm__ volatile("msr daifclr, #1" ::: "memory");
+}
+
+void aarch64_secondary_main(struct cpu_start* s)
+{
+    struct cpu* c = s->cpu;
+    if (!atomic_cas(&s->state, AP_WAIT, AP_CLAIMED)) {
+        atomic_store(&s->state, AP_PARKED);
+        psci_call3(PSCI_CPU_OFF, 0, 0, 0);
+        aarch64_halt();
+    }
+    sysreg_write("tpidr_el1", (uint64_t)c);
+    pan_on();
+    // Off the identity map, and no global entry of it left in this
+    // CPU's TLB (the boot CPU's mmu_late does the same).
+    paging_switch(kernel_desc());
+    arch_tlb_flush_local(0);
+    if (gic_init_cpu() < 0) {
+        console_printf("smp: cpu %u: no GIC system register interface, halted\n", c->index);
+        aarch64_halt();
+    }
+    cpu_irqs_init();
+    timer_start_cpu();
+
+    c->online = 1;
+    atomic_inc(&cpu_online_count);
+    console_printf("smp: cpu %u mpidr 0x%lx online\n", c->index, c->arch.mpidr);
+    task_next();
+    aarch64_halt();
+}
+
+static bool cpu_outstanding;        // given up on, not seen to park
+
+static bool wait_state(struct cpu_start* s, uint32_t want, uint64_t us)
+{
+    uint64_t end = arch_time_us() + us;
+    while (s->state != want && arch_time_us() < end)
+        cpu_relax();
+    return s->state == want;
+}
+
+// Start the CPU with this MPIDR in slot `index`. True when it came up.
+static bool start_cpu(int index, uint64_t mpidr, bool give_up_now)
+{
+    struct cpu* c = &cpus[index];
+    struct cpu_start* s = kzalloc(sizeof(*s));
+    uint8_t* stack = kzalloc(AP_STACK);
+    uint64_t gicr = gic_redistributor(mpidr);
+    if (!s || !stack || !gicr) {
+        console_printf("smp: mpidr 0x%lx: %s, not started\n", mpidr,
+                       gicr ? "no memory for its stack" : "no GIC redistributor");
+        kfree(s);
+        kfree(stack);
+        return false;
+    }
+    memset(c, 0, sizeof(*c));
+    c->self = c;
+    c->index = (uint32_t)index;
+    c->hw_id = (uint32_t)mpidr;
+    c->arch.mpidr = mpidr;
+    c->arch.gicr = gicr;
+    c->arch.stack_bottom = stack;
+    c->arch.kernel_stack = stack + AP_STACK;
+    s->cpu = c;
+    s->stack_top = (uint64_t)c->arch.kernel_stack;
+    s->state = give_up_now ? AP_GAVE_UP : AP_WAIT;
+    smp_mb();
+
+    int64_t r = psci_call3(PSCI_CPU_ON, mpidr, kimage_pa(aarch64_secondary_entry), (uint64_t)s);
+    if (r != 0) {
+        console_printf("smp: mpidr 0x%lx: PSCI CPU_ON returned %ld\n", mpidr, r);
+        kfree(s);           // nothing runs on them
+        kfree(stack);
+        return false;
+    }
+    uint64_t end = arch_time_us() + (give_up_now ? 0 : AP_START_WINDOW_US);
+    while (!c->online && arch_time_us() < end)
+        cpu_relax();
+    if (c->online)
+        return true;
+    // Too late: whoever wins the record decides. A CPU that claimed it
+    // is on its way online.
+    if (!atomic_cas(&s->state, AP_WAIT, AP_GAVE_UP) && s->state == AP_CLAIMED) {
+        while (!c->online && arch_time_us() < end + AP_START_WINDOW_US)
+            cpu_relax();
+        if (c->online)
+            return true;
+        panic("smp: a CPU claimed its slot but never came online\n");
+    }
+    console_printf("smp: mpidr 0x%lx did not start%s\n", mpidr, give_up_now ? " (samos.smp_late_ap)" : "");
+    if (wait_state(s, AP_PARKED, give_up_now ? AP_START_WINDOW_US : 0))
+        console_printf("smp: mpidr 0x%lx answered late and parked\n", mpidr);
+    else
+        cpu_outstanding = true;
+    // s and the stack stay allocated: a late CPU may still read them.
+    return false;
+}
 
 int arch_start_cpus(void)
 {
-    return 1;
+    int cpus_node = dt_ok ? fdt_path_offset(&dt, "/cpus") : -1;
+    if (!gic_ok || cpus_node < 0 || mmu_secondary_prepare() < 0)
+        return 1;
+    bool late_test = boot_cmdline_has("samos.smp_late_ap");
+    int next = 1;
+    for (int n = fdt_first_child(&dt, cpus_node); n >= 0 && next < SAMOS_MAX_CPUS; n = fdt_next_sibling(&dt, n)) {
+        const char* type = fdt_getprop_string(&dt, n, "device_type");
+        const char* method = fdt_getprop_string(&dt, n, "enable-method");
+        const char* status = fdt_getprop_string(&dt, n, "status");
+        struct fdt_region reg;
+        if (!type || strncmp(type, "cpu", 4) || (status && strncmp(status, "okay", 5)) || fdt_reg(&dt, n, 0, &reg) < 0)
+            continue;
+        uint64_t mpidr = reg.base & 0xff00ffffffull;
+        if (mpidr == cpus[0].arch.mpidr)
+            continue;
+        if (!method || strncmp(method, "psci", 5)) {
+            console_printf("smp: mpidr 0x%lx: enable-method %s, not started\n", mpidr, method ? method : "none");
+            continue;
+        }
+        if (start_cpu(next, mpidr, late_test))
+            next++;
+        late_test = false;
+    }
+    // A CPU given up on that has not parked may still turn its MMU on
+    // with the identity map: keep it then.
+    if (!cpu_outstanding)
+        mmu_secondary_done();
+    print("smp: ");
+    print(itoa((int)cpu_online_count));
+    print(" cpus online\n");
+    boot_marker_set(BM_STAGE_SMP_CPUS, cpu_online_count);
+    return (int)cpu_online_count;
 }
 
 void arch_send_ipi(struct cpu* target, enum arch_ipi ipi)
@@ -505,9 +710,13 @@ void arch_send_ipi(struct cpu* target, enum arch_ipi ipi)
         gic_send_sgi((uint32_t)ipi, target->arch.mpidr);
 }
 
+// x86's NMI: an FIQ reaches a CPU spinning with IRQs masked.
 bool arch_stop_other_cpus(void)
 {
-    return false;
+    if (!gic_ok || !fiq_stop)
+        return false;
+    gic_send_fiq_others(SGI_STOP);
+    return true;
 }
 
 // ------------------------------------------------------------------

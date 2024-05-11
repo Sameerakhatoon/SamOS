@@ -17,7 +17,6 @@
 static uint64_t freq;
 static uint32_t intid;
 static uint64_t period;
-static uint64_t deadline;
 static volatile uint64_t ticks;
 static void (*tick_hook)(struct trap_frame* f);
 
@@ -69,13 +68,22 @@ int timer_init(const struct fdt* f)
     return 0;
 }
 
+// Each CPU has its own timer: the next deadline is this CPU's
+// compare value plus a period. `ticks` counts every CPU's.
 static void timer_irq(struct trap_frame* f)
 {
-    deadline += period;
-    sysreg_write("cntp_cval_el0", deadline);
-    ticks++;
+    sysreg_write("cntp_cval_el0", sysreg_read("cntp_cval_el0") + period);
+    __atomic_add_fetch(&ticks, 1, __ATOMIC_RELAXED);
     if (tick_hook)
         tick_hook(f);
+}
+
+void timer_start_cpu(void)
+{
+    sysreg_write("cntp_cval_el0", counter_read() + period);
+    sysreg_write("cntp_ctl_el0", CNTP_CTL_ENABLE);     // IMASK clear
+    isb();
+    gic_enable(intid);
 }
 
 void timer_start(uint32_t hz, void (*on_tick)(struct trap_frame* f))
@@ -83,10 +91,6 @@ void timer_start(uint32_t hz, void (*on_tick)(struct trap_frame* f))
     tick_hook = on_tick;
     period = freq / hz;
     irq_register(intid, timer_irq);
-    deadline = counter_read() + period;
-    sysreg_write("cntp_cval_el0", deadline);
-    sysreg_write("cntp_ctl_el0", CNTP_CTL_ENABLE);     // IMASK clear
-    isb();
-    gic_enable(intid);
+    timer_start_cpu();
     console_printf("timer: %u Hz tick, period %lu counts\n", hz, period);
 }

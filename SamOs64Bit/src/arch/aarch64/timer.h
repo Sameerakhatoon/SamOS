@@ -22,6 +22,8 @@ int      timer_init(const struct fdt* f);
 // track the counter without drift; a late IRQ is followed at once by
 // the next one.
 void     timer_start(uint32_t hz, void (*on_tick)(struct trap_frame* f));
+// The same tick on this CPU's own timer (a secondary CPU).
+void     timer_start_cpu(void);
 uint64_t timer_ticks(void);
 uint32_t timer_intid(void);
 

@@ -42,4 +42,14 @@ void     gic_send_sgi(uint32_t sgi, uint64_t mpidr);
 // high, ...), 0 if absent.
 uint32_t gic_dt_flags(const struct fdt* f, int node, int index);
 
+// SMP. Each CPU has its own redistributor (SGIs, PPIs): struct
+// arch_cpu's gicr, from gic_redistributor(its MPIDR) (0: none), set
+// up by gic_init_cpu on that CPU. gic_fiq_sgi makes `sgi` a Group 0
+// (FIQ) interrupt at the top priority on this CPU, 0 if Group 0 is not
+// the kernel's; gic_send_fiq_others sends it to every other CPU.
+uint64_t gic_redistributor(uint64_t mpidr);
+int      gic_init_cpu(void);
+int      gic_fiq_sgi(uint32_t sgi);
+void     gic_send_fiq_others(uint32_t sgi);
+
 #endif

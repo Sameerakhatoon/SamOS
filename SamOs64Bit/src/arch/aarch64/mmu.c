@@ -33,6 +33,7 @@ extern char _head[], _text_end[], _rodata_end[], _stack_guard[], _stack_bottom[]
 uint64_t mmu_dm_offset;
 uint64_t kernel_phys;
 uint64_t mmu_boot_ttbr0, mmu_boot_ttbr1, mmu_boot_sctlr;     // read by boot.S
+uint64_t mmu_boot_tcr, mmu_boot_mair;                       // By a secondary CPU
 
 static uint64_t kernel_root;        // TTBR1 L0 table
 static uint64_t tables;
@@ -275,8 +276,10 @@ void mmu_early(uint64_t arg)
     dcache_inval(early_lo, early_hi);
     dcache_inval(early_pfa_table_pa(), early_pfa_table_pa() + early_pfa_table_bytes());
 
-    sysreg_write("mair_el1", MAIR_VALUE);
-    sysreg_write("tcr_el1", TCR_VALUE | ips << 32);
+    mmu_boot_mair = MAIR_VALUE;
+    mmu_boot_tcr = TCR_VALUE | ips << 32;
+    sysreg_write("mair_el1", mmu_boot_mair);
+    sysreg_write("tcr_el1", mmu_boot_tcr);
     isb();
     mmu_boot_ttbr0 = idmap;
     mmu_boot_ttbr1 = kernel_root;
@@ -292,6 +295,34 @@ void mmu_late(void)
     isb();
     __asm__ volatile("tlbi vmalle1\n\tdsb nsh\n\tisb" ::: "memory");
     idmap_freed = free_tables(mmu_boot_ttbr0, 0);
+    mmu_boot_ttbr0 = 0;
+}
+
+// Secondary CPUs turn their MMU on in boot.S as the boot CPU
+// did, so they need an identity map of the kernel text again (from the
+// shared PFA now) and this CPU's SCTLR (PAN's SPAN bit included). The
+// values are read with the MMU and caches off: clean them to the
+// point of coherency.
+int mmu_secondary_prepare(void)
+{
+    uint64_t text = kimage_pa(_text_end);
+    uint64_t idmap = table_alloc();
+    if (!idmap || map_range(idmap, kernel_phys, kernel_phys, text - kernel_phys, PROT_KTEXT, 0) < 0)
+        return -1;
+    mmu_boot_ttbr0 = idmap;
+    mmu_boot_sctlr = sysreg_read("sctlr_el1");
+    uint64_t* vals[] = { &mmu_boot_ttbr0, &mmu_boot_ttbr1, &mmu_boot_sctlr, &mmu_boot_tcr, &mmu_boot_mair };
+    for (unsigned i = 0; i < sizeof vals / sizeof vals[0]; i++)
+        __asm__ volatile("dc civac, %0" :: "r"(vals[i]) : "memory");
+    __asm__ volatile("dsb sy" ::: "memory");
+    return 0;
+}
+
+// Every CPU that will come up has its own TTBR0 now.
+void mmu_secondary_done(void)
+{
+    if (mmu_boot_ttbr0)
+        free_tables(mmu_boot_ttbr0, 0);
     mmu_boot_ttbr0 = 0;
 }
 
@@ -436,7 +467,7 @@ static int split_block(uint64_t* e, uint64_t va)
     *e = n | PTE_TABLE | PTE_VALID;
     __asm__ volatile("dsb ishst" ::: "memory");
     for (uint64_t a = va & ~(BLOCK_2M - 1); a < (va & ~(BLOCK_2M - 1)) + BLOCK_2M; a += PAGE_SIZE)
-        __asm__ volatile("tlbi vaae1is, %0" :: "r"((a >> 12) & 0xfffffffffful) : "memory");
+        __asm__ volatile("tlbi vaae1is, %0" :: "r"(TLBI_VA(a)) : "memory");
     __asm__ volatile("dsb ish\n\tisb" ::: "memory");
     return 0;
 }
@@ -465,7 +496,7 @@ int mmu_set_page(uint64_t root, uint64_t va, uint64_t desc, uint32_t asid)
         return 0;
     if (old & PTE_VALID) {
         *e = 0;
-        uint64_t op = (va >> 12) & 0xfffffffffful;
+        uint64_t op = TLBI_VA(va);
         if (old & PTE_NG)
             __asm__ volatile("dsb ishst\n\ttlbi vae1is, %0\n\tdsb ish" :: "r"(op | (uint64_t)asid << 48) : "memory");
         else

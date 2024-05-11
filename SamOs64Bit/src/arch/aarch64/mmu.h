@@ -40,6 +40,9 @@
 #define PTE_PXN             (1ul << 53)
 #define PTE_UXN             (1ul << 54)
 #define PTE_ADDR            0x0000fffffffff000ul
+// A TLBI by VA operand: VA[55:12] in bits [43:0]. Bit 55
+// picks TTBR1, so a 40-bit field would aim at a user address.
+#define TLBI_VA(va)         (((uint64_t)(va) >> 12) & ((1ul << 44) - 1))
 
 // Kernel mapping kinds (W^X: nothing is writable and executable).
 #define PROT_KTEXT          (PTE_ATTR(MT_NORMAL) | PTE_SH_INNER | PTE_AP_RO | PTE_UXN)
@@ -78,6 +81,12 @@ void     mmu_early(uint64_t arg);     // x0: the DTB, or the UEFI boot_info
 void     mmu_late(void);
 // Print the layout, the reservations and the allocator (main.c).
 void     mmu_report(void);
+// Boot.S's values for a secondary CPU's MMU (an identity map of
+// the kernel text again, this CPU's SCTLR, TCR, MAIR, TTBR1): before
+// the first PSCI CPU_ON, 0 or -1; and the identity map freed once
+// every CPU started has left it.
+int      mmu_secondary_prepare(void);
+void     mmu_secondary_done(void);
 
 // Device memory at DIRECT_MAP_BASE + pa (XN), returns that address;
 // 0 if it cannot be mapped. With the MMU off, returns pa.

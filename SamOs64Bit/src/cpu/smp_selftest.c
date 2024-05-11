@@ -101,7 +101,9 @@ static int smp_selftest(void){
             return __LINE__;
         }
     }
-    if(cpus[1].ipi_tlb == tlb_before){
+    // With broadcast TLB maintenance the remap itself reached
+    // them (the reads above), no IPI.
+    if(!ARCH_TLB_BROADCAST && cpus[1].ipi_tlb == tlb_before){
         return __LINE__;
     }
     paging_map(kernel_desc(), (void*)SMP_TEST_VA, NULL, 0);

@@ -91,10 +91,18 @@ void arch_fpu_restore(const struct arch_fpu_state* s);
 // Per-CPU data: TPIDR_EL1 holds this CPU's struct cpu.
 // ------------------------------------------------------------------
 
+// Vectors.S reads the first two fields through TPIDR_EL1 at
+// fixed offsets (CPU_STACK_BOTTOM there, checked in arch.c).
 struct arch_cpu {
-    uint64_t mpidr;            // MPIDR_EL1 affinity, for PSCI CPU_ON
+    uint8_t* stack_bottom;     // lowest address of this CPU's kernel stack
     uint8_t* kernel_stack;     // top of the stack traps from EL0 start on
+    uint64_t mpidr;            // MPIDR_EL1 affinity, for PSCI CPU_ON
+    uint64_t gicr;             // its GIC redistributor (RD_base, virtual; gicv3.c)
 };
+
+// TLB maintenance is broadcast (tlbi ...is, paging.c): a changed
+// mapping needs no shootdown IPI (cpu/smp.c).
+#define ARCH_TLB_BROADCAST 1
 
 static inline void* arch_cpu_self(void){
     void* c;
