@@ -14,7 +14,11 @@
 #   - 187 unset: no wait fell back to polling, and no "completion
 #     interrupt missing" line;
 #   - every hash right ("READERS OK"), no fault, no lock report.
-# e2e-requires: smp ahci ide (four CPUs with AHCI and PATA interrupts)
+#
+# riscv64: the boot disk on virtio-blk over MMIO, its PLIC
+# source steered to the waiting hart's context (plic_route); marker
+# 192 counts its completions by interrupt.
+# e2e-requires: smp (four CPUs: AHCI and PATA on x86, virtio-blk-mmio on riscv64)
 . "$(dirname "$0")/_lib.sh"
 
 export E2E_SMP=4
@@ -36,10 +40,12 @@ p2=$(( $(stat -c %s "$E2E_IMAGE") / 512 / 2 ))
 MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((p2 * 512))" "$big" ::/BIG.BIN \
     || e2e_fail "mcopy BIG.BIN"
 
-for machine in q35 pc; do
+machines="q35 pc"
+[ "$E2E_ARCH" = riscv64 ] && machines=virt
+for machine in $machines; do
     E2E_MACHINE=$machine
     export E2E_MACHINE
-    if [ "$machine" = q35 ]; then marker=185; else marker=186; fi
+    case $machine in q35) marker=185 ;; pc) marker=186 ;; *) marker=192 ;; esac
     _script() {
         e2e_wait_serial '^READERS (OK|FAIL)$' 800 || true
         sleep 1

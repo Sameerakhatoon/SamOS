@@ -26,7 +26,13 @@
 #include "string/string.h"
 #include "kernel.h"
 
-#define SMP_TEST_VA      0xFFFFE00000000000ull   // an otherwise unused kernel-half slot
+// An otherwise unused kernel-half slot. The arch may name its
+// own (riscv64: the mmio window's last page).
+#ifdef ARCH_SMP_TEST_VA
+#define SMP_TEST_VA      ARCH_SMP_TEST_VA
+#else
+#define SMP_TEST_VA      0xFFFFE00000000000ull
+#endif
 #define SMP_TEST_ROUNDS  20000
 #define SMP_PATTERN_A    0xAAAA5555AAAA5555ull
 #define SMP_PATTERN_B    0xBBBB6666BBBB6666ull

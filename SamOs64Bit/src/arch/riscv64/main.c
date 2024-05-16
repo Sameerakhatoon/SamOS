@@ -66,8 +66,15 @@ void riscv64_halt(void)
     if (riscv64_test_mode) {
         sbi_shutdown();
     }
+    riscv64_park();
+}
+
+// Sie too: with only SIE off a pending timer interrupt ends
+// every wfi at once, and the loop spins.
+void riscv64_park(void)
+{
     for (;;) {
-        __asm__ volatile("csrci sstatus, 2; wfi");
+        __asm__ volatile("csrci sstatus, 2; csrw sie, zero; wfi" ::: "memory");
     }
 }
 

@@ -10,15 +10,23 @@
 static long spec_version;
 static bool has_dbcn;
 
-struct sbiret sbi_call(long eid, long fid, long arg0, long arg1, long arg2)
+// Five arguments, for RFENCE.
+static struct sbiret sbi_call5(long eid, long fid, long arg0, long arg1, long arg2, long arg3, long arg4)
 {
     register long a0 __asm__("a0") = arg0;
     register long a1 __asm__("a1") = arg1;
     register long a2 __asm__("a2") = arg2;
+    register long a3 __asm__("a3") = arg3;
+    register long a4 __asm__("a4") = arg4;
     register long a6 __asm__("a6") = fid;
     register long a7 __asm__("a7") = eid;
-    __asm__ volatile("ecall" : "+r"(a0), "+r"(a1) : "r"(a2), "r"(a6), "r"(a7) : "memory");
+    __asm__ volatile("ecall" : "+r"(a0), "+r"(a1) : "r"(a2), "r"(a3), "r"(a4), "r"(a6), "r"(a7) : "memory");
     return (struct sbiret){ a0, a1 };
+}
+
+struct sbiret sbi_call(long eid, long fid, long arg0, long arg1, long arg2)
+{
+    return sbi_call5(eid, fid, arg0, arg1, arg2, 0, 0);
 }
 
 bool sbi_probe(long eid)
@@ -115,4 +123,30 @@ void sbi_reboot(void)
 void sbi_send_ipi(unsigned long mask, unsigned long base)
 {
     sbi_call(SBI_EXT_IPI, 0, (long)mask, (long)base, 0);
+}
+
+// HSM: start a stopped hart in S-mode at physical `start`,
+// MMU off, a0 = its hart id, a1 = `opaque`; and stop this one.
+long sbi_hart_start(unsigned long hartid, uint64_t start, uint64_t opaque)
+{
+    return sbi_call(SBI_EXT_HSM, 0, (long)hartid, (long)start, (long)opaque).error;
+}
+
+void sbi_hart_stop(void)
+{
+    sbi_call(SBI_EXT_HSM, 1, 0, 0, 0);
+}
+
+// RFENCE: sfence.vma for [start, start + size) on the harts in
+// `mask` (from `base`), with or without an ASID. OpenSBI returns once
+// every target has done it.
+long sbi_remote_sfence_vma(unsigned long mask, unsigned long base, uint64_t start, uint64_t size)
+{
+    return sbi_call5(SBI_EXT_RFNC, 1, (long)mask, (long)base, (long)start, (long)size, 0).error;
+}
+
+long sbi_remote_sfence_vma_asid(unsigned long mask, unsigned long base, uint64_t start, uint64_t size,
+                                uint64_t asid)
+{
+    return sbi_call5(SBI_EXT_RFNC, 2, (long)mask, (long)base, (long)start, (long)size, (long)asid).error;
 }

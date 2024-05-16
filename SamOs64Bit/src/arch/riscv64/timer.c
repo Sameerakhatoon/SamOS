@@ -1,7 +1,10 @@
 // Timer: Sstc stimecmp when the hart has it, SBI set_timer
 // otherwise.
+// One per hart: the deadline and the tick count are per CPU;
+// timer_ticks stays the boot hart's.
 
 #include "arch/riscv64/timer.h"
+#include "cpu/percpu.h"
 #include "arch/riscv64/console.h"
 #include "arch/riscv64/riscv64.h"
 #include "arch/riscv64/sbi.h"
@@ -12,7 +15,7 @@
 // stimecmp is CSR 0x14d (by number, as csr_read stringifies its
 // argument and the assembler needs _sstc for the name).
 static bool use_sstc;
-static uint64_t timebase, interval, next_deadline;
+static uint64_t timebase, interval;
 static volatile uint64_t ticks;
 
 static void set_deadline(uint64_t t)
@@ -83,19 +86,31 @@ int timer_init(const struct fdt* f, int cpu, unsigned hz)
         return -1;
     }
     interval = timebase / hz;
-    next_deadline = rdtime() + interval;
-    set_deadline(next_deadline);
-    csr_set(sie, SIE_STIE);
+    timer_start_hart();
     console_printf("timer: %s, %u Hz, timebase %lu Hz, interval %lu\n",
                    use_sstc ? "sstc stimecmp" : "sbi set_timer", hz, timebase, interval);
     return 0;
 }
 
+// The boot hart's choice of Sstc holds for the others: QEMU's
+// harts are alike, and OpenSBI enables stimecmp on each.
+void timer_start_hart(void)
+{
+    struct arch_cpu* a = &this_cpu()->arch;
+    a->next_deadline = rdtime() + interval;
+    set_deadline(a->next_deadline);
+    csr_set(sie, SIE_STIE);
+}
+
 void timer_interrupt(void)
 {
-    ticks++;
-    next_deadline += interval;
-    set_deadline(next_deadline);
+    struct cpu* c = this_cpu();
+    if (c->index == 0) {
+        ticks++;
+    }
+    c->arch.ticks++;
+    c->arch.next_deadline += interval;
+    set_deadline(c->arch.next_deadline);
 }
 
 uint64_t timer_ticks(void)

@@ -9,7 +9,12 @@
 # and 2. Before the start handshake the late AP would have run on with the slot and
 # stack of the next processor. Then the SMP self-test and BLANK.ELF's
 # self-test run on the three CPUs.
-# e2e-requires: smp (four CPUs; aarch64 starts its secondary CPUs in the aarch64 SMP work, riscv64 its harts in the riscv64 SMP work)
+#
+# riscv64: the same handshake with SBI HSM hart_start; the late
+# hart stops itself with hart_stop. The first hart the boot hart tries
+# is the first other one in the device tree, and OpenSBI may boot any
+# hart, so the ids come from the "boot hart" line.
+# e2e-requires: smp (four CPUs; aarch64 starts its secondary CPUs in the aarch64 SMP work)
 . "$(dirname "$0")/_lib.sh"
 
 export E2E_SMP=4
@@ -32,6 +37,11 @@ e2e_run_qemu 400 _script
 # off (PSCI CPU_OFF) instead of being held by INIT.
 unit=apic ids=(1 2 3)
 [ "$E2E_ARCH" = aarch64 ] && unit=mpidr ids=(0x1 0x2 0x3)
+if [ "$E2E_ARCH" = riscv64 ]; then
+    boot=$(tr -d '\r' < "$E2E_SERIAL" | sed -n 's/^boot hart: \([0-9]*\)$/\1/p' | head -n 1)
+    unit=hart ids=()
+    for h in 0 1 2 3; do [ "$h" = "$boot" ] || ids+=("$h"); done
+fi
 expect_serial "^smp: $unit ${ids[0]} did not start \(samos.smp_late_ap\)$" "the BSP gave up on $unit ${ids[0]}"
 expect_serial "^smp: $unit ${ids[0]} answered late and parked$" "the late AP parked"
 expect_no_serial "^smp: cpu [0-9]+ $unit ${ids[0]} online$" "the late AP never came online"

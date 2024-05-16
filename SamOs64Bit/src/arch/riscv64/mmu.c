@@ -10,6 +10,7 @@
 #include "arch/riscv64/mmu.h"
 #include "arch/riscv64/console.h"
 #include "arch/riscv64/riscv64.h"
+#include "cpu/percpu.h"
 #include "firmware/fdt.h"
 #include "memory/memregion.h"
 #include "memory/pfa.h"
@@ -37,8 +38,7 @@ static uint64_t sv48_readback;              // satp after the Sv48 probe write
 static uint64_t boot_dtb, boot_dtb_size;
 static uint64_t initrd_base, initrd_size;
 static unsigned asid_bits;
-static uint16_t next_asid;
-static struct mm* current_mm;
+static uint32_t next_asid;
 
 static struct mem_region regions[MAX_REGIONS];
 static int nregions;
@@ -517,13 +517,25 @@ uintptr_t mmu_map_mmio(uint64_t pa, uint64_t size)
     // Same offset within 2 MiB as the registers, so big blocks (the
     // PLIC) get megapages.
     uint64_t va = ((mmio_next + mega - 1) & ~(mega - 1)) + (lo & (mega - 1));
-    if (va + (hi - lo) > mmio_base + MMIO_WINDOW
+    if (va + (hi - lo) > mmu_scratch_va()
         || pt_map(kernel_root, va, lo, hi - lo, PTE_R | PTE_W | PTE_G, false) != 0) {
         return 0;
     }
     sfence_vma();
     mmio_next = va + (hi - lo);
     return va + (pa - lo);
+}
+
+// The mmio window's last page, which mmu_map_mmio leaves out.
+uint64_t mmu_scratch_va(void)
+{
+    return mmio_base + MMIO_WINDOW - PAGE_SIZE;
+}
+
+// Satp for the kernel's root, ASID 0 (another hart's start).
+uint64_t mmu_kernel_satp(void)
+{
+    return make_satp(kernel_root, 0);
 }
 
 // ---- address spaces -----------------------------------------------
@@ -550,8 +562,10 @@ int mm_create(struct mm* mm)
     }
     mm->root = virt_to_phys(t);
     // ASID 0 is the kernel root's; when they run out, 0 means "flush".
-    // Never recycled yet (65535 address spaces on QEMU).
-    mm->asid = asid_bits && next_asid + 1u < (1u << asid_bits) ? ++next_asid : 0;
+    // Never recycled yet (65535 address spaces on QEMU). Several
+    // harts create address spaces at once, so the counter is atomic.
+    uint32_t asid = asid_bits ? __atomic_add_fetch(&next_asid, 1, __ATOMIC_RELAXED) : 0;
+    mm->asid = asid < (1u << asid_bits) ? (uint16_t)asid : 0;
     return 0;
 }
 
@@ -590,7 +604,7 @@ static void free_tables(uint64_t table, int level)
 
 void mm_destroy(struct mm* mm)
 {
-    if (current_mm == mm) {
+    if (mm_current() == mm) {
         mm_switch(0);
     }
     uint64_t* t = table_at(mm->root);
@@ -625,10 +639,11 @@ void mm_switch(struct mm* mm)
     if (!asid) {
         sfence_vma();
     }
-    current_mm = mm;
+    this_cpu()->arch.mm = mm;
 }
 
+// This hart's.
 struct mm* mm_current(void)
 {
-    return current_mm;
+    return this_cpu()->arch.mm;
 }

@@ -2,8 +2,8 @@
 // own (paging.c, fpu.S, trap.c, uaccess.c): boot hooks, the console,
 // the return to U-mode, the PLIC and the timer behind the arch_irq_*
 // and arch_timer_* calls, time, the firmware (device tree) and the
-// things riscv64 does not have (port I/O, PCI mechanism 1, SMP until
-// The riscv64 SMP work).
+// things riscv64 does not have (port I/O, PCI mechanism 1). The
+// other harts are smp.c's.
 
 #include "arch/arch.h"
 #include "arch/riscv64/console.h"
@@ -29,7 +29,6 @@
 #include "string/string.h"
 #include "status.h"
 
-#define TRAP_STACK_SIZE (16 * 1024)
 // The ramfb mode.
 #define RAMFB_WIDTH     1024
 #define RAMFB_HEIGHT    768
@@ -65,18 +64,22 @@ void arch_early_init(void)
 // loads tp from there).
 void arch_trap_init(void)
 {
-    struct cpu* c = this_cpu();
-    uint8_t* stack = kzalloc(TRAP_STACK_SIZE + 16);
-    if (!stack) {
+    if (riscv64_trap_stack(this_cpu()) != 0) {
         panic("riscv64: no trap stack\n");
     }
-    c->arch.kernel_stack = stack + TRAP_STACK_SIZE;
-    *(struct cpu**)c->arch.kernel_stack = c;
 }
 
-void arch_halt(void)
+// The boot hart's (arch_trap_init) and each other hart's
+// (arch_start_cpus, smp.c).
+int riscv64_trap_stack(struct cpu* c)
 {
-    riscv64_halt();
+    uint8_t* stack = kzalloc(RISCV64_TRAP_STACK_SIZE + 16);
+    if (!stack) {
+        return -ENOMEM;
+    }
+    c->arch.kernel_stack = stack + RISCV64_TRAP_STACK_SIZE;
+    *(struct cpu**)c->arch.kernel_stack = c;
+    return 0;
 }
 
 void arch_wait_for_interrupt(void)
@@ -221,9 +224,10 @@ int arch_irq_attach_gsi(uint32_t gsi, uint16_t flags, unsigned slot, bool masked
     return (int)gsi;
 }
 
+// A disk wait steers its line to the waiting hart's context.
 int arch_irq_set_cpu(uint32_t gsi, struct cpu* c)
 {
-    return 0;
+    return plic_route(gsi, c->arch.plic_ctx);
 }
 
 // Only external interrupts in the window: the timer and IPIs wait
@@ -251,14 +255,15 @@ void arch_irq_wait_end(uint64_t state)
 // Timer and time: the riscv64 trap tick (Sstc or SBI), the time CSR.
 // ------------------------------------------------------------------
 
-// One hart until the riscv64 SMP work, so no per-CPU tick to report yet.
+// Every hart has its own tick (timer_start_hart), so the
+// kernel may start the others.
 bool arch_timer_start(uint32_t hz)
 {
     const struct fdt* f = riscv64_fdt();
     if (timer_init(f, riscv64_cpu_node(f, this_cpu()->arch.hart_id), hz) != 0) {
         panic("riscv64: no timer\n");
     }
-    return false;
+    return true;
 }
 
 uint64_t arch_counter(void)
@@ -292,30 +297,22 @@ void udelay(TIME_MICROSECONDS microseconds)
 }
 
 // ------------------------------------------------------------------
-// CPUs: the boot hart only until the riscv64 SMP work (SBI HSM, SBI IPIs).
+// CPUs: the riscv64 SMP work starts the other harts, stops them on a panic and halts
+// (smp.c).
 // ------------------------------------------------------------------
-
-int arch_start_cpus(void)
-{
-    return 1;
-}
 
 // The kind goes into the target's ipi_pending, then its
 // sip.SSIP: this hart sets its own (virtio-input and the UART hand
-// their keys over this way), another through the SBI.
+// their keys over this way), another through the SBI. A full fence (amoor.aqrl), so the kind is visible before OpenSBI's
+// write that raises the target's interrupt.
 void arch_send_ipi(struct cpu* target, enum arch_ipi ipi)
 {
-    __atomic_fetch_or(&target->arch.ipi_pending, 1u << ipi, __ATOMIC_RELEASE);
+    __atomic_fetch_or(&target->arch.ipi_pending, 1u << ipi, __ATOMIC_SEQ_CST);
     if (target == this_cpu()) {
         csr_set(sip, SIE_SSIE);
     } else {
         sbi_send_ipi(1, target->arch.hart_id);
     }
-}
-
-bool arch_stop_other_cpus(void)
-{
-    return false;
 }
 
 // ------------------------------------------------------------------

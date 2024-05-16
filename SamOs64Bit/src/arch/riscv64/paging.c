@@ -5,17 +5,27 @@
 // The kernel's descriptor is the boot root itself. The portable
 // PAGING_* bits become PTE bits: present R, writeable W, no NO_EXECUTE
 // X, ACCESS_FROM_ALL U; kernel-half leaves are global.
+//
+// A changed or removed leaf is flushed on the other harts too,
+// by SBI RFENCE (riscv64_tlb_shootdown below) instead of x86's
+// smp_tlb_shootdown IPI. With ASIDs a hart keeps an address
+// space's entries after switching away from it, so a user page is
+// flushed on every hart that has ever loaded its descriptor (`harts`),
+// not only on those running it now.
 
 #include "arch/arch.h"
 #include "arch/riscv64/mmu.h"
 #include "arch/riscv64/riscv64.h"
+#include "arch/riscv64/sbi.h"
 #include "cpu/percpu.h"
+#include "kernel.h"
 #include "memory/heap/kheap.h"
 #include "status.h"
 
 struct paging_desc {
     struct mm mm;
     bool      kernel;
+    volatile uint32_t harts;   // Bit n: cpus[n] has loaded it
 };
 
 static struct paging_desc kernel_paging;
@@ -46,13 +56,22 @@ void paging_desc_free(struct paging_desc* desc)
     if (this_cpu()->paging_desc == desc) {
         paging_switch(&kernel_paging);
     }
+    // Its ASID out of every TLB that held it, not only this one.
+    riscv64_tlb_shootdown(desc, 0);
     mm_destroy(&desc->mm);
     kfree(desc);
 }
 
+// The bit before satp, with a full fence (the amo's .aqrl): a
+// hart editing the tables either sees it, or edited them before this
+// hart could load any of their entries (task_switch's rule).
 void paging_switch(struct paging_desc* desc)
 {
-    this_cpu()->paging_desc = desc;
+    struct cpu* c = this_cpu();
+    c->paging_desc = desc;
+    if (!desc->kernel && !(desc->harts & 1u << c->index)) {
+        __atomic_fetch_or(&desc->harts, 1u << c->index, __ATOMIC_SEQ_CST);
+    }
     mm_switch(desc->kernel ? NULL : &desc->mm);
 }
 
@@ -111,6 +130,7 @@ int paging_map(struct paging_desc* desc, void* virt, void* phys, int flags)
     }
     uint64_t* e = present ? pt_entry_split(desc->mm.root, va) : pt_entry(desc->mm.root, va, 0, false);
     int res = 0;
+    bool was_mapped = e && (*e & PTE_V);
     if (e) {
         *e = present ? ((pa >> 2) & 0x003ffffffffffc00ul) | pte | PTE_V : 0;
     } else if (present) {
@@ -121,6 +141,11 @@ int paging_map(struct paging_desc* desc, void* virt, void* phys, int flags)
         __asm__ volatile("sfence.vma %0, zero" : : "r"(va) : "memory");
     } else {
         mm_flush_page(&desc->mm, va);
+    }
+    // An entry another hart may cache (x86's SMP rule; an
+    // invalid one is never cached by QEMU).
+    if (was_mapped) {
+        riscv64_tlb_shootdown(desc, va);
     }
     return res;
 }
@@ -216,6 +241,52 @@ void arch_tlb_flush_local(uint64_t va)
         __asm__ volatile("sfence.vma %0, zero" : : "r"(va) : "memory");
     } else {
         sfence_vma();
+    }
+}
+
+// The shootdown through SBI RFENCE. The targets: every other
+// online hart for a kernel-half page, else the others that have loaded
+// `desc`. A remote fence is done in M-mode, so it reaches a hart
+// spinning with interrupts off, and OpenSBI returns once every target
+// has fenced. Hart ids may be anywhere: one call per 64-hart block of
+// ids. va 0 flushes all of `desc` (its ASID), or everything for the
+// kernel's. ipi_tlb counts the flushes each hart was sent, as x86
+// counts its shootdown IPIs (syscall 51, the SMP self-test).
+void riscv64_tlb_shootdown(struct paging_desc* desc, uint64_t va)
+{
+    struct cpu* me = this_cpu();
+    if (!smp_active()) {
+        return;
+    }
+    bool all = desc->kernel || kernel_half(va);
+    uint32_t todo = 0;
+    for (int i = 0; i < SAMOS_MAX_CPUS; i++) {
+        if (&cpus[i] != me && cpus[i].online && (all || (desc->harts & 1u << i))) {
+            todo |= 1u << i;
+        }
+    }
+    uint64_t start = va & ~(PAGE_SIZE - 1), size = va ? PAGE_SIZE : ~0ul;
+    uint16_t asid = all || !mmu_asid_bits() ? 0 : desc->mm.asid;
+    smp_mb();   // the PTE store before any target walks again
+    // (No __builtin_ctz: without Zbb it is a libgcc call, the riscv64 device code's
+    // __bswapsi2 note in arch.c.)
+    for (int first = 0; todo; first++) {
+        if (!(todo & 1u << first)) {
+            continue;
+        }
+        uint64_t base = cpus[first].arch.hart_id & ~63ul, mask = 0;
+        for (int i = first; i < SAMOS_MAX_CPUS; i++) {
+            if ((todo & 1u << i) && (cpus[i].arch.hart_id & ~63ul) == base) {
+                mask |= 1ul << (cpus[i].arch.hart_id & 63);
+                todo &= ~(1u << i);
+                atomic_inc64(&cpus[i].ipi_tlb);
+            }
+        }
+        long err = asid ? sbi_remote_sfence_vma_asid(mask, base, start, size, asid)
+                        : sbi_remote_sfence_vma(mask, base, start, size);
+        if (err) {
+            panic("riscv64: SBI remote sfence.vma failed\n");
+        }
     }
 }
 

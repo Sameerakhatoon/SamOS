@@ -24,6 +24,7 @@ The x86-64 kernel runs on every CPU the MADT lists. This file is the lock list: 
 | 50 | `sched` | `task/task.c` | no | Every CPU's run queue and sleep list, task states, `task->cpu`, the kill flags, the task list. |
 | 60 | `kmem` | `memory/heap/kheap.c` (`kmem_lock`) | yes | The PFA, the multiheap, the slabs and the kernel half of the page tables (`paging_map` of an address at or above the direct map). One lock because it is one structure: the multiheap's sub-heap is the PFA's frame table, and mapping an arena page allocates page tables from the heap again. |
 | 65 | `ioapic` | `io/apic.c` | no | The IOAPIC's IOREGSEL/IOWIN register pair: `ioapic_set_masked`, `ioapic_route_gsi`, `ioapic_set_dest`. |
+| 65 | `plic` | `arch/riscv64/plic.c` | no | The PLIC's per-context enable words (read-modify-write) and each source's context: `plic_enable`, `plic_disable`, `plic_route` (riscv64's `ioapic`, the same place in the order). |
 | 70 | `smp`, `smp_call` | `cpu/smp.c` | no | One TLB shootdown at a time; one cross-CPU call at a time. |
 | 75 | `rtc` | `io/rtc.c` | no | The CMOS index/data port pair: `rtc_read`, for the time() syscall and FAT timestamps. |
 | 80 | `serial` | `io/serial.c` | no | COM1. After the APs start, each CPU buffers up to a newline and sends the line under one hold, so lines never mix. |

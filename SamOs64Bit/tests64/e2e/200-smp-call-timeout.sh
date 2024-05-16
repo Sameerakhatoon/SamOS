@@ -6,7 +6,7 @@
 # self-test's first smp_call to it gets no answer. After 30 s
 # (SAMOS_LOCK_TIMEOUT_US) the BSP panics naming itself and CPU 1, and
 # the panic stops the other three CPUs. Before the timeout it spun forever.
-# e2e-requires: smp (four CPUs; aarch64 starts its secondary CPUs in the aarch64 SMP work, riscv64 its harts in the riscv64 SMP work)
+# e2e-requires: smp (four CPUs; aarch64 starts its secondary CPUs in the aarch64 SMP work)
 . "$(dirname "$0")/_lib.sh"
 
 export E2E_SMP=4

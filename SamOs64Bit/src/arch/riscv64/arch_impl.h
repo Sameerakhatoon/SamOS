@@ -107,6 +107,10 @@ struct arch_cpu {
     uint64_t hart_id;          // for SBI HSM hart_start and IPIs
     uint8_t* kernel_stack;     // top of the trap stack for traps from U-mode
     volatile uint32_t ipi_pending;  // 1 << enum arch_ipi, taken by the software interrupt
+    int plic_ctx;              // This hart's S-mode PLIC context, -1 if none
+    uint64_t next_deadline;    // This hart's next timer deadline (timer.c)
+    volatile uint64_t ticks;   // Timer interrupts taken on this hart
+    struct mm* mm;             // The user address space in satp, NULL for the kernel's
 };
 
 static inline void* arch_cpu_self(void){
@@ -142,14 +146,29 @@ static inline void arch_irq_disable(void){
 }
 
 // ------------------------------------------------------------------
-// Barriers and atomics (RVWMO).
+// Barriers and atomics (RVWMO). The __atomic builtins are the A
+// extension (atomic_gcc.h): lr/sc with .aqrl for a compare-and-swap,
+// amoswap/amoadd for exchange and add, a fence before a release store
+// and after an acquire load.
 // ------------------------------------------------------------------
 
 #define barrier()   __asm__ volatile("" ::: "memory")
 #define smp_mb()    __asm__ volatile("fence rw, rw" ::: "memory")
 #define smp_rmb()   __asm__ volatile("fence r, r" ::: "memory")
 #define smp_wmb()   __asm__ volatile("fence w, w" ::: "memory")
-#define cpu_relax() barrier()          // pause needs Zihintpause
+
+// Every spin loop is also where a hart stops for another's
+// panic: there is no NMI, and a hart spinning with interrupts off
+// would never take the stop IPI (smp.c). `pause` (Zihintpause) is
+// encoded as a fence that harts without it execute as a no-op.
+extern volatile uint32_t riscv64_stop_harts;
+void riscv64_stop_poll(void);
+#define cpu_relax() do {                                              \
+        __asm__ volatile(".insn i 0x0f, 0, x0, x0, 0x010" ::: "memory"); \
+        if (riscv64_stop_harts) {                                     \
+            riscv64_stop_poll();                                      \
+        }                                                             \
+    } while (0)
 
 #include "arch/atomic_gcc.h"
 
@@ -211,5 +230,9 @@ static inline void arch_memcpy(void* d, const void* s, size_t n){
 // array in the image (RAM does not start at 0).
 #define ARCH_PFA_EARLY_MAP_LIMIT  UINT64_MAX
 #define ARCH_BOOT_MARKER_SLOTS    riscv64_boot_markers
+// The SMP self-test's scratch page: x86's address is the start
+// of the Sv48 mmio window here (the UART), and not in the Sv39 upper
+// half at all. The window's last page is never handed out.
+#define ARCH_SMP_TEST_VA          mmu_scratch_va()
 
 #endif

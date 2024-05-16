@@ -12,6 +12,12 @@
 # aarch64 stops them with an FIQ (a Group 0 SGI); QEMU's
 # dump has no halted flag, so every CPU must have DAIF masked and its
 # pc in aarch64_halt's wfi loop in both dumps.
+#
+# riscv64 has no NMI (an SBI IPI, and a poll in cpu_relax) and
+# QEMU's dump has no halted flag: every hart, the panicking one too,
+# parks in one wfi loop (riscv64_park) with sstatus.SIE and the S bits
+# of sie clear, so all eight pcs must be the same address, and
+# mstatus bit 1 (SIE) and mie bits 1, 5, 9 clear in every dump.
 # e2e-requires: smp (four CPUs; aarch64 starts its secondary CPUs in the aarch64 SMP work, riscv64 its harts in the riscv64 SMP work)
 . "$(dirname "$0")/_lib.sh"
 
@@ -55,6 +61,15 @@ if [ "$E2E_ARCH" = aarch64 ]; then
     done
     [ "$n" -eq 8 ] && [ "$masked" -eq 8 ] && [ "$inside" -eq 8 ] \
         || e2e_fail "expected 4 CPUs in aarch64_halt (0x$halt, 0x$size bytes) with DAIF masked in both dumps: $n pcs, $masked masked, $inside inside"
+elif [ "$E2E_ARCH" = riscv64 ]; then
+    reg() { tr -d '\r' < "$E2E_QEMU_LOG" | sed -n "s/^ *$1  *\([0-9a-f]*\)$/\1/p"; }
+    pcs=$(reg pc | wc -l)
+    distinct=$(reg pc | sort -u | wc -l)
+    on=0
+    for v in $(reg mstatus); do [ $(( 0x$v & 0x2 )) -eq 0 ] || on=$((on + 1)); done
+    for v in $(reg mie); do [ $(( 0x$v & 0x222 )) -eq 0 ] || on=$((on + 1)); done
+    [ "$pcs" -eq 8 ] && [ "$distinct" -eq 1 ] && [ "$on" -eq 0 ] \
+        || e2e_fail "expected 4 harts parked at one pc in both dumps, got $pcs pcs, $distinct distinct, $on with interrupts on"
 else
     halted=$(grep -ao 'HLT=1' "$E2E_QEMU_LOG" | wc -l)
     running=$(grep -ao 'HLT=0' "$E2E_QEMU_LOG" | wc -l)

@@ -106,6 +106,10 @@ uint64_t  make_satp(uint64_t root, uint64_t asid);
 // into the mmio window. Returns the virtual address of `pa`, 0 when
 // the window is full.
 uintptr_t mmu_map_mmio(uint64_t pa, uint64_t size);
+// A kernel page no mapping uses (the mmio window's last), for
+// the SMP self-test; satp for the kernel's root, ASID 0.
+uint64_t  mmu_scratch_va(void);
+uint64_t  mmu_kernel_satp(void);
 
 // Kernel root table walk: the leaf PTE for `va` (0 if unmapped) and,
 // optionally, the level it sits at (0 = 4 KiB).

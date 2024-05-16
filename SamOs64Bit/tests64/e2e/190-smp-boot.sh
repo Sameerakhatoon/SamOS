@@ -16,15 +16,21 @@
 # aarch64 (QEMU virt, once): PSCI CPU_ON from the device tree's
 # /cpus, each CPU named by its MPIDR; the remap reaches the others by
 # broadcast TLB maintenance (tlbi ...is) instead of an IPI.
+#
+# On riscv64 the boot hart starts the other three with SBI HSM
+# (each reports "cpu N hart H": OpenSBI may boot any hart, so the ids
+# are not the slots), in Sv48 and in Sv39 (the shootdown is SBI RFENCE).
 # e2e-requires: smp (four CPUs; aarch64 starts its secondary CPUs in the aarch64 SMP work, riscv64 its harts in the riscv64 SMP work)
 . "$(dirname "$0")/_lib.sh"
 
 export E2E_SMP=4
 machines="pc q35"
 [ "$E2E_ARCH" = aarch64 ] && machines="virt"
+[ "$E2E_ARCH" = riscv64 ] && machines="sv48 sv39"
 for machine in $machines; do
     E2E_MACHINE=$machine
     export E2E_MACHINE
+    if [ "$machine" = sv39 ]; then export E2E_RISCV64_CPU=rv64,sv48=off; else unset E2E_RISCV64_CPU; fi
     _script() {
         e2e_wait_serial '^e2e: user selftest done' 300 || true
         sleep 1
@@ -37,8 +43,9 @@ for machine in $machines; do
     e2e_run_qemu 400 _script
     e2e_log "machine $machine"
     for cpu in 1 2 3; do
-        expect_serial "^smp: cpu $cpu (apic [0-9]+|mpidr 0x[0-9a-f]+) online$" "$machine: cpu $cpu online"
+        expect_serial "^smp: cpu $cpu (apic [0-9]+|mpidr 0x[0-9a-f]+|hart [0-9]+) online$" "$machine: cpu $cpu online"
     done
+    [ "$E2E_ARCH" = riscv64 ] && expect_serial "^mmu: $machine, " "$machine: paging mode"
     expect_serial '^smp: 4 cpus online$' "$machine: four CPUs online"
     expect_serial '^smp selftest: call, tlb shootdown, lock and atomic counts ok$' \
         "$machine: IPI call, TLB shootdown, locks across CPUs"

@@ -47,5 +47,13 @@ void sbi_shutdown(void);
 void sbi_reboot(void);
 // IPI extension: raise sip.SSIP on the harts base + bit n of mask.
 void sbi_send_ipi(unsigned long mask, unsigned long base);
+// HSM hart_start (0 or an SBI error) and hart_stop; RFENCE
+// remote sfence.vma, returning once the targets have fenced. size ~0
+// flushes everything.
+long sbi_hart_start(unsigned long hartid, uint64_t start, uint64_t opaque);
+void sbi_hart_stop(void);
+long sbi_remote_sfence_vma(unsigned long mask, unsigned long base, uint64_t start, uint64_t size);
+long sbi_remote_sfence_vma_asid(unsigned long mask, unsigned long base, uint64_t start, uint64_t size,
+                                uint64_t asid);
 
 #endif

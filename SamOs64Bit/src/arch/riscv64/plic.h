@@ -25,6 +25,12 @@ int  plic_init(const struct fdt* f, int cpu);
 int  plic_register_handler(unsigned irq, INTERRUPT_CALLBACK_FUNCTION handler);
 void plic_enable(unsigned irq);
 void plic_disable(unsigned irq);
+// This hart's S-mode context (into arch.plic_ctx): nothing
+// enabled, threshold 0, SEIE. The context, or -1; plic_init does the
+// boot hart's.
+int  plic_init_hart(const struct fdt* f, int cpu);
+// Deliver `irq` to context `ctx` (another hart's) from now on.
+int  plic_route(unsigned irq, int ctx);
 // Supervisor external interrupt: claim, dispatch, complete until the
 // claim register reads 0.
 void plic_handle(struct trap_frame* frame);

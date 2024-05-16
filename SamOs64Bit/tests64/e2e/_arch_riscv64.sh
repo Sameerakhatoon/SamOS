@@ -10,13 +10,13 @@
 # virtio_mmio.c does not drive). The command line is what x86's UEFI
 # loader would read: CMDLINE.TXT on partition 1, as -append. A virtio
 # keyboard takes the monitor's sendkey, ramfb is the screen for
-# screendump. One hart until the riscv64 SMP work; E2E_MACHINE (pc, q35) does not
-# apply here.
+# screendump. E2E_MACHINE (pc, q35) does not apply here. E2E_SMP
+# harts, started with SBI HSM (OpenSBI picks any of them to boot).
 
 E2E_OS_IMG="$E2E_ROOT/bin/riscv64/os.img"
 E2E_QEMU_BIN=qemu-system-riscv64
 E2E_RISCV64_KERNEL="$E2E_ROOT/bin/riscv64/kernel.img"
-E2E_ARCH_PROVIDES="riscv64 virtio-mmio"
+E2E_ARCH_PROVIDES="riscv64 virtio-mmio smp"
 
 e2e_arch_build() {
     bash "$E2E_ROOT/arch-build.sh" riscv64

@@ -145,6 +145,11 @@ static void riscv64_clock(struct trap_frame* frame)
 static void software_interrupt(struct trap_frame* f)
 {
     csr_clear(sip, SIE_SSIE);
+    // The panic stop (smp.c): any hart but the panicking one
+    // halts here.
+    if (riscv64_stop_harts) {
+        riscv64_stop_poll();
+    }
     uint32_t pending = __atomic_exchange_n(&this_cpu()->arch.ipi_pending, 0, __ATOMIC_ACQ_REL);
     for (int ipi = 0; pending; ipi++, pending >>= 1) {
         if (pending & 1) {

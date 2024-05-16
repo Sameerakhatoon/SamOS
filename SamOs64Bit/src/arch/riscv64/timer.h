@@ -21,8 +21,11 @@ uint64_t timer_probe_timebase(const struct fdt* f, int cpu);
 // Program the first deadline at `hz` and enable STIE (sstatus.SIE is
 // the caller's). `cpu` is the boot hart's /cpus node. 0 or -1.
 int      timer_init(const struct fdt* f, int cpu, unsigned hz);
+// The same tick on this hart (timer_init did the boot hart's).
+void     timer_start_hart(void);
 // Called on every supervisor timer interrupt: count, next deadline.
 void     timer_interrupt(void);
+// The boot hart's ticks (each hart counts its own in arch.ticks).
 uint64_t timer_ticks(void);
 uint64_t timer_timebase(void);
 // Counter ticks per timer tick.

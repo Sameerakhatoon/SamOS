@@ -61,6 +61,37 @@ park:
     wfi
     j park
 
+// Another hart, started by sbi_hart_start (smp.c) here at the
+// physical address, MMU off, a0 = its hart id, a1 = its start ticket
+// (a kernel virtual address; the stack top is its first word). There
+// is no identity map any more, so stvec gets the virtual hart_high
+// first: once satp is on, the next fetch from this physical address
+// page-faults, and the trap is the jump to the higher half.
+    .balign 4
+    .globl hart_entry
+hart_entry:
+    csrw sie, zero
+    csrci sstatus, 2
+    lla t0, hart_high_entry
+    ld t0, 0(t0)
+    csrw stvec, t0
+    lla t0, riscv64_hart_satp
+    ld t0, 0(t0)
+    sfence.vma
+    csrw satp, t0
+    sfence.vma
+1:  j 1b
+
+    .balign 4
+hart_high:
+    sfence.vma
+    csrw sscratch, zero
+    lla t0, trap_entry
+    csrw stvec, t0
+    ld sp, 0(a1)
+    call riscv64_hart_main
+2:  j 2b
+
 // The trap path (stvec direct mode: every trap lands here).
 //
 // sscratch is 0 while the hart runs kernel code and holds the kernel
@@ -149,6 +180,8 @@ trap_test_store:
     .balign 8
 high_entry:
     .quad high
+hart_high_entry:
+    .quad hart_high
 
     .data
     .balign 4
