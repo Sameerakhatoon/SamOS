@@ -18,7 +18,10 @@
 # riscv64: the boot disk on virtio-blk over MMIO, its PLIC
 # source steered to the waiting hart's context (plic_route); marker
 # 192 counts its completions by interrupt.
-# e2e-requires: smp (four CPUs: AHCI and PATA on x86, virtio-blk-mmio on riscv64)
+# aarch64 the same over virtio-blk-mmio, its SPI steered by
+# GICD_IROUTER; before, it ran the x86 machines and read the
+# AHCI marker 185, which aarch64 never sets.
+# e2e-requires: smp (four CPUs: AHCI and PATA on x86, virtio-blk-mmio on aarch64 and riscv64)
 . "$(dirname "$0")/_lib.sh"
 
 export E2E_SMP=4
@@ -41,7 +44,7 @@ MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((p2 * 512))" "$big" ::/BIG.BIN \
     || e2e_fail "mcopy BIG.BIN"
 
 machines="q35 pc"
-[ "$E2E_ARCH" = riscv64 ] && machines=virt
+[ "$E2E_ARCH" = x86_64 ] || machines=virt
 for machine in $machines; do
     E2E_MACHINE=$machine
     export E2E_MACHINE

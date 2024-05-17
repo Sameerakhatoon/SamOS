@@ -99,6 +99,12 @@ e2e_fail() {
     fi
     exit 1
 }
+# A tool the test needs is missing (not the kernel's fault):
+# exit 77, which run-all.sh counts as skipped, with this reason.
+e2e_skip() {
+    echo "SKIP: $*"
+    exit 77
+}
 
 E2E_BOOT_MODE=uefi
 E2E_IMAGE="${E2E_IMAGE:-$E2E_OS_IMG}"

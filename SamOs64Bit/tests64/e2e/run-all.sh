@@ -8,7 +8,8 @@
 #   pattern   only run tests whose file name contains one of these
 #             substrings, e.g. `run-all.sh 01- serial`.
 #
-# A test passes when it exits 0. Output of failing tests is shown
+# A test passes when it exits 0, is skipped when it exits 77
+# (e2e_skip: a tool it needs is missing). Output of failing tests is shown
 # indented under their FAIL line. Exit status is 0 only if every
 # selected test passed.
 #
@@ -80,14 +81,22 @@ done
 outdir=$(mktemp -d "${TMPDIR:-/tmp}/samos-run-all.XXXXXX")
 trap 'rm -rf "$outdir"' EXIT
 
+# Exit 77 (e2e_skip) is a skip at run time: a tool the test
+# needs is missing; its "SKIP: <reason>" line is shown.
 run_one() {
-    local f=$1 outdir=$2
-    if bash "$f" > "$outdir/$f.out" 2>&1; then
-        echo PASS > "$outdir/$f.status"
+    local f=$1 outdir=$2 rc
+    bash "$f" > "$outdir/$f.out" 2>&1
+    rc=$?
+    case $rc in
+    0) echo PASS > "$outdir/$f.status" ;;
+    77) echo SKIP > "$outdir/$f.status" ;;
+    *) echo FAIL > "$outdir/$f.status" ;;
+    esac
+    if [ $rc -eq 77 ]; then
+        echo "SKIP $f: $(sed -n 's/^SKIP: //p' "$outdir/$f.out" | tail -n 1)"
     else
-        echo FAIL > "$outdir/$f.status"
+        echo "$(cat "$outdir/$f.status") $f"
     fi
-    echo "$(cat "$outdir/$f.status") $f"
 }
 export -f run_one
 
@@ -99,9 +108,13 @@ fi
 pass=0
 fail=0
 failed=()
+total=$(( ${#tests[@]} + ${#skipped[@]} ))
 for f in "${tests[@]}"; do
-    if [ "$(cat "$outdir/$f.status" 2>/dev/null)" = PASS ]; then
+    status=$(cat "$outdir/$f.status" 2>/dev/null)
+    if [ "$status" = PASS ]; then
         pass=$((pass + 1))
+    elif [ "$status" = SKIP ]; then
+        skipped+=("$f")
     else
         fail=$((fail + 1))
         failed+=("$f")
@@ -119,5 +132,5 @@ fi
 skip_note=""
 [ ${#skipped[@]} -eq 0 ] || skip_note=", ${#skipped[@]} skipped on $E2E_ARCH"
 echo
-echo "==== $pass passed, $fail failed$skip_note (of $(( ${#tests[@]} + ${#skipped[@]} )), $(( $(date +%s) - start )) s, -j $jobs) ===="
+echo "==== $pass passed, $fail failed$skip_note (of $total, $(( $(date +%s) - start )) s, -j $jobs) ===="
 [ "$fail" = 0 ]

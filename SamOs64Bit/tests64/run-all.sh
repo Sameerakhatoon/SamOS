@@ -82,12 +82,17 @@ fi
 echo
 bash "$here/arch/run.sh" > "$log/arch" 2>&1
 arch=$?
-grep -aE '^(PASS|FAIL|.* arch test:)' "$log/arch"
+# The timeout notes too, and a failing run's whole output
+# (the serial dumps) is kept: an el1 boot that printed nothing in one
+# full run left no trace of why.
+grep -aE '^(PASS|FAIL|.* arch test:|  \(.*timed out)' "$log/arch"
 arch_checks=$(grep -aE ' arch test: ' "$log/arch" | sed 's/ arch test:/:/' | paste -sd ';' - | sed 's/;/; /g')
 if [ $arch -eq 0 ]; then
     arch_line="PASS ($arch_checks)"
 else
-    arch_line="FAIL (exit $arch; ${arch_checks:-no summary}; serial logs: bash tests64/arch/run.sh)"
+    arch_keep=$(mktemp "${TMPDIR:-/tmp}/samos-arch-fail.XXXXXX.log")
+    cp "$log/arch" "$arch_keep"
+    arch_line="FAIL (exit $arch; ${arch_checks:-no summary}; serial logs: $arch_keep)"
 fi
 
 # The storage test boots its own four scratch disks twice
