@@ -146,6 +146,8 @@ struct xhci {
     uint32_t            max_ports;
     uint32_t            ctx_size;
     uint64_t*           dcbaa;
+    uint64_t            dma_limit;      // 0 with AC64, else the first address it cannot reach
+    bool                dma_refused;    // a page above dma_limit was refused (said once)
     struct spinlock     lock;           // the event ring and every producer ring
     struct spinlock     cmd_lock;       // one command at a time
     struct xhci_ring    cmd;

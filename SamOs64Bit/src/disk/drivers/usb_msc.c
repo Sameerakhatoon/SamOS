@@ -361,11 +361,11 @@ int usb_msc_probe(struct usb_device* dev, const struct usb_interface_descriptor*
     }
     m->dev   = dev;
     m->iface = intf->bInterfaceNumber;
-    m->cbw   = kpage_zalloc(4096);
-    m->csw   = kpage_zalloc(4096);
+    m->cbw   = usb_dma_page(dev);
+    m->csw   = usb_dma_page(dev);
     bool ok = m->cbw && m->csw;
     for(int i = 0; i < MSC_DATA_PAGES; i++){
-        m->data[i] = kpage_zalloc(4096);
+        m->data[i] = usb_dma_page(dev);
         ok = ok && m->data[i];
     }
     if(ok){

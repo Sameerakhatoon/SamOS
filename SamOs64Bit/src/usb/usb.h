@@ -4,8 +4,8 @@
 // drivers (usb_hid.c, disk/drivers/usb_msc.c) see of a device.
 //
 // Shared code: registers through arch.h's mmio_*, configuration space
-// through io/pci.h, DMA memory one page at a time (kpage_zalloc and
-// paging_kernel_virt_to_phys), so the Pi 4's VL805 and the
+// through io/pci.h, DMA memory one page at a time (usb_dma_page:
+// kpage_zalloc and paging_kernel_virt_to_phys), so the Pi 4's VL805 and the
 // VisionFive 2's Cadence controller can reuse it.
 //
 // One device per root port: no hubs, so no route strings and no
@@ -97,8 +97,12 @@ int usb_control(struct usb_device* dev, uint8_t type, uint8_t req, uint16_t valu
 // a transfer ring. NULL on failure.
 struct usb_endpoint* usb_endpoint_open(struct usb_device* dev, const struct usb_endpoint_descriptor* ed);
 
+// One zeroed page the device's controller can reach (below
+// 4 GiB without AC64), else NULL. Every transfer page comes from here.
+void* usb_dma_page(struct usb_device* dev);
+
 // Queue one transfer on a bulk or interrupt endpoint: `len` bytes
-// through `pages` (each a page from kpage_zalloc). One transfer per
+// through `pages` (each a page from usb_dma_page). One transfer per
 // endpoint at a time.
 int  usb_transfer_start(struct usb_endpoint* ep, void** pages, uint32_t len);
 // Before a transfer the caller will wait for with irq set (a disk

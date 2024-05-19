@@ -55,8 +55,31 @@ static struct cpu* usb_bsp;
 
 // ---- helpers ----------------------------------------------------------
 
-static void* dma_page(void){ return kpage_zalloc(4096); }
 static uint64_t dma_phys(void* p){ return paging_kernel_virt_to_phys(p); }
+
+// Every page the controller reads or writes: rings, contexts,
+// the DCBAA, scratchpads, transfer buffers. Without AC64 (HCCPARAMS1)
+// it drives 32 address bits only, so a page at or above dma_limit is
+// given back and NULL returned: the bring-up or the device then fails
+// on its no-memory path instead of the controller getting a truncated
+// address. kpage_zalloc has no below-4-GiB request; the heap hands out
+// low frames first, so this only bites once those are gone.
+static void* hc_dma_page(struct xhci* hc){
+    void* p = kpage_zalloc(4096);
+    if(p && hc->dma_limit && dma_phys(p) + 4096 > hc->dma_limit){
+        kfree(p);
+        p = NULL;
+        if(!hc->dma_refused){
+            hc->dma_refused = true;
+            serial_write("xhci: a DMA page above what the 32-bit controller reaches, refused\n");
+        }
+    }
+    return p;
+}
+
+void* usb_dma_page(struct usb_device* dev){
+    return hc_dma_page(dev->hc);
+}
 
 static uint64_t xhci_deadline(uint32_t ms){
     return arch_counter() + arch_counter_hz() / 1000 * ms;
@@ -416,7 +439,7 @@ static int xhci_command(struct xhci* hc, uint64_t param, uint32_t control, uint8
 
 static struct usb_endpoint* ep_new(struct usb_device* d, uint8_t dci){
     struct usb_endpoint* ep = kzalloc(sizeof(*ep));
-    void* page = dma_page();
+    void* page = hc_dma_page(d->hc);
     if(!ep || !page){
         kfree(ep);
         kfree(page);
@@ -686,9 +709,9 @@ static int usb_address(struct xhci* hc, struct usb_device* d){
         return -EIO;
     }
     d->slot = slot;
-    d->ctx_page = dma_page();
-    d->in_page  = dma_page();
-    d->buf_page = dma_page();
+    d->ctx_page = hc_dma_page(hc);
+    d->in_page  = hc_dma_page(hc);
+    d->buf_page = hc_dma_page(hc);
     struct usb_endpoint* ep0 = ep_new(d, 1);
     if(!d->ctx_page || !d->in_page || !d->buf_page || !ep0){
         return -ENOMEM;
@@ -990,26 +1013,40 @@ static int xhci_start(struct xhci* hc){
         return -EIO;
     }
 
-    void* dcbaa = dma_page();
-    void* cmd = dma_page();
-    void* ev = dma_page();
-    void* erst = dma_page();
+    // Without AC64 every structure below 4 GiB (hc_dma_page).
+    // samos.usb_dma32[=MiB] (tests; QEMU's controllers all have AC64)
+    // treats it as 32-bit, with a lower limit when given.
+    hc->dma_limit = hcc1 & XHCI_HCC_AC64 ? 0 : 1ull << 32;
+    const char* limit = boot_cmdline_value("samos.usb_dma32");
+    if(limit){
+        uint64_t mib = 0;
+        for(; isdigit(*limit); limit++){
+            mib = mib * 10 + tonumericdigit(*limit);
+        }
+        hc->dma_limit = mib << 20;
+    } else if(boot_cmdline_has("samos.usb_dma32")){
+        hc->dma_limit = 1ull << 32;
+    }
+    if(hc->dma_limit){
+        serial_write("xhci: 32-bit addressing, DMA below ");
+        serial_write(itoa((int)(hc->dma_limit >> 20)));
+        serial_write(" MiB\n");
+    }
+    void* dcbaa = hc_dma_page(hc);
+    void* cmd = hc_dma_page(hc);
+    void* ev = hc_dma_page(hc);
+    void* erst = hc_dma_page(hc);
     if(!dcbaa || !cmd || !ev || !erst){
         return -ENOMEM;
     }
-    // Without AC64 every structure must sit below 4 GiB.
-    if(!(hcc1 & XHCI_HCC_AC64) && (dma_phys(dcbaa) >> 32 || dma_phys(ev) >> 32)){
-        serial_write("xhci: 32-bit controller and memory above 4 GiB, not supported\n");
-        return -EIO;
-    }
     hc->dcbaa = dcbaa;
     if(scratch){
-        uint64_t* array = dma_page();
+        uint64_t* array = hc_dma_page(hc);
         if(!array || scratch > 512){
             return -ENOMEM;
         }
         for(uint32_t i = 0; i < scratch; i++){
-            void* p = dma_page();
+            void* p = hc_dma_page(hc);
             if(!p){
                 return -ENOMEM;
             }

@@ -225,7 +225,7 @@ int usb_hid_probe(struct usb_device* dev, const struct usb_interface_descriptor*
         return -ENOENT;
     }
     struct usb_hid* h = kzalloc(sizeof(*h));
-    if(!h || !(h->page = kpage_zalloc(4096))){
+    if(!h || !(h->page = usb_dma_page(dev))){
         kfree(h);
         return -ENOMEM;
     }
