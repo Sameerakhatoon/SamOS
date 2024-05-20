@@ -20,7 +20,10 @@
 #   el2:    virtualization=on: AAVMF runs at EL2, the loader turns the
 #           EL2 MMU off and the kernel drops to EL1 as on -kernel. -smp
 #           2: the second CPU starts at EL2 too, through PSCI over smc.
-#   gop:    -device ramfb: AAVMF's GOP mode lands in boot_info.
+#   gop:    -device ramfb: AAVMF's GOP mode lands in boot_info and is
+#           the kernel's screen: no ramfb set-up of its own,
+#           and a screendump at the loader's GOP size shows the kernel
+#           drew over the loader's green.
 # The -kernel boots stay in the other aarch64-*.sh tests.
 set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -85,7 +88,10 @@ boot() {
         for re in "$@"; do
             grep -aqE "$re" "$log.now" || { all=0; break; }
         done
-        [ $all -eq 1 ] && break
+        if [ $all -eq 1 ]; then
+            [ -z "${on_done:-}" ] || "$on_done"
+            break
+        fi
         if [ $waited -ge $((timeout_s * 10)) ]; then
             echo "  ($name: timed out after ${timeout_s}s)"
             break
@@ -204,10 +210,45 @@ expect el2 '^smp selftest: call, tlb shootdown, lock and atomic counts ok$' "SMP
 no_crash el2
 
 # ---- GOP ---------------------------------------------------------------
-boot gop ",acpi=off" "-device ramfb" "$done_re"
+# gop_screendump: on the monitor socket, while the kernel still runs.
+# Prints "<width> <height> <pixels that are not the loader's green>".
+gop_screendump() {
+    python3 -I - "$tmp/gop.mon" "$tmp/gop.ppm" > "$tmp/gop.screen" 2>&1 << 'PY'
+import os, socket, sys, time
+mon, ppm = sys.argv[1], sys.argv[2]
+s = socket.socket(socket.AF_UNIX)
+s.connect(mon)
+s.sendall(("screendump %s\n" % ppm).encode())
+size = -1
+for _ in range(100):            # the file is written whole, then stays
+    time.sleep(0.1)
+    if os.path.exists(ppm) and os.path.getsize(ppm) == size > 0:
+        break
+    size = os.path.getsize(ppm) if os.path.exists(ppm) else -1
+data = open(ppm, "rb").read()
+magic, w, h, _maxval, pixels = data.split(maxsplit=4)
+w, h = int(w), int(h)
+other = sum(1 for i in range(0, w * h * 3, 3) if pixels[i:i + 3] != b"\x00\xff\x00")
+print(w, h, other)
+PY
+}
+
+on_done=gop_screendump
+boot gop ",acpi=off" "-device ramfb -monitor unix:$tmp/gop.mon,server,nowait" "$done_re"
+on_done=
 expect gop '^Framebuffer [0-9A-F]+ \([0-9]+ bytes\), [0-9]+ x [0-9]+, pitch [0-9]+, format [01]$' "the loader set a GOP mode"
-expect gop '^uefi: GOP framebuffer 0x[1-9a-f][0-9a-f]*, [0-9]+x[0-9]+, pitch [0-9]+, format [01] \(not used yet\)$' \
+gop="$(field gop 's/^Framebuffer ([0-9A-F]+) \([0-9]+ bytes\), ([0-9]+) x ([0-9]+), pitch ([0-9]+), format [01]$/\1 \2 \3 \4/p')"
+read -r gop_base gop_w gop_h gop_pitch <<< "${gop:-0 0 0 0}"
+gop_base=$(printf '%x' "$((16#$gop_base))")
+expect gop "^uefi: GOP framebuffer 0x$gop_base, ${gop_w}x$gop_h, pitch $gop_pitch, format [01]\$" \
     "the GOP framebuffer reaches the kernel in boot_info"
+expect gop "^screen: the loader's GOP framebuffer, ${gop_w}x$gop_h, pitch $gop_pitch, at pa 0x$gop_base\$" \
+    "the kernel's screen is the GOP framebuffer"
+expect gop "^graphics: framebuffer ${gop_w}x$gop_h pitch $gop_pitch," "graphics draws at the GOP size"
+expect_no gop '^ramfb:' "no ramfb set-up of the kernel's own"
+read -r shot_w shot_h shot_other < "$tmp/gop.screen" || true
+[ "${shot_w:-}" = "$gop_w" ] && [ "${shot_h:-}" = "$gop_h" ] && [ "${shot_other:-0}" -gt 0 ] 2>/dev/null
+result $? "screendump: ${shot_w:-?}x${shot_h:-?} as the GOP mode, ${shot_other:-?} pixels drawn over the loader's green"
 expect gop "$done_re" "user programs at EL0"
 no_crash gop
 

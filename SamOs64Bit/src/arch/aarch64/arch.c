@@ -176,7 +176,14 @@ static void psci_init(void)
     psci_smc = method && method[0] == 's';
 }
 
-void aarch64_enter_kernel(const struct fdt* f, uint64_t dtb_pa, const char* bootargs)
+// Entered from the UEFI loader (`loader`, else -kernel): its
+// boot_info as it is (GOP framebuffer, RSDP, DTB, initrd, command line,
+// kernel range), with two changes: the device tree is the one in use
+// (built from ACPI when the loader had none), and the memory map is the
+// one built here from the loader's (memmap_build_uefi), which also
+// carves out the frames mmu_early's allocator took before kernel_main.
+void aarch64_enter_kernel(const struct fdt* f, uint64_t dtb_pa, const char* bootargs,
+                          const struct samos_boot_info* loader)
 {
     dt = *f;
     dt_ok = 1;
@@ -198,15 +205,20 @@ void aarch64_enter_kernel(const struct fdt* f, uint64_t dtb_pa, const char* boot
         console_printf("boot: memory map does not fit %d entries, halted\n", E820_MAX);
         aarch64_halt();
     }
-    boot_info.magic = SAMOS_BOOT_INFO_MAGIC;
-    boot_info.version = SAMOS_BOOT_INFO_VERSION;
-    boot_info.size = sizeof(boot_info);
-    boot_info.fb_format = FB_FORMAT_NONE;
+    if (loader) {
+        boot_info = *loader;
+    } else {
+        boot_info.magic = SAMOS_BOOT_INFO_MAGIC;
+        boot_info.version = SAMOS_BOOT_INFO_VERSION;
+        boot_info.size = sizeof(boot_info);
+        boot_info.fb_format = FB_FORMAT_NONE;
+        boot_info.kernel_start = kimage_pa(_head);
+        boot_info.kernel_end = kimage_pa(_end);
+        for (int i = 0; bootargs && bootargs[i] && i < SAMOS_BOOT_CMDLINE_MAX - 1; i++)
+            boot_info.cmdline[i] = bootargs[i];
+    }
+    boot_info.dtb = dtb_pa;
     boot_info.memory_map = kimage_pa(&e820);
-    boot_info.kernel_start = kimage_pa(_head);
-    boot_info.kernel_end = kimage_pa(_end);
-    for (int i = 0; bootargs && bootargs[i] && i < SAMOS_BOOT_CMDLINE_MAX - 1; i++)
-        boot_info.cmdline[i] = bootargs[i];
     samos_boot_info_ptr = &boot_info;
 
     default_graphics_info.horizontal_resolution = FB_WIDTH;
@@ -766,6 +778,23 @@ static void ramfb_init(void)
     console_printf("ramfb: %ux%u XRGB8888 framebuffer at pa 0x%lx\n", FB_WIDTH, FB_HEIGHT, fb_pa);
 }
 
+// The loader's GOP mode when it set one (under AAVMF with
+// -device ramfb, the firmware's own ramfb buffer, in memory it reserved),
+// as x86 uses OVMF's; else ramfb programmed here.
+static void screen_init(void)
+{
+    if (boot_info.fb_format == SAMOS_FB_FORMAT_NONE) {
+        ramfb_init();
+        return;
+    }
+    default_graphics_info.framebuffer = (struct framebuffer_pixel*)boot_info.fb_base;
+    default_graphics_info.horizontal_resolution = boot_info.fb_width;
+    default_graphics_info.vertical_resolution = boot_info.fb_height;
+    default_graphics_info.pixels_per_scanline = boot_info.fb_pitch;
+    console_printf("screen: the loader's GOP framebuffer, %ux%u, pitch %u, at pa 0x%lx\n", boot_info.fb_width,
+                   boot_info.fb_height, boot_info.fb_pitch, boot_info.fb_base);
+}
+
 // The PCIe host's ECAM window ("pci-host-ecam-generic", QEMU virt),
 // mapped whole for io/pci.c. Enumeration only: nothing assigned the
 // BARs, and pci_intx_gsi knows no route on this host bridge.
@@ -814,7 +843,7 @@ void arch_firmware_init(void)
     pl031_init();
     int slots = virtio_mmio_scan_fdt(&dt, dt_virtio_irq, true);
     console_printf("virtio-mmio: %d slot(s) in the device tree\n", slots);
-    ramfb_init();
+    screen_init();
 
     uint64_t base, size;
     if (memmap_initrd(&base, &size) == 0) {

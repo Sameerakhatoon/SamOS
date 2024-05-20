@@ -56,8 +56,8 @@ uint64_t fault_test_svc(uint64_t x0);
 void mmu_test(const struct fdt* f);
 int mmu_fault_test(const char* kind);
 void aarch64_gic_ready(void);
-void aarch64_enter_kernel(const struct fdt* f, uint64_t dtb_pa, const char* bootargs)
-    __attribute__((noreturn));
+void aarch64_enter_kernel(const struct fdt* f, uint64_t dtb_pa, const char* bootargs,
+                          const struct samos_boot_info* loader) __attribute__((noreturn));
 
 static uint8_t work_stacks[2][WORK_STACK] __attribute__((aligned(16)));
 static uint64_t timer_epoch;        // CNTPCT when the tick started
@@ -194,12 +194,13 @@ static void uefi_report(const struct samos_boot_info* bi, uint64_t pa)
                    bi->version, *(const uint64_t*)phys_to_virt(bi->memory_map), bi->kernel_start, bi->kernel_end);
     console_printf("uefi: dtb 0x%lx, acpi rsdp 0x%lx, initrd 0x%lx (%lu bytes)\n", bi->dtb, bi->acpi_rsdp,
                    bi->initrd_base, bi->initrd_size);
-    // The screen is the aarch64 device code's (ramfb); the GOP mode is only reported.
+    // A GOP framebuffer is the screen (arch.c screen_init);
+    // without one, the aarch64 device code's ramfb.
     if (bi->fb_format == SAMOS_FB_FORMAT_NONE)
         console_printf("uefi: no GOP framebuffer\n");
     else
-        console_printf("uefi: GOP framebuffer 0x%lx, %ux%u, pitch %u, format %u (not used yet)\n", bi->fb_base,
-                       bi->fb_width, bi->fb_height, bi->fb_pitch, bi->fb_format);
+        console_printf("uefi: GOP framebuffer 0x%lx, %ux%u, pitch %u, format %u\n", bi->fb_base, bi->fb_width,
+                       bi->fb_height, bi->fb_pitch, bi->fb_format);
     console_printf("uefi: cmdline \"%s\"\n", bi->cmdline);
 }
 
@@ -276,5 +277,5 @@ void aarch64_main(uint64_t arg, uint64_t boot_el)
             __asm__ volatile("wfi");    // the idle thread
     // The shared kernel, with IRQs masked until the first task.
     aarch64_gic_ready();
-    aarch64_enter_kernel(&f, dtb, args);
+    aarch64_enter_kernel(&f, dtb, args, bi);
 }
