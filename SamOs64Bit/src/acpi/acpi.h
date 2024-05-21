@@ -6,8 +6,10 @@
 // Not in the book: it hard-codes the 8259 PIC and the 0xCF8 PCI
 // ports and has no power-off. The loader passes the RSDP the UEFI
 // configuration table names in boot_info.acpi_rsdp. Every
-// table is checksum-checked and mapped through the direct map with
-// paging_map_mmio (ACPI memory is not part of the RAM direct map).
+// table is checksum-checked and mapped with paging_map_mmio: on x86
+// ACPI memory is not part of the RAM direct map, so it gets a mapping
+// of its own; on aarch64 under UEFI it is RAM, and paging_map_mmio
+// returns its direct map address.
 //
 // The Arm parts as well: the MADT's GIC entries (GICC per CPU,
 // GICD, GICR ranges), the SPCR console, the GTDT timer interrupts and

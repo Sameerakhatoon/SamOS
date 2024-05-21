@@ -46,7 +46,9 @@ expect_serial "$SHELL_BANNER" "q35: shell up"
 expect_serial '^Hello: USB_Keys$' "q35: Shift, ':' and '_' through usb-kbd"
 expect_serial '^CAPS done$' "q35: Caps Lock through usb-kbd"
 expect_serial '^usb-hid: cursor registered with the mouse layer$' "q35: USB mouse has its own cursor"
-expect_serial 'usb-hid: first mouse report, cursor at [0-9]+,[0-9]+$' "q35: mouse_move reached the mouse layer"
+# The cursor starts at the centre of the 1280x800 screen, and
+# mouse_move 30 20 is one report of +30,+20.
+expect_serial 'usb-hid: first mouse report, cursor at 670,420$' "q35: mouse_move moved the cursor by 30,20 from the centre"
 [ -s "$E2E_DUMP" ] || e2e_fail "q35: no marker dump"
 keys=$(usb_count 195)
 e2e_log "q35: USB key events: $keys"

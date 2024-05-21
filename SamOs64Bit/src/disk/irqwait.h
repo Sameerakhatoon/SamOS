@@ -14,9 +14,12 @@
 // and _end only the completion lines are taken (x86: the LAPIC TPR is
 // APIC_TPR_DISK_WAIT, so only vectors 0x50-0x5F): the keyboard, the
 // mouse and the scheduler tick stay pending as they do with
-// interrupts off. The one other handler that can run there is a
-// virtio-input line sharing a completion vector, and it only sends
-// an IPI the wait also holds off.
+// interrupts off. Two other handlers can run there: a virtio-input
+// line sharing a completion vector, which only sends an IPI the wait
+// also holds off, and xHCI's (a completion slot of
+// its own), which takes its controller's `usb` lock to drain the event
+// ring, then signals a mass storage wait or sends that same IPI for
+// HID reports and plug events.
 //
 // Each interrupt is checked against the device (`done`), so a late
 // interrupt from an earlier command does not end a wait early, and the
