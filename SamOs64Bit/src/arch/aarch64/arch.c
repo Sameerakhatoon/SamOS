@@ -606,9 +606,13 @@ void aarch64_secondary_main(struct cpu_start* s)
     cpu_irqs_init();
     timer_start_cpu();
 
+    // The line before `online` (as riscv64): once this CPU is online
+    // the boot CPU starts the next one or prints "smp: N cpus online",
+    // and console_printf is one character at a time, so the two lines
+    // could interleave (e2e/201 saw "...online" + "smp: 3 cpus online").
+    console_printf("smp: cpu %u mpidr 0x%lx online\n", c->index, c->arch.mpidr);
     c->online = 1;
     atomic_inc(&cpu_online_count);
-    console_printf("smp: cpu %u mpidr 0x%lx online\n", c->index, c->arch.mpidr);
     task_next();
     aarch64_halt();
 }
