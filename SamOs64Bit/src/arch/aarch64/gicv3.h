@@ -52,4 +52,12 @@ int      gic_init_cpu(void);
 int      gic_fiq_sgi(uint32_t sgi);
 void     gic_send_fiq_others(uint32_t sgi);
 
+// S-PAR - LPIs (its.c): INTIDs GIC_INTID_LPI.. for MSIs, GIC_LPIS of
+// them dispatched (trap.c). The redistributor frames gic_init found,
+// for their LPI tables: gic_rd_frame(0 .. gic_rd_count() - 1).
+#define GIC_INTID_LPI       8192
+#define GIC_LPIS            64
+int      gic_rd_count(void);
+uint64_t gic_rd_frame(int i);
+
 #endif

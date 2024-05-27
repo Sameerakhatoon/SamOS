@@ -4,7 +4,7 @@
 # The driver marks the disk read-only, the volume mounts as drive 1:,
 # the shell reads a file Linux put there, a write is refused with
 # "read-only", and the image is byte for byte what it was.
-# e2e-requires: virtio-pci (a read-only virtio-blk-pci on pc)
+# e2e-requires: virtio-pci (a read-only virtio-blk-pci)
 E2E_MACHINE=pc
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
@@ -29,7 +29,7 @@ _ro_mon() {
 }
 e2e_run_qemu 300 _ro_mon
 
-expect_serial '^virtio-blk: disk 1, 64 MiB, read-only(, flush)?, queue [0-9]+$' "the disk is read-only"
+expect_serial '^virtio-blk: disk [0-9]+, 64 MiB, read-only(, flush)?, queue [0-9]+$' "the disk is read-only"
 expect_serial '^on a read-only virtio disk$' "cat read the Linux file"
 expect_serial '^echo: 1:/NEW\.TXT: read-only$' "the write was refused"
 expect_no_serial 'KERNEL PANIC|KERNEL FAULT|USER FAULT|spinlock:|virtio-blk: request timed out' "no fault"

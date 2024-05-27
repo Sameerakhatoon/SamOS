@@ -67,8 +67,12 @@ static int virtio_mmio_probe(uint32_t device_id, int (*attach)(struct virtio_dev
     return found;
 }
 
+// S-PAR - the virtio-mmio slots first: on QEMU virt the boot disk is
+// one, and it keeps disk id 0 next to virtio-blk-pci data disks, as the
+// boot disk does on x86 (which has no slots).
 int virtio_probe(uint32_t device_id, int (*attach)(struct virtio_dev* d, void* ctx), void* ctx){
-    return virtio_pci_probe(device_id, attach, ctx) + virtio_mmio_probe(device_id, attach, ctx);
+    int n = virtio_mmio_probe(device_id, attach, ctx);
+    return n + virtio_pci_probe(device_id, attach, ctx);
 }
 
 // ---- Lines -------------------------------------------------------------

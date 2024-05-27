@@ -140,7 +140,10 @@ int  arch_irq_set_cpu(uint32_t gsi, struct cpu* c);
 // `handler` NULL keeps the one registered (retargeting). Returns the
 // line number, or < 0. Ports without it: a weak -EUNIMP in
 // usb/xhci.c, so the xHCI driver falls back to INTx or polling.
-int  arch_irq_msi(unsigned slot, struct cpu* c, INTERRUPT_CALLBACK_FUNCTION handler,
+// S-PAR - `dev` is the function that writes it (aarch64's GICv3 ITS
+// translates by its DeviceID; x86 ignores it).
+struct pci_device;
+int  arch_irq_msi(struct pci_device* dev, unsigned slot, struct cpu* c, INTERRUPT_CALLBACK_FUNCTION handler,
                   uint64_t* addr, uint32_t* data);
 // A driver's wait in the middle of a syscall: between begin and end
 // only completion lines are taken, each time arch_irq_wait_window

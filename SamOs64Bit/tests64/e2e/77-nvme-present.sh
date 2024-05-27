@@ -7,7 +7,7 @@
 # kernel's PCI scan saw class 0x01:0x08. The backing image is
 # tiny (4 MiB) and lives at $E2E_TMP/nvme.img so we do not pull a
 # real disk into the test.
-# e2e-requires: nvme (an NVMe controller on PCI (no BARs assigned on aarch64 virt without firmware))
+# e2e-requires: nvme (an NVMe controller on PCI)
 . "$(dirname "$0")/_lib.sh"
 
 # Pre-create the backing image if it is missing.
@@ -27,4 +27,12 @@ expect_stage_value 96 -eq 1 "PCI list contains NVMe controller (0x01:0x08)"
 # The controller comes up (TSC-deadline waits) and only then
 # is its disk registered.
 expect_serial '^nvme: controller ready, disk [0-9]+$' "NVMe controller up, disk registered"
+# S-PAR - aarch64 virt: under -kernel the kernel assigned the NVMe's
+# BAR0 from the host bridge's 32-bit window; under AAVMF
+# (E2E_AARCH64_FW=uefi) the firmware's BARs are kept, nothing assigned.
+if [ "$E2E_ARCH" = aarch64 ] && [ "${E2E_AARCH64_FW:-}" = uefi ]; then
+    expect_no_serial '^pci: [0-9]+:[0-9]+\.[0-9] BAR' "firmware-assigned BARs kept"
+elif [ "$E2E_ARCH" = aarch64 ]; then
+    expect_serial '^pci: 0:[0-9]+\.0 BAR0 mem32 0x000000001[0-9a-f]{7} size 0x0000000000004000$' "NVMe BAR0 assigned"
+fi
 echo "PASS: e2e/77 nvme present"

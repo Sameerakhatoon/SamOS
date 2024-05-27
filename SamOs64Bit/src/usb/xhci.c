@@ -273,8 +273,8 @@ static INTERRUPT_CALLBACK_FUNCTION const xhci_irq_handler[XHCI_IRQ_SLOTS] = { xh
 
 // The ports without one (the Pi and VisionFive 2 ports until they wire MSI): no message
 // interrupts, so INTx or polling.
-__attribute__((weak)) int arch_irq_msi(unsigned slot, struct cpu* c, INTERRUPT_CALLBACK_FUNCTION handler,
-                                       uint64_t* addr, uint32_t* data){
+__attribute__((weak)) int arch_irq_msi(struct pci_device* dev, unsigned slot, struct cpu* c,
+                                       INTERRUPT_CALLBACK_FUNCTION handler, uint64_t* addr, uint32_t* data){
     return -EUNIMP;
 }
 
@@ -294,10 +294,12 @@ static uint8_t pci_find_cap(struct pci_device* d, uint8_t id){
 }
 
 // Point the message at CPU `c` (MSI-X: masked while it changes).
+// The arch's line number, or < 0.
 static int xhci_msg_target(struct xhci* hc, struct cpu* c, INTERRUPT_CALLBACK_FUNCTION handler){
     uint64_t addr;
     uint32_t data;
-    if(arch_irq_msi(XHCI_IRQ_SLOT_BASE + hc->irq_slot, c, handler, &addr, &data) < 0){
+    int line = arch_irq_msi(hc->pci, XHCI_IRQ_SLOT_BASE + hc->irq_slot, c, handler, &addr, &data);
+    if(line < 0){
         return -EIO;
     }
     struct pci_address* a = &hc->pci->addr;
@@ -318,7 +320,7 @@ static int xhci_msg_target(struct xhci* hc, struct cpu* c, INTERRUPT_CALLBACK_FU
         }
     }
     hc->irq.dest = c;
-    return 0;
+    return line;
 }
 
 static int xhci_setup_msi(struct xhci* hc, INTERRUPT_CALLBACK_FUNCTION handler){
@@ -332,10 +334,11 @@ static int xhci_setup_msi(struct xhci* hc, INTERRUPT_CALLBACK_FUNCTION handler){
             uint64_t base = (d->bars[bir].addr & ~0xFULL) + (table & ~7u);
             hc->msix_entry = paging_map_mmio(base, 16, PAGING_CACHE_DISABLED);
             hc->irq_kind = XHCI_IRQ_MSIX;
-            if(hc->msix_entry && xhci_msg_target(hc, usb_bsp, handler) == 0){
+            int line = hc->msix_entry ? xhci_msg_target(hc, usb_bsp, handler) : -EIO;
+            if(line >= 0){
                 uint16_t ctrl = pci_cfg_read_word(b, s, f, cap + 2);
                 pci_cfg_write_word(b, s, f, cap + 2, (ctrl & ~0x4000) | 0x8000);
-                return 0;
+                return line;
             }
         }
     }
@@ -343,10 +346,11 @@ static int xhci_setup_msi(struct xhci* hc, INTERRUPT_CALLBACK_FUNCTION handler){
     if(cap){
         hc->msi_cap  = cap;
         hc->irq_kind = XHCI_IRQ_MSI;
-        if(xhci_msg_target(hc, usb_bsp, handler) == 0){
+        int line = xhci_msg_target(hc, usb_bsp, handler);
+        if(line >= 0){
             uint16_t ctrl = pci_cfg_read_word(b, s, f, cap + 2);
             pci_cfg_write_word(b, s, f, cap + 2, (ctrl & ~0x70) | 1);
-            return 0;
+            return line;
         }
     }
     hc->irq_kind = XHCI_IRQ_NONE;
@@ -362,11 +366,12 @@ static void xhci_setup_irq(struct xhci* hc){
     }
     hc->irq_slot = xhci_hc_count - 1;
     INTERRUPT_CALLBACK_FUNCTION handler = xhci_irq_handler[hc->irq_slot];
-    if(!boot_cmdline_has("samos.usb_intx") && xhci_setup_msi(hc, handler) == 0){
+    int msi = boot_cmdline_has("samos.usb_intx") ? -ENOENT : xhci_setup_msi(hc, handler);
+    if(msi >= 0){
         q->enabled = true;
         serial_write(hc->irq_kind == XHCI_IRQ_MSIX ? "xhci: interrupts by MSI-X" : "xhci: interrupts by MSI");
         serial_write(", vector ");
-        serial_write(itoa(0x50 + XHCI_IRQ_SLOT_BASE + hc->irq_slot));
+        serial_write(itoa(msi));
         serial_write("\n");
         return;
     }

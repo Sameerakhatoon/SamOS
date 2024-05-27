@@ -8,7 +8,8 @@
 #      the key events. The USB mouse registers a cursor of its own and
 #      monitor `mouse_move` moves it.
 #   2. pc (PS/2 mouse present): the USB mouse drives the PS/2 cursor.
-# e2e-requires: xhci (qemu-xhci on PCI, x86 machines and OVMF; on aarch64 virt nothing assigns PCI BARs and there is no MSI)
+# S-PAR - on aarch64 virt part 1 only, without the virtio keyboard.
+# e2e-requires: xhci (qemu-xhci on PCI)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_usb_lib.sh"
@@ -32,14 +33,14 @@ _hid_mon() {
     sleep 0.3
     printf 'mouse_button 0\n'
     sleep 1
-    printf 'pmemsave 0x6000 %d "%s"\n' "$E2E_MARKER_REGION_SIZE" "$E2E_DUMP"
+    e2e_pmemsave
     sleep 1
     printf 'quit\n'
 }
 
 E2E_MACHINE=q35
 usb_args ""
-E2E_EXTRA_QEMU_ARGS+=" -machine i8042=off"
+usb_only_keyboard
 e2e_run_qemu 300 _hid_mon
 usb_enum_check "q35"
 expect_serial "$SHELL_BANNER" "q35: shell up"
@@ -53,6 +54,10 @@ expect_serial 'usb-hid: first mouse report, cursor at 670,420$' "q35: mouse_move
 keys=$(usb_count 195)
 e2e_log "q35: USB key events: $keys"
 [ "$keys" -ge 60 ] || e2e_fail "q35: only $keys USB key events"
+if [ "$E2E_ARCH" = aarch64 ]; then
+    echo "PASS: e2e/203 USB keyboard (Shift, Caps Lock) and mouse through the keyboard and mouse layers (aarch64 virt)"
+    exit 0
+fi
 
 _ps2_mon() {
     e2e_wait_serial '^e2e: user selftest done' 120 || true

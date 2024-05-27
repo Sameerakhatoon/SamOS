@@ -172,7 +172,8 @@ PORT_OBJS = arch/aarch64/boot.S.o arch/aarch64/vectors.S.o arch/aarch64/main.o \
     arch/aarch64/gicv3.o arch/aarch64/timer.o arch/aarch64/sched.o arch/aarch64/fault_test.S.o \
     arch/aarch64/mmu.o arch/aarch64/pfa.o arch/aarch64/memmap.o arch/aarch64/mmu_test.o \
     arch/aarch64/arch.o arch/aarch64/entry.S.o arch/aarch64/paging.o arch/aarch64/uaccess.o \
-    arch/aarch64/uaccess.S.o arch/aarch64/acpi_dt.o virtio/virtio_mmio_fdt.o firmware/ramfb.o
+    arch/aarch64/uaccess.S.o arch/aarch64/acpi_dt.o virtio/virtio_mmio_fdt.o firmware/ramfb.o \
+    io/pci_fdt.o arch/aarch64/its.o
 # The whole shared kernel, as on x86, except task/uaccess.o:
 # arch/aarch64/uaccess.c implements task/uaccess.h with LDTR/STTR and
 # the __ex_table fixups instead of a table walk.
@@ -195,7 +196,7 @@ PORT_OBJS = arch/riscv64/boot.S.o arch/riscv64/main.o arch/riscv64/sbi.o \
     arch/riscv64/timer.o arch/riscv64/plic.o arch/riscv64/kthread.o \
     arch/riscv64/mmu.o arch/riscv64/paging.o arch/riscv64/arch.o arch/riscv64/fpu.S.o \
     arch/riscv64/uaccess.o arch/riscv64/uaccess.S.o arch/riscv64/mmu_test.o firmware/fdt.o \
-    virtio/virtio_mmio_fdt.o firmware/ramfb.o arch/riscv64/smp.o
+    virtio/virtio_mmio_fdt.o firmware/ramfb.o arch/riscv64/smp.o io/pci_fdt.o
 # The kernel is the shared one (kernel_main): every shared
 # object is linked, except task/uaccess.o, which uaccess.c replaces
 # (SUM and the fixup table).

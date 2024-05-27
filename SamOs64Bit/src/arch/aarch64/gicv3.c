@@ -228,6 +228,16 @@ uint64_t gic_redistributor(uint64_t mpidr)
     return 0;
 }
 
+int gic_rd_count(void)
+{
+    return rd_frames;
+}
+
+uint64_t gic_rd_frame(int i)
+{
+    return i >= 0 && i < rd_frames ? rd_frame[i] : 0;
+}
+
 void gic_enable(uint32_t intid)
 {
     if (intid < GIC_INTID_SPI)

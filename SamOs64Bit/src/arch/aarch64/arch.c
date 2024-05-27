@@ -29,6 +29,7 @@
 #include "acpi/acpi.h"
 #include "arch/aarch64/console.h"
 #include "arch/aarch64/gicv3.h"
+#include "arch/aarch64/its.h"
 #include "arch/aarch64/memmap.h"
 #include "arch/aarch64/mmu.h"
 #include "arch/aarch64/pfa.h"
@@ -46,6 +47,7 @@
 #include "firmware/ramfb.h"
 #include "graphics/graphics.h"
 #include "io/pci.h"
+#include "io/pci_fdt.h"
 #include "io/rtc.h"
 #include "io/serial.h"
 #include "kernel.h"
@@ -384,6 +386,7 @@ void arch_irq_init(void)
         irq_register(i, sgi_handler[i]);
     cpu_irqs_init();
     uart_rx_init();
+    its_init(&dt);
 }
 
 void aarch64_gic_ready(void)
@@ -439,6 +442,26 @@ int arch_irq_set_cpu(uint32_t gsi, struct cpu* c)
         return -EINVARG;
     gic_route(gsi, c->arch.mpidr);
     return 0;
+}
+
+// S-PAR - MSI and MSI-X through the GICv3 ITS (its.c): DeviceID from
+// the host bridge's msi-map, EventID the slot, LPI GIC_INTID_LPI +
+// slot on c's redistributor, at PRIO_COMPLETION and ended after the
+// handler like an SPI line. Without an ITS -EUNIMP, and the driver
+// takes INTx.
+int arch_irq_msi(struct pci_device* dev, unsigned slot, struct cpu* c, INTERRUPT_CALLBACK_FUNCTION handler,
+                 uint64_t* addr, uint32_t* data)
+{
+    uint32_t devid, lpi = GIC_INTID_LPI + slot;
+    if (!its_ready() || !dev || slot > 15 || !c->arch.gicr || pci_fdt_msi_id(dev, &devid) < 0)
+        return -EUNIMP;
+    if (handler && irq_register_late(lpi, handler) < 0)
+        return -EINVARG;
+    if (its_map(devid, slot, lpi, c->arch.gicr, PRIO_COMPLETION) < 0)
+        return -EIO;
+    *addr = its_doorbell();
+    *data = slot;
+    return (int)lpi;
 }
 
 // ICC_PMR_EL1 is PMR_DISK_WAIT meanwhile, so only the completion lines
@@ -799,27 +822,15 @@ static void screen_init(void)
                    boot_info.fb_height, boot_info.fb_pitch, boot_info.fb_base);
 }
 
-// The PCIe host's ECAM window ("pci-host-ecam-generic", QEMU virt),
-// mapped whole for io/pci.c. Enumeration only: nothing assigned the
-// BARs, and pci_intx_gsi knows no route on this host bridge.
-static void pci_ecam_dt_init(void)
+// S-PAR - the PCIe host ("pci-host-ecam-generic", QEMU virt) is
+// io/pci_fdt.c's: ECAM, BAR assignment from its ranges, INTx through
+// its interrupt-map to a GIC SPI (this, the parent's <type num flags>).
+static int pci_gic_irq(const struct fdt* f, int parent, const uint32_t* cell, uint32_t n, uint16_t* inti)
 {
-    int node = fdt_find_compatible(&dt, -1, "pci-host-ecam-generic");
-    struct fdt_region reg;
-    if (node < 0 || fdt_reg_cpu(&dt, node, 0, &reg) < 0)
-        return;
-    uint32_t len;
-    const uint8_t* range = fdt_getprop(&dt, node, "bus-range", &len);
-    uint32_t first = 0, last = (uint32_t)(reg.size >> 20) - 1;
-    if (range && len == 8) {
-        first = (uint32_t)range[0] << 24 | range[1] << 16 | range[2] << 8 | range[3];
-        last = (uint32_t)range[4] << 24 | range[5] << 16 | range[6] << 8 | range[7];
-    }
-    if (last > 255 || first > last || ((uint64_t)(last - first + 1) << 20) > reg.size)
-        return;
-    void* v = paging_map_mmio(reg.base, reg.size, PAGING_CACHE_DISABLED);
-    if (v)
-        pci_ecam_install_range(0, reg.base, (uint8_t)first, (uint8_t)last, v);
+    if (!fdt_node_is_compatible(f, parent, "arm,gic-v3") || n < 3 || cell[0] != 0)
+        return -ENOENT;
+    *inti = ACPI_INTI_POLARITY_HIGH | ((cell[2] & 3) ? ACPI_INTI_TRIGGER_EDGE : ACPI_INTI_TRIGGER_LEVEL);
+    return (int)(cell[1] + GIC_INTID_SPI);
 }
 
 // The PL031 real-time clock: RTCDR counts seconds since 1970.
@@ -843,7 +854,7 @@ static void pl031_init(void)
 
 void arch_firmware_init(void)
 {
-    pci_ecam_dt_init();
+    pci_fdt_host_init(&dt, pci_gic_irq);
     pl031_init();
     int slots = virtio_mmio_scan_fdt(&dt, dt_virtio_irq, true);
     console_printf("virtio-mmio: %d slot(s) in the device tree\n", slots);

@@ -7,7 +7,7 @@
 #     (cat reports an error, nothing hangs or faults); a stick plugged
 #     in after boot is enumerated and bound but not mounted (no
 #     hot-plug mount yet).
-# e2e-requires: xhci (qemu-xhci on PCI, x86 machines and OVMF; on aarch64 virt nothing assigns PCI BARs and there is no MSI)
+# e2e-requires: xhci (qemu-xhci on PCI)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_usb_lib.sh"
@@ -42,7 +42,7 @@ _plug_mon() {
 }
 E2E_MACHINE=q35
 usb_args "" "$stick"
-E2E_EXTRA_QEMU_ARGS+=" -machine i8042=off"
+usb_only_keyboard
 e2e_run_qemu 400 _plug_mon
 usb_enum_check "boot" stick
 expect_serial '^before$' "typed before the unplug"

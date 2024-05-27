@@ -405,6 +405,146 @@ static void* pci_ecam_map(uint64_t phys, size_t size){
     return paging_map_mmio(phys, size, PAGING_CACHE_DISABLED);
 }
 
+// S-PAR - BAR assignment (pci.h). Cursors are bus addresses.
+#define PCI_ASSIGN_MAX 64
+
+static struct pci_host_windows g_windows;
+static bool g_windows_set;
+static int  g_assigned_bars;
+static pci_intx_route_fn g_intx_router;
+
+void pci_set_host_windows(const struct pci_host_windows* w){
+    g_windows = *w;
+    g_windows_set = true;
+}
+
+int pci_assigned_bar_count(void){
+    return g_assigned_bars;
+}
+
+void pci_set_intx_router(pci_intx_route_fn fn){
+    g_intx_router = fn;
+}
+
+struct pci_cursor {
+    struct pci_window* w;
+    uint64_t next;
+};
+
+static bool pci_bar_is_mem64_pref(struct pci_device_bar* b){
+    return b->type == PCI_DEVICE_IO_MEMORY &&
+           (b->flags & (PCI_DEVICE_BAR_FLAG_64BIT | PCI_DEVICE_BAR_FLAG_PREFETCHABLE)) ==
+           (PCI_DEVICE_BAR_FLAG_64BIT | PCI_DEVICE_BAR_FLAG_PREFETCHABLE);
+}
+
+static struct pci_cursor* pci_bar_cursor(struct pci_device_bar* b, struct pci_cursor* c){
+    if(b->type == PCI_DEVICE_IO_PORT){
+        return &c[0];
+    }
+    return pci_bar_is_mem64_pref(b) && c[2].w->size ? &c[2] : &c[1];
+}
+
+// A BAR firmware placed: the cursor of the window it lies in moves past it.
+static void pci_cursor_skip(struct pci_cursor* c, struct pci_device_bar* b){
+    for(int k = 0; k < 3; k++){
+        struct pci_window* w = c[k].w;
+        if(!w->size || (k == 0) != (b->type == PCI_DEVICE_IO_PORT)){
+            continue;
+        }
+        uint64_t bus = k == 0 ? b->addr : b->addr - w->cpu_base + w->pci_base;
+        if(bus >= w->pci_base && bus - w->pci_base < w->size && bus + b->size > c[k].next){
+            c[k].next = bus + b->size;
+        }
+    }
+}
+
+static void pci_assign_resources(void){
+    struct pci_cursor cur[3] = {
+        { &g_windows.io,    g_windows.io.pci_base + (g_windows.io.size > 0x1000 ? 0x1000 : 0) },
+        { &g_windows.mem32, g_windows.mem32.pci_base },
+        { &g_windows.mem64, g_windows.mem64.pci_base },
+    };
+    struct { struct pci_device* d; int i; } todo[PCI_ASSIGN_MAX];
+    int n = 0;
+    size_t count = pci_device_count();
+    for(size_t k = 0; k < count; k++){
+        struct pci_device* d;
+        if(pci_device_get(k, &d) < 0 || d->is_bridge || d->addr.bus != 0){
+            continue;
+        }
+        // A function with any BAR placed was firmware's, all of it: an
+        // I/O BAR at port 0 is legal (AAVMF puts one there).
+        bool fw = false;
+        for(int i = 0; i < 6; i++){
+            fw = fw || (d->bars[i].size && !(d->bars[i].flags & PCI_DEVICE_BAR_FLAG_IS_EXT) && d->bars[i].addr);
+        }
+        for(int i = 0; i < 6; i++){
+            struct pci_device_bar* b = &d->bars[i];
+            if(b->size == 0 || (b->flags & PCI_DEVICE_BAR_FLAG_IS_EXT)){
+                continue;
+            }
+            // pci_size_bars widens a 32-bit mask with zeros, so a 32-bit
+            // (or 16-bit I/O) BAR's size has the high bits set; the
+            // lowest set bit is the size.
+            b->size &= -b->size;
+            if(fw){
+                pci_cursor_skip(cur, b);
+            } else if(n < PCI_ASSIGN_MAX){
+                // Largest first: insertion into a list sorted by size.
+                int j = n++;
+                for(; j > 0 && d->bars[i].size > todo[j - 1].d->bars[todo[j - 1].i].size; j--){
+                    todo[j] = todo[j - 1];
+                }
+                todo[j].d = d;
+                todo[j].i = i;
+            }
+        }
+    }
+    for(int k = 0; k < n; k++){
+        struct pci_device* d = todo[k].d;
+        int i = todo[k].i;
+        struct pci_device_bar* b = &d->bars[i];
+        struct pci_cursor* c = pci_bar_cursor(b, cur);
+        uint64_t a = (c->next + b->size - 1) & ~(b->size - 1);
+        if(!c->w->size || a < c->next || a + b->size > c->w->pci_base + c->w->size){
+            serial_write("pci: no room for a BAR of ");
+            serial_write_hex(b->size);
+            serial_write(", left unassigned\n");
+            continue;
+        }
+        c->next = a + b->size;
+        uint8_t bus = d->addr.bus, s = d->addr.slot, f = d->addr.func;
+        uint8_t off = PCI_HEADER_BAR0_OFFSET + i * 4;
+        uint32_t lo = pci_cfg_read_dword(bus, s, f, off);
+        uint16_t cmd = pci_cfg_read_word(bus, s, f, PCI_HEADER_COMMAND_OFFSET);
+        pci_cfg_write_word(bus, s, f, PCI_HEADER_COMMAND_OFFSET, cmd & ~0x0003);
+        pci_cfg_write_dword(bus, s, f, off, (uint32_t)a | (lo & (b->type == PCI_DEVICE_IO_PORT ? 0x3u : 0xFu)));
+        if(b->flags & PCI_DEVICE_BAR_FLAG_64BIT){
+            pci_cfg_write_dword(bus, s, f, off + 4, (uint32_t)(a >> 32));
+        }
+        cmd |= b->type == PCI_DEVICE_IO_PORT ? 0x0001 : 0x0002;
+        pci_cfg_write_word(bus, s, f, PCI_HEADER_COMMAND_OFFSET, cmd);
+        b->addr = b->type == PCI_DEVICE_IO_PORT ? a : a - c->w->pci_base + c->w->cpu_base;
+        if((b->flags & PCI_DEVICE_BAR_FLAG_64BIT) && i < 5){
+            d->bars[i + 1].addr = b->addr >> 32;
+        }
+        g_assigned_bars++;
+        serial_write("pci: ");
+        serial_write(itoa(bus));
+        serial_write(":");
+        serial_write(itoa(s));
+        serial_write(".");
+        serial_write(itoa(f));
+        serial_write(" BAR");
+        serial_write(itoa(i));
+        serial_write(c == &cur[0] ? " io " : c == &cur[2] ? " mem64 pref " : " mem32 ");
+        serial_write_hex(b->addr);
+        serial_write(" size ");
+        serial_write_hex(b->size);
+        serial_write("\n");
+    }
+}
+
 // Lecture 180 - boot-time entry point. Allocates the device
 // vector and scans bus 0.
 // Config space goes through ECAM when ACPI has an MCFG
@@ -429,6 +569,9 @@ int pci_init(void){
                           : "pci: no MCFG, config access ports 0xcf8/0xcfc\n");
     }
     pci_scan_bus(0, NULL);
+    if(g_windows_set){
+        pci_assign_resources();
+    }
     return 0;
 }
 
@@ -538,6 +681,9 @@ void bus_enable_bus_master(struct pci_device* device){
 int pci_intx_gsi(struct pci_device* d, uint16_t* inti_flags){
     uint8_t pin = pci_cfg_read_byte(d->addr.bus, d->addr.slot, d->addr.func,
                                     PCI_HEADER_INTERRUPT_PIN_OFFSET);
+    if(g_intx_router && pin >= 1 && pin <= 4){
+        return g_intx_router(d, pin, inti_flags);
+    }
     if(pin < 1 || pin > 4 || d->addr.bus != 0 ||
        pci_cfg_read_word(0, 0, 0, PCI_HEADER_VENDOR_OFFSET) != 0x8086){
         return -ENOENT;

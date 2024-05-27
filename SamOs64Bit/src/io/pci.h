@@ -127,4 +127,44 @@ void pci_enable_bus_master(struct pci_device* d);
 int  pci_intx_gsi(struct pci_device* d, uint16_t* inti_flags);
 void pci_intx_enable(struct pci_device* d);
 
+// S-PAR - BAR assignment where no firmware did it (aarch64 and riscv64
+// QEMU virt under -kernel: every BAR reads 0). Arch neutral; x86 never
+// calls pci_set_host_windows, so its firmware's BARs stay as they are.
+//
+// The arch (or io/pci_fdt.c for a device tree host bridge) hands over
+// the host bridge's windows before pci_init. pci_init then sizes every
+// function's BARs as before and, for each function whose BARs are all
+// still 0, assigns them from a window, largest first, naturally aligned:
+//   - I/O BARs from `io` (from pci_base + 0x1000, never port 0);
+//   - 64-bit prefetchable BARs from `mem64` when it has a size, else
+//     like the rest;
+//   - every other memory BAR (64-bit non-prefetchable ones included)
+//     from `mem32`.
+// A function with any BAR already non-zero is firmware's and kept whole
+// (an I/O BAR at port 0 is legal); the window cursors move past its
+// BARs, so a partly assigned bus (UEFI) never overlaps. The register
+// gets the bus address, bars[i].addr the CPU address (cpu_base +
+// (bus address - pci_base)); for I/O BARs the port number. Memory and
+// I/O decode are turned on for each function assigned; bus mastering
+// stays the driver's (pci_enable_bus_master). Functions behind a bridge
+// are not assigned (QEMU virt puts -device on bus 0; a bridge would
+// need bus numbers and its own windows), they keep BARs of 0.
+struct pci_window {
+    uint64_t cpu_base;          // where the CPU sees the window
+    uint64_t pci_base;          // the bus address of its first byte
+    uint64_t size;              // 0: no such window
+};
+struct pci_host_windows {
+    struct pci_window io, mem32, mem64;
+};
+void pci_set_host_windows(const struct pci_host_windows* w);
+// The BARs pci_init assigned (0 when firmware had done it all).
+int  pci_assigned_bar_count(void);
+
+// S-PAR - INTx where pci_intx_gsi's chipset table knows nothing: the
+// arch's (io/pci_fdt.c's interrupt-map) route for `pin` (1-4, INTA-D)
+// of `d`, as pci_intx_gsi returns it, or -ENOENT.
+typedef int (*pci_intx_route_fn)(struct pci_device* d, uint8_t pin, uint16_t* inti_flags);
+void pci_set_intx_router(pci_intx_route_fn fn);
+
 #endif

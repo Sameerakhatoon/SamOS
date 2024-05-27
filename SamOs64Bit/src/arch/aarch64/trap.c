@@ -29,6 +29,7 @@
 #include "task/process.h"
 
 #define IRQ_MAX 1020            // INTIDs 0-1019: SGI, PPI, SPI
+#define IRQ_SLOTS (IRQ_MAX + GIC_LPIS)  // S-PAR: then the LPIs (its.c)
 
 // ESR_EL1.EC, bits [31:26]
 #define EC_UNKNOWN      0x00    // also UDF and other undefined encodings
@@ -43,8 +44,17 @@
 #define EC_SP_ALIGN     0x26
 #define EC_BRK64        0x3c
 
-static irq_handler irq_handlers[IRQ_MAX];
-static uint32_t irq_late_eoi[IRQ_MAX / 32 + 1];    // EOI after the handler
+static irq_handler irq_handlers[IRQ_SLOTS];
+static uint32_t irq_late_eoi[IRQ_SLOTS / 32 + 1];  // EOI after the handler
+
+// An INTID's entry in the tables, -1 for none.
+static int irq_slot(uint32_t intid)
+{
+    if (intid < IRQ_MAX)
+        return (int)intid;
+    return intid - GIC_INTID_LPI < GIC_LPIS ? (int)(IRQ_MAX + intid - GIC_INTID_LPI) : -1;
+}
+
 static void (*svc_handler)(struct trap_frame* f, uint32_t imm);
 static int trap_tasks;
 
@@ -240,9 +250,10 @@ static struct trap_frame* sync_el0(struct trap_frame* f)
 static struct trap_frame* irq(struct trap_frame* f)
 {
     uint32_t intid = gic_ack();
-    if (intid >= GIC_INTID_SPURIOUS)
+    if (intid >= GIC_INTID_SPURIOUS && intid < GIC_INTID_LPI)
         return f;                           // nothing pending: no EOI
-    irq_handler h = intid < IRQ_MAX ? irq_handlers[intid] : 0;
+    int slot = irq_slot(intid);
+    irq_handler h = slot >= 0 ? irq_handlers[slot] : 0;
     if (!trap_tasks) {
         if (h)
             h(f);
@@ -253,7 +264,7 @@ static struct trap_frame* irq(struct trap_frame* f)
     }
     // A device completion line (arch_irq_attach_gsi) ends after
     // its handler quietened the device; its handler always returns.
-    bool late = (irq_late_eoi[intid / 32] >> (intid % 32)) & 1;
+    bool late = slot >= 0 && (irq_late_eoi[slot / 32] >> (slot % 32)) & 1;
     if (!late)
         gic_eoi(intid);
     bool user = trap_frame_from_user(f);
@@ -292,9 +303,10 @@ struct trap_frame* aarch64_trap(struct trap_frame* f, uint64_t vector)
 
 int irq_register(uint32_t intid, irq_handler handler)
 {
-    if (intid >= IRQ_MAX)
+    int slot = irq_slot(intid);
+    if (slot < 0)
         return -1;
-    irq_handlers[intid] = handler;
+    irq_handlers[slot] = handler;
     return 0;
 }
 
@@ -302,7 +314,8 @@ int irq_register_late(uint32_t intid, irq_handler handler)
 {
     if (irq_register(intid, handler) < 0)
         return -1;
-    irq_late_eoi[intid / 32] |= 1u << (intid % 32);
+    int slot = irq_slot(intid);
+    irq_late_eoi[slot / 32] |= 1u << (slot % 32);
     return 0;
 }
 

@@ -11,7 +11,10 @@
 #     steered to the waiting CPU);
 #   - 191 = 0: none taken by another CPU; 187 unset: none polled;
 #   - every hash right, no fault, no lock report.
-# e2e-requires: smp virtio-pci (OVMF booting from virtio-blk-pci with four CPUs)
+# S-PAR - on aarch64 virt the kernel comes from -kernel and the boot
+# disk is the only virtio-blk-pci (E2E_BOOT_BUS=virtio in the hook), its
+# INTx a GIC SPI steered to the waiting CPU.
+# e2e-requires: smp virtio-pci (booting from virtio-blk-pci with four CPUs)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_virtio_lib.sh"
 
@@ -33,7 +36,9 @@ p2=$(( $(stat -c %s "$E2E_IMAGE") / 512 / 2 ))
 MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((p2 * 512))" "$big" ::/BIG.BIN \
     || e2e_fail "mcopy BIG.BIN"
 
-for machine in q35 pc; do
+machines="q35 pc"
+[ "$E2E_ARCH" = aarch64 ] && machines=virt
+for machine in $machines; do
     E2E_MACHINE=$machine
     export E2E_MACHINE
     _script() {
@@ -61,4 +66,4 @@ for machine in q35 pc; do
     [ "$other" -eq 0 ] || e2e_fail "$machine: $other completions taken by a CPU other than the waiter"
     [ "$polled" -eq 0 ] || e2e_fail "$machine: $polled waits fell back to polling"
 done
-echo "PASS: e2e/197 boot from virtio-blk, parallel reads on four CPUs by interrupt (q35, pc)"
+echo "PASS: e2e/197 boot from virtio-blk, parallel reads on four CPUs by interrupt ($machines)"

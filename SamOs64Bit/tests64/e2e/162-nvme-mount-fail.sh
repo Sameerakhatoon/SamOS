@@ -6,7 +6,7 @@
 # data and the partition scan read the disk through freed memory.
 # Now the controller is stopped, its queues are freed, no disk is
 # registered, and the boot goes on to the BLANK.ELF selftest.
-# e2e-requires: nvme (an NVMe controller on PCI (no BARs assigned on aarch64 virt without firmware))
+# e2e-requires: nvme (an NVMe controller on PCI)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"

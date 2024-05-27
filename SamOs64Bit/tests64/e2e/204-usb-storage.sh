@@ -12,7 +12,7 @@
 #      (194 > 0, 191 and 187 unset).
 #   4. readonly=on: MODE SENSE reports write protection, the disk is
 #      read-only, a write is refused, the image is unchanged.
-# e2e-requires: xhci (qemu-xhci on PCI, x86 machines and OVMF; on aarch64 virt nothing assigns PCI BARs and there is no MSI)
+# e2e-requires: xhci (qemu-xhci on PCI)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_usb_lib.sh"
@@ -81,7 +81,7 @@ usb_cmdline "samos.run=KTEST.ELF readers 4 2 1:/BIG.BIN $h"
 _readers_mon() {
     e2e_wait_serial '^READERS (OK|FAIL)$' 800 || true
     sleep 1
-    printf 'pmemsave 0x6000 %d "%s"\n' "$E2E_MARKER_REGION_SIZE" "$E2E_DUMP"
+    e2e_pmemsave
     sleep 1
     printf 'quit\n'
 }
@@ -93,7 +93,7 @@ e2e_run_qemu 900 _readers_mon
 E2E_SMP=1
 E2E_IMAGE=$E2E_OS_IMG
 expect_serial '^smp: 4 cpus online$' "smp: four CPUs online"
-expect_serial '^xhci: interrupts by MSI-X, vector 92$' "smp: MSI-X"
+expect_serial "^xhci: interrupts by MSI-X, vector $(usb_msi_line)\$" "smp: MSI-X"
 expect_serial '^READERS OK$' "smp: every hash right"
 expect_no_serial 'READERS .*FAIL|STRESS reader|completion interrupt missing|KERNEL PANIC|KERNEL FAULT|USER FAULT|spinlock:|disk disabled' \
     "smp: no failure, no fallback to polling, no fault"
@@ -117,7 +117,7 @@ _ro_mon() {
 }
 E2E_EXTRA_QEMU_ARGS="-device qemu-xhci,id=xhci -drive file=$stick,format=raw,if=none,id=stick,readonly=on -device usb-storage,bus=xhci.0,drive=stick"
 e2e_run_qemu 300 _ro_mon
-expect_serial '^usb-msc: slot [0-9]+, QEMU QEMU HARDDISK, disk 1, 32 MiB, write-protected$' "readonly: write protection seen"
+expect_serial '^usb-msc: slot [0-9]+, QEMU QEMU HARDDISK, disk [0-9]+, 32 MiB, write-protected$' "readonly: write protection seen"
 expect_serial '^written through usb$' "readonly: read works"
 expect_serial '^echo: 1:/NO\.TXT: read-only$' "readonly: the write was refused"
 [ "$(md5sum < "$stick")" = "$before" ] || e2e_fail "readonly: the image changed"

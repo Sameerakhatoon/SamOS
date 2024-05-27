@@ -4,8 +4,9 @@
 # write, echo >, echo >>, a long name, ls, cat, rm, rmdir on FAT16 and
 # FAT32, a reboot on the same disks, then Linux (mtools, fsck.fat)
 # reads what SamOS wrote. Both boots: virtio-blk set up both disks and
-# its completions came by interrupt.
-# e2e-requires: virtio-pci (virtio-blk-pci on pc; e2e/207 runs the same files test over virtio-mmio)
+# its completions came by interrupt. S-PAR - on aarch64 virt the same,
+# next to the virtio-mmio boot disk, by INTx through the interrupt-map.
+# e2e-requires: virtio-pci (virtio-blk-pci data disks; e2e/207 runs the same files test over virtio-mmio)
 E2E_MACHINE=pc
 FILES_BUS=virtio
 . "$(dirname "$0")/_lib.sh"

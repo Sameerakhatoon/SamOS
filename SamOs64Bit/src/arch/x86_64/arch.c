@@ -159,7 +159,7 @@ int arch_irq_set_cpu(uint32_t gsi, struct cpu* c){
 
 // MSI: fixed delivery, edge, physical destination; the same
 // vector and EOI as a GSI on that slot. xAPIC ids only (8 bits).
-int arch_irq_msi(unsigned slot, struct cpu* c, INTERRUPT_CALLBACK_FUNCTION handler,
+int arch_irq_msi(struct pci_device* dev, unsigned slot, struct cpu* c, INTERRUPT_CALLBACK_FUNCTION handler,
                  uint64_t* addr, uint32_t* data){
     uint8_t vector = APIC_VECTOR_DISK_BASE + slot;
     if(!apic_active() || vector >= APIC_VECTOR_DISK_END || c->hw_id > 0xFF){

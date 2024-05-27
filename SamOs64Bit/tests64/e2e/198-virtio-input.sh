@@ -11,7 +11,9 @@
 #   2. q35 only, the same keyboard bound to the VGA console
 #      (display=vga0): sendkey skips it and goes to PS/2, and the shell
 #      still works with the virtio-input driver loaded (193 stays 0).
-# e2e-requires: virtio-pci ps2 (virtio-keyboard-pci next to PS/2; on aarch64 every shell test types through virtio-keyboard-device)
+# S-PAR - aarch64 virt has no PS/2: part 1 only, the virtio-keyboard-pci
+# in place of the hook's virtio-keyboard-device, its INTx a GIC SPI.
+# e2e-requires: virtio-pci (virtio-keyboard-pci)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_virtio_lib.sh"
@@ -32,7 +34,10 @@ _vinput_mon() {
 vinput_boot() {
     local m=$1 path=$2
     E2E_MACHINE=$m
-    if [ "$path" = virtio ]; then
+    if [ "$path" = virtio-only ]; then
+        E2E_EXTRA_QEMU_ARGS=""      # the hook's keyboard, E2E_AARCH64_KBD
+        path=virtio
+    elif [ "$path" = virtio ]; then
         E2E_EXTRA_QEMU_ARGS="-device virtio-keyboard-pci"
     else
         E2E_EXTRA_QEMU_ARGS="-vga none -device VGA,id=vga0 -device virtio-keyboard-pci,display=vga0"
@@ -61,6 +66,14 @@ vinput_boot() {
     fi
 }
 
+if [ "$E2E_ARCH" = aarch64 ]; then
+    E2E_AARCH64_KBD=virtio-keyboard-pci
+    vinput_boot virt virtio-only
+    expect_serial '^virtio-input: QEMU Virtio Keyboard, GSI 3[5-8], vector 3[5-8], keys by IPI to the BSP$' \
+        "virt: the PCI keyboard's INTx is a GIC SPI"
+    echo "PASS: e2e/198 sendkey reaches the shell through a virtio-keyboard-pci (aarch64 virt)"
+    exit 0
+fi
 vinput_boot q35 virtio
 vinput_boot q35 ps2
 vinput_boot pc virtio
