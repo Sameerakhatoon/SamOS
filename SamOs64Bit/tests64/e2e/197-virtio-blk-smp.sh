@@ -13,7 +13,8 @@
 #   - every hash right, no fault, no lock report.
 # S-PAR - on aarch64 virt the kernel comes from -kernel and the boot
 # disk is the only virtio-blk-pci (E2E_BOOT_BUS=virtio in the hook), its
-# INTx a GIC SPI steered to the waiting CPU.
+# INTx a GIC SPI steered to the waiting CPU. Parity - riscv64 virt the
+# same, its INTx a PLIC source steered to the waiting hart's context.
 # e2e-requires: smp virtio-pci (booting from virtio-blk-pci with four CPUs)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_virtio_lib.sh"
@@ -38,6 +39,7 @@ MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((p2 * 512))" "$big" ::/BIG.BIN \
 
 machines="q35 pc"
 [ "$E2E_ARCH" = aarch64 ] && machines=virt
+[ "$E2E_ARCH" = riscv64 ] && machines=virt
 for machine in $machines; do
     E2E_MACHINE=$machine
     export E2E_MACHINE

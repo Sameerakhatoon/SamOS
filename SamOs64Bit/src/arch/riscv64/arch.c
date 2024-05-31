@@ -8,6 +8,7 @@
 #include "arch/arch.h"
 #include "arch/riscv64/console.h"
 #include "arch/riscv64/mmu.h"
+#include "arch/riscv64/aia.h"
 #include "arch/riscv64/plic.h"
 #include "arch/riscv64/riscv64.h"
 #include "arch/riscv64/sbi.h"
@@ -19,6 +20,7 @@
 #include "disk/drivers/ramdisk.h"
 #include "firmware/fdt.h"
 #include "firmware/ramfb.h"
+#include "io/pci_fdt.h"
 #include "graphics/graphics.h"
 #include "kernel.h"
 #include "keyboard/serial_input.h"
@@ -171,26 +173,46 @@ static void uart_rx_interrupt(struct trap_frame* frame)
     }
 }
 
+// Parity - or, without a PLIC (virt,aia=aplic-imsic), APLIC sources
+// delivered as messages to the IMSIC (aia.h).
+static bool aia_up;
+
+static int ext_register(unsigned irq, INTERRUPT_CALLBACK_FUNCTION handler)
+{
+    return aia_up ? aia_register_handler(irq, handler) : plic_register_handler(irq, handler);
+}
+
+static void ext_enable(unsigned irq)
+{
+    if (aia_up) {
+        aia_enable(irq);
+    } else {
+        plic_enable(irq);
+    }
+}
+
 // And the software interrupt (the IPI, arch_send_ipi), and the
 // UART's receive line as a keyboard.
 void arch_irq_init(void)
 {
     const struct fdt* f = riscv64_fdt();
-    plic_up = plic_init(f, riscv64_cpu_node(f, this_cpu()->arch.hart_id)) == 0;
+    int cpu = riscv64_cpu_node(f, this_cpu()->arch.hart_id);
+    plic_up = plic_init(f, cpu) == 0;
+    aia_up = !plic_up && aia_init(f, cpu) == 0;
     csr_set(sie, SIE_SSIE);
     int uart_irq = riscv64_uart_irq();
-    if (plic_up && uart_irq > 0 && plic_register_handler(uart_irq, uart_rx_interrupt) == 0) {
+    if ((plic_up || aia_up) && uart_irq > 0 && ext_register(uart_irq, uart_rx_interrupt) == 0) {
         serial_input_init();
-        plic_enable(uart_irq);
+        ext_enable(uart_irq);
         uart16550_enable_rx_irq();
-        console_printf("uart: keys from plic irq %d\n", uart_irq);
+        console_printf("uart: keys from %s irq %d\n", aia_up ? "aplic" : "plic", uart_irq);
     }
 }
 
 // Device lines (arch_irq_attach_gsi) are PLIC sources.
 bool arch_irq_routable(void)
 {
-    return plic_up;
+    return plic_up || aia_up;
 }
 
 // The shared callers' IRQ numbers are x86 ISA lines (IRQ_KEYBOARD,
@@ -215,11 +237,11 @@ void arch_irq_mask(int irq)
 int arch_irq_attach_gsi(uint32_t gsi, uint16_t flags, unsigned slot, bool masked,
                         INTERRUPT_CALLBACK_FUNCTION handler)
 {
-    if (!plic_up || plic_register_handler(gsi, handler) != 0) {
+    if (!arch_irq_routable() || ext_register(gsi, handler) != 0) {
         return -EINVARG;
     }
     if (!masked) {
-        plic_enable(gsi);
+        ext_enable(gsi);
     }
     return (int)gsi;
 }
@@ -227,7 +249,15 @@ int arch_irq_attach_gsi(uint32_t gsi, uint16_t flags, unsigned slot, bool masked
 // A disk wait steers its line to the waiting hart's context.
 int arch_irq_set_cpu(uint32_t gsi, struct cpu* c)
 {
-    return plic_route(gsi, c->arch.plic_ctx);
+    return aia_up ? aia_route(gsi, c) : plic_route(gsi, c->arch.plic_ctx);
+}
+
+// Parity - PCI MSI and MSI-X need the IMSIC; with the PLIC the xHCI
+// driver takes INTx.
+int arch_irq_msi(struct pci_device* dev, unsigned slot, struct cpu* c, INTERRUPT_CALLBACK_FUNCTION handler,
+                 uint64_t* addr, uint32_t* data)
+{
+    return aia_up ? aia_msi(slot, c, handler, addr, data) : -EUNIMP;
 }
 
 // Only external interrupts in the window: the timer and IPIs wait
@@ -319,13 +349,26 @@ void arch_send_ipi(struct cpu* target, enum arch_ipi ipi)
 // Firmware, port I/O, PCI configuration space, power
 // ------------------------------------------------------------------
 
-// A virtio-mmio node's PLIC source, its one `interrupts` cell, raised
-// level-triggered.
+// A virtio-mmio node's PLIC source, the first `interrupts` cell (the
+// APLIC's specifier adds the trigger type), raised level-triggered.
 static int virtio_plic_source(const struct fdt* f, int node, uint16_t* inti)
 {
-    uint32_t irq = fdt_getprop_u32(f, node, "interrupts", 0);
     *inti = ACPI_INTI_TRIGGER_LEVEL | ACPI_INTI_POLARITY_HIGH;
-    return irq ? (int)irq : -1;
+    return riscv64_dt_irq(f, node);
+}
+
+// Parity - the PCIe host bridge is io/pci_fdt.c's (ECAM, BARs from its
+// ranges); a pin's interrupt-map entry names a PLIC source (one cell)
+// or, with aia=aplic-imsic, an APLIC source and its trigger type.
+// QEMU raises INTx level, active high, on either.
+static int pci_intx_source(const struct fdt* f, int parent, const uint32_t* cell, uint32_t n, uint16_t* inti)
+{
+    if (n < 1 || cell[0] == 0 || !(fdt_node_is_compatible(f, parent, "riscv,aplic")
+        || fdt_node_is_compatible(f, parent, "sifive,plic-1.0.0") || fdt_node_is_compatible(f, parent, "riscv,plic0"))) {
+        return -ENOENT;
+    }
+    *inti = ACPI_INTI_TRIGGER_LEVEL | ACPI_INTI_POLARITY_HIGH;
+    return (int)cell[0];
 }
 
 // ramfb (firmware/ramfb.h) as the screen when QEMU has one
@@ -383,6 +426,7 @@ void arch_firmware_init(void)
         console_printf("initrd: 0x%lx, %lu KiB\n", base, size >> 10);
         ramdisk_attach(base, size);
     }
+    pci_fdt_host_init(f, pci_intx_source);
     // riscv64 virt plugs the first -device into the highest slot, as
     // arm virt does (virtio_mmio_fdt.h).
     int slots = virtio_mmio_scan_fdt(f, virtio_plic_source, true);

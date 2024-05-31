@@ -196,7 +196,7 @@ PORT_OBJS = arch/riscv64/boot.S.o arch/riscv64/main.o arch/riscv64/sbi.o \
     arch/riscv64/timer.o arch/riscv64/plic.o arch/riscv64/kthread.o \
     arch/riscv64/mmu.o arch/riscv64/paging.o arch/riscv64/arch.o arch/riscv64/fpu.S.o \
     arch/riscv64/uaccess.o arch/riscv64/uaccess.S.o arch/riscv64/mmu_test.o firmware/fdt.o \
-    virtio/virtio_mmio_fdt.o firmware/ramfb.o arch/riscv64/smp.o io/pci_fdt.o
+    virtio/virtio_mmio_fdt.o firmware/ramfb.o arch/riscv64/smp.o io/pci_fdt.o arch/riscv64/aia.o
 # The kernel is the shared one (kernel_main): every shared
 # object is linked, except task/uaccess.o, which uaccess.c replaces
 # (SUM and the fixup table).

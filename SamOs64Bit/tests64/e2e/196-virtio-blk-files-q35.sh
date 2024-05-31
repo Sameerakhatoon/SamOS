@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # e2e/196-virtio-blk-files-q35.sh - e2e/195 on q35, both data
 # disks on virtio-blk-pci (the boot disk stays on AHCI).
-# e2e-requires: ahci virtio-pci (q35, with its AHCI boot disk, is x86 only; e2e/195 runs the same test on aarch64 virt's virtio-blk-pci)
+# e2e-requires: ahci virtio-pci (q35, with its AHCI boot disk, is x86 only; e2e/195 runs the same test on aarch64 and riscv64 virt's virtio-blk-pci)
 E2E_MACHINE=q35
 FILES_BUS=virtio
 . "$(dirname "$0")/_lib.sh"

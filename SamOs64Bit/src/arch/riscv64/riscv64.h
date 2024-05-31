@@ -23,6 +23,8 @@ int riscv64_cpu_node(const struct fdt* f, uint64_t hartid);
 const struct fdt* riscv64_fdt(void);
 // The console UART's PLIC source, or -1.
 int riscv64_uart_irq(void);
+// Parity - a node's interrupt source (the first `interrupts` cell), or -1.
+int riscv64_dt_irq(const struct fdt* f, int node);
 
 struct cpu;
 struct paging_desc;

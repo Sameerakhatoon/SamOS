@@ -10,7 +10,7 @@
 #   - samos.bootlog wrote the boot's output to @:/BOOTLOG.TXT on the
 #     stick, which Linux reads back with mtools (logging without
 #     serial).
-# e2e-requires: xhci uefi (OVMF loads the kernel from the stick through its own xHCI driver; the aarch64 port boots with -kernel)
+# e2e-requires: xhci uefi (OVMF loads the kernel from the stick through its own xHCI driver; the aarch64 and riscv64 ports boot with -kernel)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_usb_lib.sh"

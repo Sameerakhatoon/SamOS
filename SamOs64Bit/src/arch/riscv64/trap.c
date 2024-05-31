@@ -11,6 +11,7 @@
 #include "arch/arch.h"
 #include "arch/riscv64/console.h"
 #include "arch/riscv64/kthread.h"
+#include "arch/riscv64/aia.h"
 #include "arch/riscv64/plic.h"
 #include "arch/riscv64/riscv64.h"
 #include "arch/riscv64/timer.h"
@@ -163,7 +164,7 @@ static void interrupt(struct trap_frame* f)
     uint64_t code = f->scause & ~SCAUSE_INTERRUPT;
     switch (code) {
     case IRQ_S_TIMER: riscv64_clock(f); break;
-    case IRQ_S_EXT: plic_handle(f); break;
+    case IRQ_S_EXT: aia_active() ? aia_handle(f) : plic_handle(f); break;
     case IRQ_S_SOFT: software_interrupt(f); break;
     default:
         // Nothing raises the others yet; mask one so it cannot storm.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# e2e-requires: pci (PCI enumeration; riscv64 has no PCI host bridge driver yet)
+# e2e-requires: pci (PCI enumeration)
 # e2e/52-pci-fn-count.sh - PCI device count > 1 (QEMU PC chipset
 # exposes several distinct devices: host bridge, IDE, VGA, ...).
 . "$(dirname "$0")/_lib.sh"

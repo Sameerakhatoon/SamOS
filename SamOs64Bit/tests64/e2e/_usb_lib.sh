@@ -39,21 +39,33 @@ usb_args() {
 }
 
 # S-PAR - usb_only_keyboard: no keyboard but the USB one, so every key
-# the shell gets came through it (x86: i8042=off; aarch64 virt: no
-# virtio keyboard, E2E_AARCH64_KBD=none).
+# the shell gets came through it (x86: i8042=off; aarch64 and riscv64
+# virt: no virtio keyboard, E2E_<ARCH>_KBD=none).
 usb_only_keyboard() {
-    if [ "$E2E_ARCH" = aarch64 ]; then
-        E2E_AARCH64_KBD=none
-    else
-        E2E_EXTRA_QEMU_ARGS+=" -machine i8042=off"
-    fi
+    case "$E2E_ARCH" in
+        aarch64) E2E_AARCH64_KBD=none ;;
+        riscv64) E2E_RISCV64_KBD=none ;;
+        *)       E2E_EXTRA_QEMU_ARGS+=" -machine i8042=off" ;;
+    esac
 }
 
 # S-PAR - usb_msi_line: the line xhci reports for MSI and MSI-X (x86:
-# vector 92; aarch64: LPI 8204 through the GICv3 ITS).
+# vector 92; aarch64: LPI 8204 through the GICv3 ITS; riscv64: IMSIC
+# EIID 140).
 usb_msi_line() {
-    if [ "$E2E_ARCH" = aarch64 ]; then echo 8204; else echo 92; fi
+    case "$E2E_ARCH" in
+        aarch64) echo 8204 ;;
+        riscv64) echo 140 ;;
+        *)       echo 92 ;;
+    esac
 }
+
+# Parity (riscv64) - MSI needs the IMSIC: the USB tests run on
+# virt,aia=aplic-imsic unless a test picks the machine (e2e/202's
+# virt-plic mode).
+if [ "$E2E_ARCH" = riscv64 ]; then
+    E2E_RISCV64_MACHINE_OPTS=${E2E_RISCV64_MACHINE_OPTS-,aia=aplic-imsic}
+fi
 
 # usb_wait_count <ERE> <n> <seconds>: (monitor script) wait until the
 # serial log has <n> lines matching.

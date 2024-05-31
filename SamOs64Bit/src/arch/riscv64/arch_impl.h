@@ -108,6 +108,7 @@ struct arch_cpu {
     uint8_t* kernel_stack;     // top of the trap stack for traps from U-mode
     volatile uint32_t ipi_pending;  // 1 << enum arch_ipi, taken by the software interrupt
     int plic_ctx;              // This hart's S-mode PLIC context, -1 if none
+    int imsic_hart;            // parity: this hart's index in the S-level IMSIC, -1 if none
     uint64_t next_deadline;    // This hart's next timer deadline (timer.c)
     volatile uint64_t ticks;   // Timer interrupts taken on this hart
     struct mm* mm;             // The user address space in satp, NULL for the kernel's

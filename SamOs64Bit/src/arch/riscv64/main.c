@@ -226,7 +226,17 @@ static void mmu_tests(const char* args)
 // arch_irq_init takes it for the keyboard path.
 int riscv64_uart_irq(void)
 {
-    return uart_node < 0 ? -1 : (int)fdt_getprop_u32(&fdt, uart_node, "interrupts", 0);
+    return uart_node < 0 ? -1 : riscv64_dt_irq(&fdt, uart_node);
+}
+
+// Parity - the first cell: the PLIC's specifier is one cell, the
+// APLIC's two (source, trigger type).
+int riscv64_dt_irq(const struct fdt* f, int node)
+{
+    uint32_t len;
+    const uint8_t* p = fdt_getprop(f, node, "interrupts", &len);
+    uint32_t irq = p && len >= 4 ? (uint32_t)p[0] << 24 | p[1] << 16 | p[2] << 8 | p[3] : 0;
+    return irq ? (int)irq : -1;
 }
 
 static unsigned uart_irq;

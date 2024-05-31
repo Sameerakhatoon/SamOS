@@ -13,6 +13,15 @@
 #              a GIC SPI
 #   virt-noits virt,its=off: no ITS, so MSI is refused and INTx taken
 #   virt-poll  samos.usb_poll
+# Parity - on riscv64 virt (OpenSBI, -kernel; the kernel assigns the
+# BARs):
+#   rv-aia      virt,aia=aplic-imsic: MSI-X to an IMSIC file (EIID 140)
+#   rv-aia-msi  nec-usb-xhci,msix=off: MSI to the IMSIC
+#   rv-aia-intx samos.usb_intx: INTx through the interrupt-map to an
+#               APLIC source, sent on as an MSI
+#   rv-plic     plain virt: no IMSIC, so MSI is refused and INTx goes
+#               to a PLIC source
+#   rv-poll     samos.usb_poll
 # Each boot: the controller and the three devices enumerated and bound,
 # PS/2 off (i8042=off) so `ls 1:/` is typed through the USB keyboard,
 # and its output read off the USB stick. With an interrupt, marker 194
@@ -40,12 +49,14 @@ xhci_boot() {
     USB_HC=qemu-xhci
     E2E_IMAGE=$E2E_OS_IMG
     E2E_AARCH64_MACHINE_OPTS=
+    E2E_RISCV64_MACHINE_OPTS=",aia=aplic-imsic"
     case "$mode" in
         pc)         machine=pc ;;
         *-msi)      USB_HC=nec-usb-xhci; opts=",msix=off" ;;
         *-intx)     usb_cmdline samos.usb_intx ;;
         *-poll)     usb_cmdline samos.usb_poll ;;
         virt-noits) E2E_AARCH64_MACHINE_OPTS=",its=off" ;;
+        rv-plic)    E2E_RISCV64_MACHINE_OPTS= ;;
     esac
     E2E_MACHINE=$machine
     usb_stick "$E2E_TMP/stick.img" USBSTICK
@@ -56,14 +67,23 @@ xhci_boot() {
     e2e_run_qemu 300 _xhci_mon
     usb_enum_check "$mode" stick
     case "$mode" in
-        q35|pc|virt) expect_serial "^xhci: interrupts by MSI-X, vector $msi\$" "$mode: MSI-X" ;;
+        q35|pc|virt|rv-aia) expect_serial "^xhci: interrupts by MSI-X, vector $msi\$" "$mode: MSI-X" ;;
         *-msi)    expect_serial "^xhci: interrupts by MSI, vector $msi\$" "$mode: MSI" ;;
         q35-intx) expect_serial '^disk: xhci completions by interrupt, GSI [0-9]+ level active-high, vector 92$' "$mode: INTx through the IOAPIC" ;;
         virt-intx|virt-noits)
                   expect_serial '^disk: xhci completions by interrupt, GSI 3[5-8] level active-high, vector 3[5-8]$' \
                       "$mode: INTx, a GIC SPI from the interrupt-map" ;;
+        rv-aia-intx|rv-plic)
+                  expect_serial '^disk: xhci completions by interrupt, GSI 3[2-5] level active-high, vector 3[2-5]$' \
+                      "$mode: INTx, an APLIC or PLIC source from the interrupt-map" ;;
         *-poll)   expect_serial '^xhci: .*, running, polled$' "$mode: polled" ;;
     esac
+    if [ "$mode" = rv-plic ]; then
+        expect_serial '^plic: 0xc000000, ' "$mode: the PLIC, no IMSIC"
+        expect_no_serial '^xhci: interrupts by MSI' "$mode: no MSI without an IMSIC"
+    elif [ "${mode#rv-}" != "$mode" ]; then
+        expect_serial '^imsic: 0x28000000, ' "$mode: the IMSIC"
+    fi
     if [ "$mode" = virt-noits ]; then
         expect_serial '^its: none in the device tree, PCI MSI off \(INTx\)$' "$mode: no ITS"
     fi
@@ -86,6 +106,7 @@ xhci_boot() {
 
 modes="q35 pc q35-msi q35-intx q35-poll"
 [ "$E2E_ARCH" = aarch64 ] && modes="virt virt-msi virt-intx virt-noits virt-poll"
+[ "$E2E_ARCH" = riscv64 ] && modes="rv-aia rv-aia-msi rv-aia-intx rv-plic rv-poll"
 for mode in $modes; do
     xhci_boot $mode
 done

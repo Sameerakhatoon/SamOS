@@ -6,6 +6,7 @@
 # reads what SamOS wrote. Both boots: virtio-blk set up both disks and
 # its completions came by interrupt. S-PAR - on aarch64 virt the same,
 # next to the virtio-mmio boot disk, by INTx through the interrupt-map.
+# Parity - and on riscv64 virt (INTx a PLIC source).
 # e2e-requires: virtio-pci (virtio-blk-pci data disks; e2e/207 runs the same files test over virtio-mmio)
 E2E_MACHINE=pc
 FILES_BUS=virtio

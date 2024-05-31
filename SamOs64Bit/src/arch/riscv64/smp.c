@@ -26,6 +26,7 @@
 
 #include "arch/arch.h"
 #include "arch/riscv64/mmu.h"
+#include "arch/riscv64/aia.h"
 #include "arch/riscv64/plic.h"
 #include "arch/riscv64/riscv64.h"
 #include "arch/riscv64/sbi.h"
@@ -78,6 +79,7 @@ void riscv64_hart_main(uint64_t hartid, struct hart_ticket* t)
     paging_switch(kernel_desc());
     const struct fdt* f = riscv64_fdt();
     plic_init_hart(f, riscv64_cpu_node(f, hartid));
+    aia_init_hart(f, riscv64_cpu_node(f, hartid));
     csr_set(sie, SIE_SSIE);
     timer_start_hart();
 
@@ -169,6 +171,7 @@ static bool start_hart(uint64_t hartid, int index, bool late_test)
     c->hw_id = (uint32_t)hartid;
     c->arch.hart_id = hartid;
     c->arch.plic_ctx = -1;
+    c->arch.imsic_hart = -1;
     struct hart_ticket* t = kzalloc(sizeof(*t));
     uint8_t* stack = kzalloc(HART_STACK_SIZE);
     if (!t || !stack || riscv64_trap_stack(c) != 0) {

@@ -6,10 +6,12 @@
 # set up by virtio_blk.c, its completions are routed through the IOAPIC
 # (level, active high, a vector in 0x54-0x5F) and never fell back to
 # polling. S-PAR - aarch64 virt: INTx through the host bridge's
-# interrupt-map, one of the GIC SPIs 35-38, the INTID its line.
+# interrupt-map, one of the GIC SPIs 35-38, the INTID its line; riscv64
+# virt: one of the PLIC sources 32-35, the source its line.
 virtio_blk_serial_check() {
     local log=$1 tag=$2 id line='GSI [0-9]+ level active-high, vector (8[4-9]|9[0-5])'
     [ "$E2E_ARCH" = aarch64 ] && line='GSI 3[5-8] level active-high, vector 3[5-8]'
+    [ "$E2E_ARCH" = riscv64 ] && line='GSI 3[2-5] level active-high, vector 3[2-5]'
     shift 2
     for id in "$@"; do
         tr -d '\r' < "$log" | grep -E "^virtio-blk: disk $id, [0-9]+ MiB, flush, queue [0-9]+\$" > /dev/null \

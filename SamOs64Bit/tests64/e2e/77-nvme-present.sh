@@ -34,5 +34,8 @@ if [ "$E2E_ARCH" = aarch64 ] && [ "${E2E_AARCH64_FW:-}" = uefi ]; then
     expect_no_serial '^pci: [0-9]+:[0-9]+\.[0-9] BAR' "firmware-assigned BARs kept"
 elif [ "$E2E_ARCH" = aarch64 ]; then
     expect_serial '^pci: 0:[0-9]+\.0 BAR0 mem32 0x000000001[0-9a-f]{7} size 0x0000000000004000$' "NVMe BAR0 assigned"
+elif [ "$E2E_ARCH" = riscv64 ]; then
+    # Parity - riscv64 virt: from the window at 0x40000000.
+    expect_serial '^pci: 0:[0-9]+\.0 BAR0 mem32 0x000000004[0-9a-f]{7} size 0x0000000000004000$' "NVMe BAR0 assigned"
 fi
 echo "PASS: e2e/77 nvme present"

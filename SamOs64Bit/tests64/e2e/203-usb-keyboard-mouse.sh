@@ -8,7 +8,8 @@
 #      the key events. The USB mouse registers a cursor of its own and
 #      monitor `mouse_move` moves it.
 #   2. pc (PS/2 mouse present): the USB mouse drives the PS/2 cursor.
-# S-PAR - on aarch64 virt part 1 only, without the virtio keyboard.
+# S-PAR - on aarch64 virt part 1 only, without the virtio keyboard;
+# parity: on riscv64 virt (aia=aplic-imsic, _usb_lib.sh) too.
 # e2e-requires: xhci (qemu-xhci on PCI)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
@@ -54,8 +55,8 @@ expect_serial 'usb-hid: first mouse report, cursor at 670,420$' "q35: mouse_move
 keys=$(usb_count 195)
 e2e_log "q35: USB key events: $keys"
 [ "$keys" -ge 60 ] || e2e_fail "q35: only $keys USB key events"
-if [ "$E2E_ARCH" = aarch64 ]; then
-    echo "PASS: e2e/203 USB keyboard (Shift, Caps Lock) and mouse through the keyboard and mouse layers (aarch64 virt)"
+if [ "$E2E_ARCH" != x86_64 ]; then
+    echo "PASS: e2e/203 USB keyboard (Shift, Caps Lock) and mouse through the keyboard and mouse layers ($E2E_ARCH virt)"
     exit 0
 fi
 
