@@ -4,7 +4,6 @@
 # recursion in KTEST.ELF stack faults there, the process is killed and
 # the kernel keeps running. Before the isolation work the memory below the stack was
 # writable RAM, so an overflow silently corrupted it.
-# e2e-requires: x86|riscv64 (the x86 and riscv64 fault reports; aarch64-traps.sh and aarch64-user.sh check the ESR/ELR/FAR reports)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"
@@ -16,6 +15,9 @@ MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.
 boot_and_dump 40
 expect_serial 'KTEST stack: recursing$' "KTEST started recursing"
 case "$E2E_ARCH" in
+aarch64)
+    # EC 0x24, WnR, DFSC 7 (translation fault, level 3) in the guard page
+    expect_serial '^USER FAULT: data abort, lower EL in @:/KTEST.ELF: ESR 0x92000047 ELR 0x4[0-9a-f]{5} FAR 0x3fa[0-9a-f]{3}$' "data abort in the guard page" ;;
 riscv64)
     # A store (the call's frame) into the guard page
     expect_serial '^USER FAULT: scause 0xf \(store page fault\) in @:/KTEST.ELF: sepc 0x4[0-9a-f]+ stval 0x3fa[0-9a-f]{3}$' "store page fault in the guard page" ;;

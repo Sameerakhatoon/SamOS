@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # e2e/151-user-gp.sh - a #GP in a user program (hlt in ring 3)
 # kills only that program; BLANK.ELF still completes its selftest.
-# e2e-requires: x86|riscv64 (the x86 and riscv64 fault reports; aarch64-traps.sh and aarch64-user.sh check the ESR/ELR/FAR reports)
+# Parity: aarch64 masks IRQs at EL0 (MSR DAIFSet with SCTLR_EL1.UMA
+# clear traps as EC 0x18).
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"
@@ -12,6 +13,11 @@ MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.
 
 boot_and_dump 30
 case "$E2E_ARCH" in
+aarch64)
+    # ESR: EC 0x18, IL, the ISS of MSR DAIFSet, #2 (the same on every
+    # run); FAR is not set for this class.
+    expect_serial 'KTEST gp: masking IRQs at EL0$' "KTEST reached the msr"
+    expect_serial '^USER FAULT: system register access in @:/KTEST.ELF: ESR 0x620793e4 ELR 0x4[0-9a-f]{5} FAR 0x[0-9a-f]+$' "system register trap reported with ESR and ELR" ;;
 riscv64)
     # A privileged CSR read in U-mode; stval is the instruction
     # (csrr t0, sstatus).

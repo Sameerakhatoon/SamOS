@@ -10,12 +10,19 @@
 #   - write to physical 0x100000 at its old identity address, which
 #     every process used to map user-writable:
 #     not mapped at all now, error 6
-# e2e-requires: x86|riscv64 (the x86 and riscv64 fault reports; aarch64-traps.sh and aarch64-user.sh check the ESR/ELR/FAR reports)
+# Parity: aarch64 the same five with its addresses; a permission fault
+# (DFSC/IFSC 0xf) where x86 has error 7, 5 or 0x15, a translation
+# fault where it has 6.
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"
 E2E_IMAGE="$E2E_TMP/os.img"
 case "$E2E_ARCH" in
+aarch64)
+    # The kernel image at 0xffffffff80000000 (pa 0x40200000), the
+    # direct map at 0xffff800000000000 + pa (its alias of the image and
+    # of free RAM above it), no kernel mapping in the low half.
+    printf 'samos.run=KTEST.ELF kwrite ffffffff80001000;KTEST.ELF kwrite ffff800040201000;KTEST.ELF kread ffff800040400000;KTEST.ELF kexec ffffffff80001000;KTEST.ELF kwrite 40200000\n' ;;
 riscv64)
     # The kernel is at 0xffffffff80200000 (pa 0x80200000), the
     # Sv48 direct map at 0xffff800000000000; its text alias and free
@@ -31,6 +38,16 @@ MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.
 
 boot_and_dump 40
 case "$E2E_ARCH" in
+aarch64)
+    # ESR: EC 0x24 data abort (0x20 instruction abort), IL, WnR for a
+    # store; DFSC 0xf permission fault level 3, 0x5 translation fault
+    # level 1.
+    F='^USER FAULT: data abort, lower EL in @:/KTEST.ELF: ESR'
+    expect_serial "$F 0x9200004f ELR 0x4[0-9a-f]{5} FAR 0xffffffff80001000\$" "write to the kernel image refused"
+    expect_serial "$F 0x9200004f ELR 0x4[0-9a-f]{5} FAR 0xffff800040201000\$" "write through the direct map refused"
+    expect_serial "$F 0x9200000f ELR 0x4[0-9a-f]{5} FAR 0xffff800040400000\$" "read through the direct map refused"
+    expect_serial '^USER FAULT: instruction abort, lower EL in @:/KTEST.ELF: ESR 0x8200000f ELR 0xffffffff80001000 FAR 0xffffffff80001000$' "jump into kernel text refused"
+    expect_serial "$F 0x92000045 ELR 0x4[0-9a-f]{5} FAR 0x40200000\$" "no kernel mapping in the low half" ;;
 riscv64)
     F='^USER FAULT: scause 0x[df] \((load|store) page fault\) in @:/KTEST.ELF: sepc 0x4[0-9a-f]+'
     expect_serial "$F stval 0xffffffff80201000$" "write to the kernel image refused"

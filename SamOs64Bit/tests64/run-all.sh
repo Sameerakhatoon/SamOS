@@ -15,7 +15,10 @@
 #   bash tests64/run-all.sh --storage -j 3
 #                                      # also tests64/storage/run.sh
 #                                      # (pc, q35 and q35 on virtio-blk,
-#                                      # about 15 min)
+#                                      # about 15 min; in parallel the
+#                                      # ports built here on virtio-mmio:
+#                                      # aarch64-virtio, riscv64-virtio,
+#                                      # riscv64-sv39-virtio)
 #
 # Build first with ./build.sh at the repo root.
 set -u
@@ -44,6 +47,7 @@ e2e_line=$(grep -E '^==== [0-9]+ passed' "$log/e2e" | tail -n 1 | sed 's/^==== /
 # arch's machine lacks are skipped by their e2e-requires line.
 arch_e2e_lines=()
 arch_e2e_status=0
+built_arches=()
 for hook in "$here"/e2e/_arch_*.sh; do
     a=$(basename "$hook" .sh)
     a=${a#_arch_}
@@ -59,6 +63,7 @@ for hook in "$here"/e2e/_arch_*.sh; do
         arch_e2e_status=1
         continue
     fi
+    built_arches+=("$a")
     E2E_ARCH=$a bash "$here/e2e/run-all.sh" "$@" 2>&1 | tee "$log/e2e-$a"
     [ "${PIPESTATUS[0]}" -eq 0 ] || arch_e2e_status=1
     line=$(grep -E '^==== [0-9]+ passed' "$log/e2e-$a" | tail -n 1 | sed 's/^==== //; s/ ====$//')
@@ -100,9 +105,36 @@ fi
 storage=0
 if [ $storage_wanted -eq 1 ]; then
     echo
-    bash "$here/storage/run.sh" pc q35 q35-virtio 2>&1 | tee "$log/storage"
-    storage=${PIPESTATUS[0]}
-    storage_line=$(grep -E '^storage: ' "$log/storage" | tail -n 1 | sed 's/^storage: //')
+    # Parity: each port whose image was built above runs the same
+    # suite at the same time as x86, one run.sh (and QEMU) per group.
+    groups=("pc q35 q35-virtio")
+    for a in "${built_arches[@]}"; do
+        case $a in
+            aarch64) groups+=(aarch64-virtio) ;;
+            riscv64) groups+=(riscv64-virtio riscv64-sv39-virtio) ;;
+        esac
+    done
+    pids=()
+    for i in "${!groups[@]}"; do
+        # shellcheck disable=SC2086
+        bash "$here/storage/run.sh" ${groups[$i]} > "$log/storage-$i" 2>&1 &
+        pids+=($!)
+    done
+    passed=() failed=()
+    for i in "${!groups[@]}"; do
+        wait "${pids[$i]}" || storage=1
+        cat "$log/storage-$i"
+        l=$(grep -E '^storage: ' "$log/storage-$i" | tail -n 1 | sed 's/^storage: //')
+        case $l in
+            PASS*) passed+=("${groups[$i]}") ;;
+            *) failed+=("${groups[$i]}: ${l:-no summary}") ;;
+        esac
+    done
+    if [ $storage -eq 0 ]; then
+        storage_line="PASS (${passed[*]})"
+    else
+        storage_line="FAIL ($(printf '%s; ' "${failed[@]}")passed: ${passed[*]:-none})"
+    fi
 fi
 
 echo

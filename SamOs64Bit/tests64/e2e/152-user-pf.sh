@@ -2,7 +2,6 @@
 # e2e/152-user-pf.sh - a #PF in a user program (write to an
 # unmapped address) kills only that program, and the report carries
 # the error code and CR2. BLANK.ELF still completes its selftest.
-# e2e-requires: x86|riscv64 (the x86 and riscv64 fault reports; aarch64-traps.sh and aarch64-user.sh check the ESR/ELR/FAR reports)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"
@@ -14,6 +13,10 @@ MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.
 boot_and_dump 30
 expect_serial 'KTEST pf: writing to an unmapped page$' "KTEST reached the store"
 case "$E2E_ARCH" in
+aarch64)
+    # ESR 0x92000044: EC 0x24 (data abort, lower EL), IL, WnR, DFSC 4
+    # (translation fault, level 0); FAR the store's address.
+    expect_serial '^USER FAULT: data abort, lower EL in @:/KTEST.ELF: ESR 0x92000044 ELR 0x4[0-9a-f]{5} FAR 0x700000000000$' "data abort reported with ESR, ELR and FAR" ;;
 riscv64)
     # Scause 15, the store's address in stval (in Sv39 it is
     # not even canonical, which is a page fault too).

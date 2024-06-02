@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # tests64/storage/run.sh - storage end-to-end test.
 #
-# Usage: bash tests64/storage/run.sh [pc|q35|pc-virtio|q35-virtio ...]
+# Usage: bash tests64/storage/run.sh [pc|q35|pc-virtio|q35-virtio|
+#            aarch64-virtio|riscv64-virtio|riscv64-sv39-virtio ...]
 #        (default: pc q35 q35-virtio)
 #
 # For each machine type it builds fresh scratch images, boots
@@ -31,6 +32,15 @@
 # <pc|q35>-virtio (e.g. q35-virtio) puts all four on virtio-blk-pci,
 # booting from the first.
 #
+# Parity tests: on aarch64-virtio, riscv64-virtio and riscv64-sv39-virtio
+# (Sv39 paging, rv64,sv48=off) QEMU virt boots the port kernel the
+# way the e2e suite does (tests64/e2e/_arch_<arch>.sh: -kernel, the
+# arch's bin/<arch>/os.img as the boot disk on virtio-blk-device), and
+# the three scratch disks follow it on virtio-blk over virtio-mmio.
+# The scratch disks and every check are the same as on x86. Those
+# machines need bin/<arch>/os.img and kernel.img (bash arch-build.sh
+# <arch>) and qemu-system-<arch> instead of OVMF and SamOs.efi.
+#
 # Needs: qemu-system-x86_64, OVMF, mtools, dosfstools, gdisk
 # (sgdisk), fdisk (sfdisk), python3; plus a built kernel.bin and
 # SamOs.efi (see SAMOS_EFI below). No sudo.
@@ -51,7 +61,12 @@ OVMF="${OVMF:-/usr/share/ovmf/OVMF.fd}"
 # build.sh copies the loader to <repo>/bin/SamOs.efi; the EDK2 build
 # tree is shared by every worktree, so do not read it from there.
 SAMOS_EFI="${SAMOS_EFI:-$K64/../bin/SamOs.efi}"
-TIMEOUT="${STORAGE_TIMEOUT:-300}"
+# Per boot (the loop stops as soon as all three volumes are DONE).
+# Under TCG the ports' first boot is slow: about 300 s on aarch64, and
+# riscv64 takes about 600 s for the FAT12 volume alone (1-byte-and-a-
+# half FAT entries, one disk read each), over 900 s in all on a busy
+# host. Their default is 2400 s.
+TIMEOUT="${STORAGE_TIMEOUT:-}"
 export MTOOLS_SKIP_CHECK=1
 
 FAT32_START=314572800          # LBA of the FAT32 partition (150 GiB)
@@ -62,10 +77,25 @@ log()  { echo "[storage] $*"; }
 bad()  { echo "[storage] FAIL: $*"; fail_count=$((fail_count + 1)); }
 
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing tool: $1" >&2; exit 2; }; }
-for t in qemu-system-x86_64 mcopy mtype mmd mkfs.fat fsck.fat sgdisk sfdisk python3; do need "$t"; done
-[ -f "$OVMF" ] || { echo "missing OVMF at $OVMF" >&2; exit 2; }
-[ -f "$SAMOS_EFI" ] || { echo "missing SamOs.efi at $SAMOS_EFI (set SAMOS_EFI)" >&2; exit 2; }
-[ -f "$K64/bin/kernel.bin" ] || { echo "missing $K64/bin/kernel.bin; build first" >&2; exit 2; }
+
+# port_arch <machine>: the port a parity machine boots, or nothing on x86.
+port_arch() {
+    case "$1" in
+        aarch64-virtio) echo aarch64 ;;
+        riscv64-virtio|riscv64-sv39-virtio) echo riscv64 ;;
+    esac
+}
+
+# port_hook <machine>: load the arch's e2e hook (E2E_QEMU_BIN,
+# e2e_arch_check, e2e_arch_qemu_args) for that machine.
+e2e_fail() { echo "[storage] $*" >&2; exit 2; }
+port_hook() {
+    E2E_ROOT="$K64" E2E_TMP="$WORK"
+    . "$K64/tests64/e2e/_arch_$(port_arch "$1").sh"
+    E2E_IMAGE="$E2E_OS_IMG"
+    E2E_RISCV64_CPU=rv64
+    [ "$1" = riscv64-sv39-virtio ] && E2E_RISCV64_CPU=rv64,sv48=off
+}
 
 # mtools image spec for each scratch volume.
 spec() {
@@ -137,23 +167,36 @@ result_done() {
 
 run_qemu() {
     local machine=$1 tag=$2 result=$3
-    # "<machine>-virtio": the same four disks on virtio-blk-pci.
-    local bus=native
-    if [ "${machine%-virtio}" != "$machine" ]; then
-        bus=virtio
-        machine=${machine%-virtio}
-    fi
     # STORAGE_SMP CPUs (default 1), one host thread each.
     local smp=${STORAGE_SMP:-1} accel=tcg
     [ "$smp" -gt 1 ] && accel=tcg,thread=multi
-    local args=(-machine "$machine" -m 512M -cpu Skylake-Server -bios "$OVMF"
-                -smp "$smp" -accel "$accel"
+    local args=(-m 512M -smp "$smp" -accel "$accel"
                 -display none -no-reboot -monitor none
                 -serial "file:$WORK/serial-$tag.log")
+    # "<machine>-virtio": the same four disks on virtio-blk-pci.
+    local bus=native qemu=qemu-system-x86_64 disks=(boot fat16 fat32 fat12)
+    local limit=${TIMEOUT:-300}
+    if [ -n "$(port_arch "$machine")" ]; then
+        # Parity: the hook's machine and boot disk, then the scratch disks.
+        port_hook "$machine"
+        E2E_QEMU_ARGS=()
+        e2e_arch_qemu_args
+        args+=("${E2E_QEMU_ARGS[@]}")
+        qemu=$E2E_QEMU_BIN bus=virtio-mmio disks=(fat16 fat32 fat12)
+        limit=${TIMEOUT:-2400}
+    else
+        if [ "${machine%-virtio}" != "$machine" ]; then
+            bus=virtio
+            machine=${machine%-virtio}
+        fi
+        args+=(-machine "$machine" -cpu Skylake-Server -bios "$OVMF")
+    fi
     local i=0
-    for d in boot fat16 fat32 fat12; do
+    for d in "${disks[@]}"; do
         args+=(-drive "file=$WORK/$d.img,format=raw,if=none,id=d$i")
-        if [ "$bus" = virtio ]; then
+        if [ "$bus" = virtio-mmio ]; then
+            args+=(-device "virtio-blk-device,drive=d$i")
+        elif [ "$bus" = virtio ]; then
             args+=(-device "virtio-blk-pci,drive=d$i$([ $i -eq 0 ] && echo ,bootindex=0)")
         elif [ "$machine" = pc ]; then
             args+=(-device "ide-hd,drive=d$i,bus=ide.$((i / 2)),unit=$((i % 2))")
@@ -163,9 +206,9 @@ run_qemu() {
         i=$((i + 1))
     done
     log "boot $tag ($machine)"
-    qemu-system-x86_64 "${args[@]}" > "$WORK/qemu-$tag.log" 2>&1 &
+    "$qemu" "${args[@]}" > "$WORK/qemu-$tag.log" 2>&1 &
     local pid=$! t=0
-    while kill -0 "$pid" 2>/dev/null && [ $t -lt "$TIMEOUT" ]; do
+    while kill -0 "$pid" 2>/dev/null && [ $t -lt "$limit" ]; do
         sleep 3
         t=$((t + 3))
         if grep -q 'KERNEL PANIC' "$WORK/serial-$tag.log" 2>/dev/null; then
@@ -235,7 +278,7 @@ run_machine() {
     # saves its variables to \NvVars on the ESP, and the q35 boot
     # entries it leaves there make the next pc boot (or the reverse)
     # drop into the UEFI shell instead of BOOTX64.EFI.
-    make_boot_img
+    [ -n "$(port_arch "$machine")" ] || make_boot_img
     make_scratch_imgs
 
     run_qemu "$machine" "$machine-1" RESULT1.TXT
@@ -259,6 +302,20 @@ run_machine() {
 mkdir -p "$WORK"
 machines=("$@")
 [ ${#machines[@]} -eq 0 ] && machines=(pc q35 q35-virtio)
+
+for t in mcopy mtype mmd mkfs.fat fsck.fat sgdisk sfdisk python3; do need "$t"; done
+for m in "${machines[@]}"; do
+    if [ -n "$(port_arch "$m")" ]; then
+        port_hook "$m"
+        need "$E2E_QEMU_BIN"
+        e2e_arch_check
+        continue
+    fi
+    need qemu-system-x86_64
+    [ -f "$OVMF" ] || { echo "missing OVMF at $OVMF" >&2; exit 2; }
+    [ -f "$SAMOS_EFI" ] || { echo "missing SamOs.efi at $SAMOS_EFI (set SAMOS_EFI)" >&2; exit 2; }
+    [ -f "$K64/bin/kernel.bin" ] || { echo "missing $K64/bin/kernel.bin; build first" >&2; exit 2; }
+done
 for m in "${machines[@]}"; do
     run_machine "$m"
 done

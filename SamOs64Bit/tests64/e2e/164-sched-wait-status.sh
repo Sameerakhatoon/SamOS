@@ -6,7 +6,8 @@
 # kills (128 + 9). Also: getpid differs between parent and child, a
 # status pointer into the kernel is -EFAULT and does not reap the
 # child, kill of a reaped pid is -ESRCH, wait with no child -ECHILD.
-# e2e-requires: x86|riscv64 (the #DE child on x86, an illegal instruction on riscv64; aarch64-user.sh parent checks the same waitpid statuses)
+# Parity: aarch64 and riscv64 have no divide trap; their child runs an
+# undefined instruction (x86's #UD, 128 + 6) instead.
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"
@@ -25,8 +26,8 @@ e2e_run_qemu 400 _wait_all
 expect_serial '^EXIT pid [0-9]+ code 42$' "child printed its own pid"
 expect_serial '^PARENT exit\(42\) status ok 42$' "exit(42) reaches the parent"
 expect_serial '^PARENT main returning 7 ok 7$' "main's return value is the status"
-if [ "$E2E_ARCH" = riscv64 ]; then
-    # No divide trap; an illegal instruction is x86's #UD
+if [ "$E2E_ARCH" != x86_64 ]; then
+    # No divide trap; an undefined instruction is x86's #UD
     expect_serial '^PARENT undefined instruction is 128 \+ 6 ok 134$' "illegal instruction child: 134"
 else
     expect_serial '^PARENT divide by zero is 128 \+ 0 ok 128$' "#DE child: 128"

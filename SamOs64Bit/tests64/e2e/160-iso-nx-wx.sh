@@ -5,7 +5,6 @@
 # runs each fault and are killed: executing from the stack, the heap
 # and .data (error 0x15, instruction fetch from a present NX page)
 # and writing to its own code (error 7).
-# e2e-requires: x86|riscv64 (the x86 and riscv64 fault reports; aarch64-traps.sh and aarch64-user.sh check the ESR/ELR/FAR reports)
 . "$(dirname "$0")/_lib.sh"
 
 cp "$E2E_IMAGE" "$E2E_TMP/os.img"
@@ -18,6 +17,15 @@ MTOOLS_SKIP_CHECK=1 mcopy -o -i "$E2E_IMAGE@@$((2048 * 512))" "$E2E_TMP/CMDLINE.
 boot_and_dump 40
 expect_serial '^BSS OK$' ".bss zeroed and writable"
 case "$E2E_ARCH" in
+aarch64)
+    # An instruction abort (EC 0x20, IFSC 0xf permission fault: the
+    # page is present, UXN) with ELR = FAR = the data page; a data
+    # abort (EC 0x24, WnR, permission fault) on the code.
+    F='^USER FAULT: instruction abort, lower EL in @:/KTEST.ELF: ESR 0x8200000f'
+    expect_serial "$F ELR (0x3f[0-9a-f]{4}) FAR \\1\$" "stack is NX"
+    expect_serial "$F ELR (0x100[0-9a-f]{5}) FAR \\1\$" "heap is NX"
+    expect_serial "$F ELR (0x4[0-9a-f]{5}) FAR \\1\$" ".data is NX"
+    expect_serial '^USER FAULT: data abort, lower EL in @:/KTEST.ELF: ESR 0x9200004f ELR 0x4[0-9a-f]{5} FAR 0x4[0-9a-f]{5}$' "code is read-only" ;;
 riscv64)
     # An instruction page fault (scause 12) with sepc = stval =
     # the data page, a store page fault (15) on the code.
