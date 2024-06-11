@@ -54,6 +54,8 @@ static uint32_t intid_cells;    // #interrupt-cells
 static uint64_t rd_frame[MAX_RD_FRAMES];
 static uint32_t rd_aff[MAX_RD_FRAMES];
 static int rd_frames;
+// A GICv2 or the BCM2836 controller instead (gicv3.h).
+static const struct gic_ops* other;
 
 // SGIs and PPIs live in each CPU's own redistributor: struct
 // cpu's (arch_start_cpus sets it), the boot CPU's before it has one.
@@ -175,8 +177,17 @@ int gic_init(const struct fdt* f)
 {
     int node = fdt_find_compatible(f, -1, "arm,gic-v3");
     struct fdt_region reg;
-    if (node < 0 || fdt_reg_cpu(f, node, 0, &reg) < 0) {
-        console_printf("gic: no arm,gic-v3 in the device tree (GICv2? use -machine virt,gic-version=3)\n");
+    if (node < 0) {
+        int r = gicv2_probe(f, &other);
+        if (r == 1)
+            r = bcm2836_intc_probe(f, &other);
+        if (r == 1)
+            console_printf("gic: no GICv3, GICv2 or BCM2836 interrupt controller in the device tree\n");
+        intid_cells = 3;
+        return r == 0 ? 0 : -1;
+    }
+    if (fdt_reg_cpu(f, node, 0, &reg) < 0) {
+        console_printf("gic: arm,gic-v3 without a distributor reg\n");
         return -1;
     }
     // ID_AA64PFR0_EL1.GIC [27:24]: the ICC_* system registers exist.
@@ -215,12 +226,16 @@ int gic_init(const struct fdt* f)
 // interface. 0, or -1 without the system register interface.
 int gic_init_cpu(void)
 {
+    if (other)
+        return other->init_cpu();
     redistributor_init(this_gicr());
     return cpu_interface_init();
 }
 
 uint64_t gic_redistributor(uint64_t mpidr)
 {
+    if (other)
+        return other->cpu_token(mpidr);
     uint32_t aff = (uint32_t)(((mpidr >> 8) & 0xff000000) | (mpidr & 0xffffff));
     for (int i = 0; i < rd_frames; i++)
         if (rd_aff[i] == aff)
@@ -240,7 +255,9 @@ uint64_t gic_rd_frame(int i)
 
 void gic_enable(uint32_t intid)
 {
-    if (intid < GIC_INTID_SPI)
+    if (other)
+        other->enable(intid);
+    else if (intid < GIC_INTID_SPI)
         wr32(this_gicr() + GICR_SGI + GICR_ISENABLER0, 1u << intid);
     else if (intid < gic_lines)
         wr32(gicd + GICD_ISENABLER + intid / 32 * 4, 1u << (intid % 32));
@@ -248,7 +265,9 @@ void gic_enable(uint32_t intid)
 
 void gic_disable(uint32_t intid)
 {
-    if (intid < GIC_INTID_SPI) {
+    if (other) {
+        other->disable(intid);
+    } else if (intid < GIC_INTID_SPI) {
         wr32(this_gicr() + GICR_SGI + GICR_ICENABLER0, 1u << intid);
         wait_clear(this_gicr() + GICR_CTLR, GICR_CTLR_RWP);
     } else if (intid < gic_lines) {
@@ -259,11 +278,17 @@ void gic_disable(uint32_t intid)
 
 uint32_t gic_ack(void)
 {
+    if (other)
+        return other->ack();
     return (uint32_t)sysreg_read(ICC_IAR1_EL1) & 0xffffff;
 }
 
 void gic_eoi(uint32_t intid)
 {
+    if (other) {
+        other->eoi(intid);
+        return;
+    }
     sysreg_write(ICC_EOIR1_EL1, intid);
 }
 
@@ -274,6 +299,8 @@ static uint32_t be32(const uint8_t* p)
 
 int gic_dt_intid(const struct fdt* f, int node, int index)
 {
+    if (other && other->dt_intid)
+        return other->dt_intid(f, node, index);
     uint32_t len;
     const uint8_t* p = fdt_getprop(f, node, "interrupts", &len);
     uint32_t cells = intid_cells ? intid_cells : 3;
@@ -288,7 +315,9 @@ int gic_dt_intid(const struct fdt* f, int node, int index)
 
 void gic_set_priority(uint32_t intid, uint8_t priority)
 {
-    if (intid < GIC_INTID_SPI)
+    if (other)
+        other->set_priority(intid, priority);
+    else if (intid < GIC_INTID_SPI)
         *(volatile uint8_t*)(this_gicr() + GICR_SGI + GICR_IPRIORITYR + intid) = priority;
     else if (intid < gic_lines)
         *(volatile uint8_t*)(gicd + GICD_IPRIORITYR + intid) = priority;
@@ -297,6 +326,10 @@ void gic_set_priority(uint32_t intid, uint8_t priority)
 // GICD_ICFGR: two bits per INTID, the upper one set for edge.
 void gic_set_edge(uint32_t intid, int edge)
 {
+    if (other) {
+        other->set_edge(intid, edge);
+        return;
+    }
     if (intid < GIC_INTID_SPI || intid >= gic_lines)
         return;
     uint64_t reg = gicd + GICD_ICFGR + intid / 16 * 4;
@@ -311,7 +344,9 @@ static uint64_t mpidr_route(uint64_t mpidr)
 
 void gic_route(uint32_t intid, uint64_t mpidr)
 {
-    if (intid >= GIC_INTID_SPI && intid < gic_lines)
+    if (other)
+        other->route(intid, mpidr);
+    else if (intid >= GIC_INTID_SPI && intid < gic_lines)
         wr64(gicd + GICD_IROUTER + 8 * intid, mpidr_route(mpidr));
 }
 
@@ -319,6 +354,10 @@ void gic_route(uint32_t intid, uint64_t mpidr)
 // [23:16], RS [47:44] (Aff0 / 16) and the target list [15:0] (Aff0 % 16).
 void gic_send_sgi(uint32_t sgi, uint64_t mpidr)
 {
+    if (other) {
+        other->send_sgi(sgi, mpidr);
+        return;
+    }
     uint64_t aff0 = mpidr & 0xff;
     uint64_t v = ((uint64_t)(sgi & 0xf) << 24) | (((mpidr >> 32) & 0xff) << 48) | (((mpidr >> 16) & 0xff) << 32) |
                  (((mpidr >> 8) & 0xff) << 16) | ((aff0 >> 4) << 44) | (1ull << (aff0 & 0xf));
@@ -334,7 +373,7 @@ void gic_send_sgi(uint32_t sgi, uint64_t mpidr)
 // QEMU virt without secure=on); with TF-A it is EL3's, false then.
 int gic_fiq_sgi(uint32_t sgi)
 {
-    if (!(rd32(gicd + GICD_CTLR) & GICD_CTLR_DS))
+    if (other || !(rd32(gicd + GICD_CTLR) & GICD_CTLR_DS))
         return 0;
     uint64_t sgi_base = this_gicr() + GICR_SGI;
     wr32(sgi_base + GICR_IGROUPR0, rd32(sgi_base + GICR_IGROUPR0) & ~(1u << sgi));
@@ -355,10 +394,25 @@ void gic_send_fiq_others(uint32_t sgi)
 
 uint32_t gic_dt_flags(const struct fdt* f, int node, int index)
 {
+    if (other && other->dt_flags)
+        return other->dt_flags(f, node, index);
     uint32_t len;
     const uint8_t* p = fdt_getprop(f, node, "interrupts", &len);
     uint32_t cells = intid_cells ? intid_cells : 3;
     if (!p || cells < 3 || (uint32_t)(index + 1) * cells * 4 > len)
         return 0;
     return be32(p + index * cells * 4 + 8);
+}
+
+uint32_t gic_get_pmr(void)
+{
+    return other ? other->get_pmr() : (uint32_t)sysreg_read(ICC_PMR_EL1);
+}
+
+void gic_set_pmr(uint32_t pmr)
+{
+    if (other)
+        other->set_pmr(pmr);
+    else
+        sysreg_write(ICC_PMR_EL1, pmr);
 }

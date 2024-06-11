@@ -44,6 +44,8 @@ uint32_t timer_intid(void)
 int timer_init(const struct fdt* f)
 {
     int node = fdt_find_compatible(f, -1, "arm,armv8-timer");
+    if (node < 0)
+        node = fdt_find_compatible(f, -1, "arm,armv7-timer");     // The BCM2837's (Pi 3)
     uint32_t dt_freq = node >= 0 ? fdt_getprop_u32(f, node, "clock-frequency", 0) : 0;
     int id = node >= 0 ? gic_dt_intid(f, node, TIMER_DT_PHYS_NS) : -1;
 

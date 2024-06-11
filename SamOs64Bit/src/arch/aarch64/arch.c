@@ -34,6 +34,7 @@
 #include "arch/aarch64/mmu.h"
 #include "arch/aarch64/pfa.h"
 #include "arch/aarch64/pl011.h"
+#include "arch/aarch64/rpi.h"
 #include "arch/aarch64/sysreg.h"
 #include "arch/aarch64/timer.h"
 #include "arch/aarch64/trap.h"
@@ -95,6 +96,7 @@ static int dt_ok;
 static int gic_ok;
 static uint64_t boot_counter;
 static int psci_smc;                // PSCI through smc, else hvc
+static int psci_ok;                 // The DT has PSCI (a Pi 3 or 4 has none)
 static struct ramfb_dma ramfb_dma;
 
 static void cpu_irqs_init(void);
@@ -176,6 +178,7 @@ static void psci_init(void)
         node = fdt_find_compatible(&dt, -1, "arm,psci-0.2");
     const char* method = node >= 0 ? fdt_getprop_string(&dt, node, "method") : 0;
     psci_smc = method && method[0] == 's';
+    psci_ok = node >= 0;
 }
 
 // Entered from the UEFI loader (`loader`, else -kernel): its
@@ -469,8 +472,8 @@ int arch_irq_msi(struct pci_device* dev, unsigned slot, struct cpu* c, INTERRUPT
 uint64_t arch_irq_wait_begin(void)
 {
     uint64_t daif = arch_irq_save();
-    uint64_t pmr = sysreg_read(ICC_PMR_EL1);
-    sysreg_write(ICC_PMR_EL1, PMR_DISK_WAIT);
+    uint64_t pmr = gic_get_pmr();
+    gic_set_pmr(PMR_DISK_WAIT);
     return pmr << 32 | daif;
 }
 
@@ -481,7 +484,7 @@ void arch_irq_wait_window(void)
 
 void arch_irq_wait_end(uint64_t state)
 {
-    sysreg_write(ICC_PMR_EL1, state >> 32);
+    gic_set_pmr((uint32_t)(state >> 32));
     arch_irq_restore((uint32_t)state);
 }
 
@@ -550,6 +553,15 @@ void udelay(TIME_MICROSECONDS microseconds)
 // answers after the boot CPU gave up on it finds GAVE_UP, says PARKED
 // and turns itself off (PSCI CPU_OFF), so it never touches the slot
 // the next CPU gets (x86 holds such an AP with INIT instead).
+//
+// A CPU whose enable-method is "spin-table" (the Pi 3 and 4
+// firmware's armstub, QEMU raspi) waits in wfe for a nonzero entry
+// address at its cpu-release-addr, which spin_release writes (cleaned
+// to the point of coherency: the CPU reads it with the MMU off) before
+// a sev. It enters with x0 = 0, so boot.S's aarch64_spin_entry finds
+// its record in aarch64_spin_records by MPIDR (Aff1 * 4 + Aff0, both
+// 0-3: one record per CPU, so a late CPU still gets its own). A late
+// one parks in wfi (it cannot be turned off without PSCI).
 
 #define PSCI_CPU_OFF      0x84000002
 #define PSCI_CPU_ON       0xc4000003
@@ -572,7 +584,8 @@ _Static_assert(__builtin_offsetof(struct cpu_start, stack_top) == 8, "boot.S cpu
 _Static_assert(__builtin_offsetof(struct cpu, arch.stack_bottom) == 496, "vectors.S struct cpu offsets");
 _Static_assert(__builtin_offsetof(struct cpu, arch.kernel_stack) == 504, "vectors.S struct cpu offsets");
 
-extern char aarch64_secondary_entry[];
+extern char aarch64_secondary_entry[], aarch64_spin_entry[];
+uint64_t aarch64_spin_records[16];
 void aarch64_secondary_main(struct cpu_start* s) __attribute__((noreturn));
 
 static int fiq_stop;                // the panic stop SGI is Group 0 (gic_fiq_sgi)
@@ -613,7 +626,8 @@ void aarch64_secondary_main(struct cpu_start* s)
     struct cpu* c = s->cpu;
     if (!atomic_cas(&s->state, AP_WAIT, AP_CLAIMED)) {
         atomic_store(&s->state, AP_PARKED);
-        psci_call3(PSCI_CPU_OFF, 0, 0, 0);
+        if (psci_ok)
+            psci_call3(PSCI_CPU_OFF, 0, 0, 0);
         aarch64_halt();
     }
     sysreg_write("tpidr_el1", (uint64_t)c);
@@ -650,8 +664,32 @@ static bool wait_state(struct cpu_start* s, uint32_t want, uint64_t us)
     return s->state == want;
 }
 
-// Start the CPU with this MPIDR in slot `index`. True when it came up.
-static bool start_cpu(int index, uint64_t mpidr, bool give_up_now)
+static int spin_slot(uint64_t mpidr)
+{
+    return mpidr & ~0x303ull ? -1 : (int)((mpidr & 3) | (mpidr >> 8 & 3) << 2);
+}
+
+static void clean_to_poc(volatile void* p)
+{
+    __asm__ volatile("dc civac, %0\n\tdsb sy" :: "r"(p) : "memory");
+}
+
+static int64_t spin_release(uint64_t mpidr, uint64_t release, struct cpu_start* s)
+{
+    volatile uint64_t* word = paging_map_mmio(release, sizeof(uint64_t), 0);
+    if (!word)
+        return -1;
+    aarch64_spin_records[spin_slot(mpidr)] = (uint64_t)s;
+    clean_to_poc(&aarch64_spin_records[spin_slot(mpidr)]);
+    *word = kimage_pa(aarch64_spin_entry);
+    clean_to_poc(word);
+    __asm__ volatile("sev" ::: "memory");
+    return 0;
+}
+
+// Start the CPU with this MPIDR in slot `index`, by PSCI CPU_ON or, with
+// a `release` address, its spin table. True when it came up.
+static bool start_cpu(int index, uint64_t mpidr, bool give_up_now, uint64_t release)
 {
     struct cpu* c = &cpus[index];
     struct cpu_start* s = kzalloc(sizeof(*s));
@@ -677,9 +715,13 @@ static bool start_cpu(int index, uint64_t mpidr, bool give_up_now)
     s->state = give_up_now ? AP_GAVE_UP : AP_WAIT;
     smp_mb();
 
-    int64_t r = psci_call3(PSCI_CPU_ON, mpidr, kimage_pa(aarch64_secondary_entry), (uint64_t)s);
+    int64_t r = release ? spin_release(mpidr, release, s)
+                        : psci_call3(PSCI_CPU_ON, mpidr, kimage_pa(aarch64_secondary_entry), (uint64_t)s);
     if (r != 0) {
-        console_printf("smp: mpidr 0x%lx: PSCI CPU_ON returned %ld\n", mpidr, r);
+        if (release)
+            console_printf("smp: mpidr 0x%lx: cpu-release-addr 0x%lx cannot be mapped\n", mpidr, release);
+        else
+            console_printf("smp: mpidr 0x%lx: PSCI CPU_ON returned %ld\n", mpidr, r);
         kfree(s);           // nothing runs on them
         kfree(stack);
         return false;
@@ -724,11 +766,22 @@ int arch_start_cpus(void)
         uint64_t mpidr = reg.base & 0xff00ffffffull;
         if (mpidr == cpus[0].arch.mpidr)
             continue;
-        if (!method || strncmp(method, "psci", 5)) {
+        uint64_t release = 0;
+        if (method && !strncmp(method, "spin-table", 11)) {
+            uint32_t len;
+            const uint8_t* p = fdt_getprop(&dt, n, "cpu-release-addr", &len);
+            for (uint32_t i = 0; p && len == 8 && i < 8; i++)
+                release = release << 8 | p[i];
+            if (!release || spin_slot(mpidr) < 0) {
+                console_printf("smp: mpidr 0x%lx: spin-table without a usable cpu-release-addr, not started\n",
+                               mpidr);
+                continue;
+            }
+        } else if (!method || strncmp(method, "psci", 5)) {
             console_printf("smp: mpidr 0x%lx: enable-method %s, not started\n", mpidr, method ? method : "none");
             continue;
         }
-        if (start_cpu(next, mpidr, late_test))
+        if (start_cpu(next, mpidr, late_test, release))
             next++;
         late_test = false;
     }
@@ -852,13 +905,37 @@ static void pl031_init(void)
         rtc_set_unix_source(pl031_unix_time);
 }
 
+// On a Raspberry Pi the screen is the VideoCore's framebuffer
+// (rpi.c, the mailbox). 0, or -1 without one.
+static int rpi_screen(void)
+{
+    struct rpi_fb fb;
+    if (rpi_framebuffer(&dt, FB_WIDTH, FB_HEIGHT, &fb) < 0)
+        return -1;
+    boot_info.fb_base = fb.pa;
+    boot_info.fb_size = fb.size;
+    boot_info.fb_width = fb.width;
+    boot_info.fb_height = fb.height;
+    boot_info.fb_pitch = fb.pitch / 4;
+    boot_info.fb_format = fb.format;
+    default_graphics_info.framebuffer = (struct framebuffer_pixel*)fb.pa;
+    default_graphics_info.horizontal_resolution = fb.width;
+    default_graphics_info.vertical_resolution = fb.height;
+    default_graphics_info.pixels_per_scanline = fb.pitch / 4;
+    return 0;
+}
+
 void arch_firmware_init(void)
 {
     pci_fdt_host_init(&dt, pci_gic_irq);
     pl031_init();
     int slots = virtio_mmio_scan_fdt(&dt, dt_virtio_irq, true);
     console_printf("virtio-mmio: %d slot(s) in the device tree\n", slots);
-    screen_init();
+    rpi_sd_init(&dt);
+    // A loader's GOP framebuffer wins; else a Pi's mailbox one,
+    // else ramfb (screen_init).
+    if (boot_info.fb_format != SAMOS_FB_FORMAT_NONE || rpi_screen() < 0)
+        screen_init();
 
     uint64_t base, size;
     if (memmap_initrd(&base, &size) == 0) {
@@ -902,14 +979,24 @@ static void psci_call(uint64_t fn)
         __asm__ volatile("hvc #0" : "+r"(x0) :: "x1", "x2", "x3", "memory");
 }
 
+// Without PSCI (Pi 3, the Pi 4's armstub) a restart is the PM
+// watchdog's and there is no power off.
 void arch_shutdown_fallback(void)
 {
+    if (!psci_ok) {
+        serial_write("psci: none, no power off\n");
+        return;
+    }
     serial_write("psci: SYSTEM_OFF\n");
     psci_call(PSCI_SYSTEM_OFF);
 }
 
 void arch_reboot_fallback(void)
 {
+    if (!psci_ok) {
+        rpi_reset(&dt);
+        return;
+    }
     serial_write("psci: SYSTEM_RESET\n");
     psci_call(PSCI_SYSTEM_RESET);
 }

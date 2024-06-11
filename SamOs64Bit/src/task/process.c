@@ -88,6 +88,9 @@ static void process_init(struct process* process){
 
 // Lecture 154 - does this process own the given kernel window?
 bool process_owns_kernel_window(struct process* process, struct window* kernel_window){
+    if(!process->windows){
+        return false;       // Exiting (process_terminate)
+    }
     size_t total_windows = vector_count(process->windows);
     for(size_t i = 0; i < total_windows; i++){
         struct process_window* win = NULL;
@@ -1167,9 +1170,15 @@ int process_terminate(struct process* process){
 
     // Lecture 154 - free the windows vector. The kernel windows
     // themselves were closed up front by process_close_windows.
+    // Taken out under the process lock: another CPU's
+    // process_get_from_kernel_window (a key or a click while this
+    // process exits) walks every process's windows with it held.
     if(process->windows){
-        vector_free(process->windows);
+        process_lock();
+        struct vector* windows = process->windows;
         process->windows = NULL;
+        process_unlock();
+        vector_free(windows);
     }
 
     // Lecture 161 - drop the per-process window-events ring.

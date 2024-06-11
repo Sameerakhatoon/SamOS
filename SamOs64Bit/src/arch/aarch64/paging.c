@@ -14,6 +14,10 @@
 //   NO_EXECUTE      UXN for user pages, PXN for kernel pages; user pages
 //                   are always PXN, kernel pages always UXN
 //   CACHE_DISABLED  Device-nGnRE (MAIR attr 1)
+// A kernel page of physical memory outside the RAM the kernel
+// owns (not in the direct map: the VideoCore's framebuffer on a Pi) is
+// Normal non-cacheable (attr 2) instead of write-back: another master
+// reads it, and nothing would clean the CPU's lines for it.
 // User pages are non-global (nG), so they are tagged with the ASID.
 
 #include "arch/arch.h"
@@ -138,6 +142,8 @@ int paging_map(struct paging_desc* desc, void* virt, void* phys, int flags)
     if (kernel ? (flags & PAGING_ACCESS_FROM_ALL) : (!desc || desc->kernel || va >= USER_TOP))
         return -EINVARG;
     uint64_t d = flags & PAGING_IS_PRESENT ? (pa & PTE_ADDR) | leaf_bits(va, flags) : 0;
+    if (d && kernel && !(flags & PAGING_CACHE_DISABLED) && !memmap_ram(pa, PAGING_PAGE_SIZE))
+        d = (d & ~PTE_ATTR(7)) | PTE_ATTR(MT_NORMAL_NC);
     // Table frames come from the PFA, which takes the kernel memory
     // lock too (recursive); one CPU at a time in a tree.
     kmem_lock();

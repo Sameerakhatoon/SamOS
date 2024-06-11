@@ -11,9 +11,9 @@
 #   fault: samos.fault_test, brk #0x5a: the vector table dumps
 #          ESR 0xf200005a (EC 0x3c, BRK) with ELR inside the kernel
 #          (at 0xffffffff80000000 since the aarch64 MMU work).
-# Plain virt has a GICv2, so since the aarch64 trap work these boots also show that the
-# kernel says so and still reaches hello without a tick; the GICv3
-# boots are in aarch64-traps.sh.
+# Plain virt has a GICv2: since the Raspberry Pi port the kernel takes its GICv2 path
+# (aarch64-pi.sh boots it to the shell); the GICv3 boots are in
+# aarch64-traps.sh.
 # The kernel halts in wfi, so each boot is killed as soon as its last
 # expected line is on serial (or after ARCH_TIMEOUT seconds).
 set -uo pipefail
@@ -91,7 +91,7 @@ expect el1 '^fdt: 0x[0-9a-f]+, version 17, [0-9]+ bytes$' "device tree from x0"
 expect el1 '^memory: 0x40000000 size 0x20000000$' "/memory reg"
 expect el1 '^memory: 512 MiB in 1 region\(s\)$' "memory size"
 expect el1 '^bootargs: samos.test=1$' "bootargs"
-expect el1 '^gic: no arm,gic-v3 in the device tree' "GICv2 machine: no GICv3, said so"
+expect el1 '^gic: GICv2 distributor at 0x8000000, CPU interface at 0x8010000, [0-9]+ INTIDs' "GICv2 machine: the GICv2 path"
 expect el1 '^SamOS aarch64: hello$' "hello"
 expect_no el1 '^exception:' "no exception"
 

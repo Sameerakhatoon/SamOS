@@ -52,7 +52,7 @@ SHARED_OBJS = kernel.o kernel_selftest.o string/string.o \
     lib/vector/vector.o lib/spinlock/spinlock.o cpu/smp.o cpu/smp_selftest.o \
     virtio/virtio.o virtio/virtio_pci.o virtio/virtio_mmio.o virtio/virtio_bus.o disk/drivers/virtio_blk.o \
     keyboard/virtio_input.o keyboard/serial_input.o disk/drivers/ramdisk.o \
-    usb/xhci.o usb/usb_hid.o disk/drivers/usb_msc.o
+    usb/xhci.o usb/usb_hid.o disk/drivers/usb_msc.o disk/drivers/sdhci.o
 
 # Freestanding, warnings are errors, no unused-parameter noise.
 COMMON_FLAGS = -g -ffreestanding -fno-builtin -nostdlib -nostartfiles -nodefaultlibs \
@@ -173,7 +173,8 @@ PORT_OBJS = arch/aarch64/boot.S.o arch/aarch64/vectors.S.o arch/aarch64/main.o \
     arch/aarch64/mmu.o arch/aarch64/pfa.o arch/aarch64/memmap.o arch/aarch64/mmu_test.o \
     arch/aarch64/arch.o arch/aarch64/entry.S.o arch/aarch64/paging.o arch/aarch64/uaccess.o \
     arch/aarch64/uaccess.S.o arch/aarch64/acpi_dt.o virtio/virtio_mmio_fdt.o firmware/ramfb.o \
-    io/pci_fdt.o arch/aarch64/its.o
+    io/pci_fdt.o arch/aarch64/its.o \
+    arch/aarch64/gicv2.o arch/aarch64/bcm2836_intc.o arch/aarch64/rpi.o
 # The whole shared kernel, as on x86, except task/uaccess.o:
 # arch/aarch64/uaccess.c implements task/uaccess.h with LDTR/STTR and
 # the __ex_table fixups instead of a table walk.
@@ -308,6 +309,20 @@ all: $(OSIMG)
 $(OSIMG): ./bin/aarch64/kernel.img $(USER_ELFS) ./hello.txt ./assets/sysfont.bmp ./tools/arch-osimg.sh
 	bash ./tools/arch-osimg.sh $@ ./bin/aarch64/kernel.img $(USER_BUILD)
 	@echo "make: $@ ($$(du -h $@ | cut -f1) on disk)"
+
+# The Raspberry Pi 4 / 5 boot files, not part of `all`: the same
+# kernel.img as kernel8.img, tools/pi/config.txt, and an SD card image
+# with both and the programs on one FAT32 partition (tools/pi-sdimg.sh).
+PI_DIR      = ./bin/aarch64/pi
+
+pi: $(PI_DIR)/sdcard.img
+
+$(PI_DIR)/sdcard.img: ./bin/aarch64/kernel.img $(USER_ELFS) $(RAMDISK) ./hello.txt ./assets/sysfont.bmp \
+    ./tools/pi-sdimg.sh ./tools/pi/config.txt
+	bash ./tools/pi-sdimg.sh $(PI_DIR) ./bin/aarch64/kernel.img $(USER_BUILD)
+	@echo "make: $(PI_DIR)/kernel8.img, config.txt, sdcard.img"
+
+.PHONY: pi
 endif
 
 # The port's user stdlib as a sysroot for SamCompiler's

@@ -13,6 +13,12 @@
 #define PL011_FR_TXFF   (1 << 5)    // transmit FIFO full
 
 #define PL011_QEMU_VIRT 0x09000000UL
+// The Pi 5's RP1 UART0 (GPIO 14/15) is a PL011 behind RP1's PCIe
+// link ("arm,pl011-axi"). With pciex4_reset=0 the firmware leaves the
+// link and RP1's window at 0x1f00000000 (UART0 at +0x30000, RP1
+// datasheet); used when the device tree's PCI ranges do not translate.
+// Not run on a board yet.
+#define PL011_RP1_UART0 0x1f00030000UL
 
 static volatile uint32_t* uart;
 static uint64_t uart_pa;
@@ -34,6 +40,13 @@ const char* pl011_init(const struct fdt* f)
         if (node >= 0 && fdt_node_is_compatible(f, node, "arm,pl011")) {
             base = base_of(f, node);
             how = "stdout-path";
+        } else if (node >= 0 && fdt_node_is_compatible(f, node, "arm,pl011-axi")) {
+            base = base_of(f, node);
+            how = "stdout-path, RP1";
+            if (!base) {
+                base = PL011_RP1_UART0;
+                how = "stdout-path, RP1 at the firmware's window";
+            }
         }
         if (!base) {
             base = base_of(f, fdt_find_compatible(f, -1, "arm,pl011"));

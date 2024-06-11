@@ -1,0 +1,34 @@
+# SamOS on the Raspberry Pi 4 and 5: the firmware's settings.
+# Goes on the first (FAT32) partition of the SD card with kernel8.img
+# and the Raspberry Pi firmware files.
+
+# 64-bit, the kernel (an arm64 Image) at 2 MiB, where its header asks
+# to be and where QEMU's raspi3b loads it too.
+arm_64bit=1
+kernel=kernel8.img
+kernel_address=0x200000
+
+# The serial console: the firmware sets up the UART the device tree's
+# stdout-path names (115200 8N1) and SamOS uses it as left.
+# uart_2ndstage=1 adds the firmware's own boot log on the same line.
+enable_uart=1
+uart_2ndstage=1
+
+[pi4]
+# The PL011 (uart0) on GPIO 14/15 (header pins 8 and 10) instead of the
+# mini UART: SamOS drives only the PL011. Needs overlays/disable-bt.dtbo.
+dtoverlay=disable-bt
+# Interrupts through the GIC-400 (the default; SamOS's GICv2 path).
+enable_gic=1
+
+[pi5]
+# The console is the debug UART connector (uart10, a PL011), which the
+# firmware's stdout-path names by default. For RP1's UART0 on GPIO 14/15
+# instead (untested), keep the firmware's PCIe set-up of RP1:
+#pciex4_reset=0
+# The programs from a RAM disk (the same files, label SAMOS) in case the
+# SD slot does not come up (SamOS's Pi 5 SD path is untested): the
+# firmware loads it at 32 MiB and names it in /chosen as an initrd.
+initramfs ramdisk.img 0x2000000
+
+[all]

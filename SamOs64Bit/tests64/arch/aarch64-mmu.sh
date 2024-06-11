@@ -150,8 +150,8 @@ for name in layout el2; do
     boot $name $machine 512M "samos.mmu_test" '^SamOS aarch64: hello|^exception: halted'
     dump $name
     expect $name '^mmu: 4 KiB granule, 48-bit VA, 4 levels, [0-9]+-bit PA, 8-bit ASIDs$' "4 KiB, 48-bit VA, 4 levels"
-    expect $name '^mmu: MAIR 0x4ff \(attr0 normal WB, attr1 device nGnRE\), SCTLR M C I WXN$' \
-        "MAIR normal and device, MMU and caches on, WXN"
+    expect $name '^mmu: MAIR 0x4404ff \(attr0 normal WB, attr1 device nGnRE, attr2 normal NC\), SCTLR M C I WXN$' \
+        "MAIR normal, device and normal non-cacheable, MMU and caches on, WXN"
     expect $name '^mmu: kernel 0xffffffff80000000-0xffffffff80[0-9a-f]{6} at pa 0x40200000 ' \
         "kernel linked high, mapped to its load address"
     expect $name '^mmu: direct map at 0xffff800000000000, [0-9]+ table frames, identity map removed \([1-9][0-9]* tables freed\)$' \

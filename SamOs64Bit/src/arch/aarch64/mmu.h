@@ -27,6 +27,7 @@
 // MAIR_EL1 attribute indexes.
 #define MT_NORMAL           0       // 0xff: Normal, inner/outer write-back RW-allocate
 #define MT_DEVICE           1       // 0x04: Device-nGnRE
+#define MT_NORMAL_NC        2       // 0x44: Normal, non-cacheable (memory another master reads)
 
 // Descriptor bits.
 #define PTE_VALID           (1ul << 0)

@@ -152,6 +152,21 @@ halt:
     wfi
     b       halt
 
+// A secondary CPU released from its spin table (arch.c
+// spin_release) enters with x0 = 0: its start record is
+// aarch64_spin_records[Aff1 * 4 + Aff0], written and cleaned to the
+// point of coherency before the release (read here with the MMU off).
+    .global aarch64_spin_entry
+aarch64_spin_entry:
+    mrs     x1, mpidr_el1
+    and     x2, x1, #3
+    ubfx    x1, x1, #8, #2
+    add     x1, x2, x1, lsl #2
+    adrp    x2, aarch64_spin_records
+    add     x2, x2, :lo12:aarch64_spin_records
+    ldr     x0, [x2, x1, lsl #3]
+    b       aarch64_secondary_entry
+
 // A secondary CPU, started by PSCI CPU_ON (arch.c's
 // arch_start_cpus) with x0 = its struct cpu_start (a kernel virtual
 // address), the MMU and caches off, at the EL the boot CPU was entered

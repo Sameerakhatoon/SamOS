@@ -59,5 +59,37 @@ void     gic_send_fiq_others(uint32_t sgi);
 #define GIC_LPIS            64
 int      gic_rd_count(void);
 uint64_t gic_rd_frame(int i);
+// The priority mask (ICC_PMR_EL1 on GICv3) for a disk wait.
+uint32_t gic_get_pmr(void);
+void     gic_set_pmr(uint32_t pmr);
+
+// The same calls on another controller, which gic_init picks
+// from the device tree when it has no "arm,gic-v3": a GICv2 (GIC-400,
+// gicv2.c: Pi 4 and 5, QEMU virt,gic-version=2) or the BCM2836 per-core
+// controller (bcm2836_intc.c: Pi 3, QEMU raspi3b). INTIDs keep the
+// GIC's numbering. cpu_token is gic_redistributor's answer there (0: no
+// such CPU); a 0 dt_intid uses the GIC binding. No FIQ stop on either.
+struct gic_ops {
+    const char* name;
+    int      (*init_cpu)(void);
+    void     (*enable)(uint32_t intid);
+    void     (*disable)(uint32_t intid);
+    uint32_t (*ack)(void);
+    void     (*eoi)(uint32_t intid);
+    int      (*dt_intid)(const struct fdt* f, int node, int index);
+    uint32_t (*dt_flags)(const struct fdt* f, int node, int index);
+    void     (*set_priority)(uint32_t intid, uint8_t priority);
+    void     (*set_edge)(uint32_t intid, int edge);
+    void     (*route)(uint32_t intid, uint64_t mpidr);
+    void     (*send_sgi)(uint32_t sgi, uint64_t mpidr);
+    uint64_t (*cpu_token)(uint64_t mpidr);
+    uint32_t (*get_pmr)(void);
+    void     (*set_pmr)(uint32_t pmr);
+};
+
+// 0 and *ops set, 1 if the device tree has no such controller, -1 if it
+// has one that did not set up (printed).
+int      gicv2_probe(const struct fdt* f, const struct gic_ops** ops);
+int      bcm2836_intc_probe(const struct fdt* f, const struct gic_ops** ops);
 
 #endif

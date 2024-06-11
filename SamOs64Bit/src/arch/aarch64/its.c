@@ -196,6 +196,10 @@ static int rd_lpis_init(void)
 
 int its_init(const struct fdt* f)
 {
+    // A GICv2 or the BCM2836 (gic_ops) has no redistributors and
+    // so no LPIs: no ITS, arch_irq_msi refuses, PCI takes INTx.
+    if (gic_rd_count() == 0)
+        return -ENOENT;
     int node = fdt_find_compatible(f, -1, "arm,gic-v3-its");
     struct fdt_region reg;
     if (node < 0 || fdt_reg_cpu(f, node, 0, &reg) < 0) {

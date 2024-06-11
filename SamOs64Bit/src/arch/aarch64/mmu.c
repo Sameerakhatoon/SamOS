@@ -16,7 +16,7 @@
 #include "memory/pfa.h"
 
 #define BLOCK_2M        (1ul << 21)
-#define MAIR_VALUE      (0xfful << (8 * MT_NORMAL) | 0x04ul << (8 * MT_DEVICE))
+#define MAIR_VALUE      (0xfful << (8 * MT_NORMAL) | 0x04ul << (8 * MT_DEVICE) | 0x44ul << (8 * MT_NORMAL_NC))
 #define SCTLR_M         (1ul << 0)
 #define SCTLR_C         (1ul << 2)
 #define SCTLR_I         (1ul << 12)
@@ -330,7 +330,7 @@ void mmu_report(void)
 {
     uint64_t sctlr = sysreg_read("sctlr_el1");
     console_printf("mmu: 4 KiB granule, 48-bit VA, 4 levels, %u-bit PA, 8-bit ASIDs\n", pa_bits);
-    console_printf("mmu: MAIR 0x%lx (attr0 normal WB, attr1 device nGnRE), SCTLR%s%s%s%s\n",
+    console_printf("mmu: MAIR 0x%lx (attr0 normal WB, attr1 device nGnRE, attr2 normal NC), SCTLR%s%s%s%s\n",
                    sysreg_read("mair_el1"), sctlr & SCTLR_M ? " M" : "", sctlr & SCTLR_C ? " C" : "",
                    sctlr & SCTLR_I ? " I" : "", sctlr & SCTLR_WXN ? " WXN" : "");
     console_printf("mmu: kernel 0x%lx-0x%lx at pa 0x%lx (text RX, rodata R, data/bss/stack RW XN)\n",
