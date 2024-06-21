@@ -219,4 +219,9 @@ static inline void* phys_to_virt(uint64_t p){
 #define PAGING_IS_DIRECT_MAP(v) ((uintptr_t)(v) >= SAMOS_DIRECT_MAP_BASE && \
                                  (uintptr_t)(v) <  SAMOS_DIRECT_MAP_BASE + SAMOS_DIRECT_MAP_SIZE)
 
+// DMA cache maintenance (arch.h): PCI devices snoop the caches.
+static inline void arch_dma_clean(const volatile void* va, size_t size){ }
+static inline void arch_dma_inval(const volatile void* va, size_t size){ }
+static inline void arch_dma_flush(const volatile void* va, size_t size){ }
+
 #endif

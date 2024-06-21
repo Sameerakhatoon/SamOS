@@ -5,6 +5,7 @@
 // only masks the UART's interrupts and enables the FIFOs. `base`
 // is the registers' virtual address in the mmio window.
 
+#include <stdbool.h>
 #include "arch/riscv64/uart16550.h"
 
 #define UART_RBR 0  // receive buffer (read)
@@ -22,21 +23,32 @@
 
 static volatile uint8_t* uart_base;
 static uint32_t uart_shift;
+static bool uart_word;          // 32-bit accesses (DesignWare APB UART)
 
 static inline void reg_write(int reg, uint8_t v)
 {
-    uart_base[reg << uart_shift] = v;
+    if (uart_word) {
+        *(volatile uint32_t*)(uart_base + (reg << uart_shift)) = v;
+    } else {
+        uart_base[reg << uart_shift] = v;
+    }
 }
 
 static inline uint8_t reg_read(int reg)
 {
+    if (uart_word) {
+        return (uint8_t)*(volatile uint32_t*)(uart_base + (reg << uart_shift));
+    }
     return uart_base[reg << uart_shift];
 }
 
-void uart16550_init(uintptr_t base, uint32_t reg_shift)
+// The DesignWare UART's quirk (a busy-detect interrupt when LCR is
+// written mid-transfer) cannot happen: LCR is never written here.
+void uart16550_init(uintptr_t base, uint32_t reg_shift, uint32_t io_width)
 {
     uart_base = (volatile uint8_t*)base;
     uart_shift = reg_shift;
+    uart_word = io_width == 4;
     reg_write(UART_IER, 0);
     reg_write(UART_FCR, 0x07);  // enable and clear both FIFOs
 }

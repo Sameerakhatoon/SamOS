@@ -12,6 +12,7 @@
 #include "arch/riscv64/riscv64.h"
 #include "cpu/percpu.h"
 #include "firmware/fdt.h"
+#include "firmware/fdt_dev.h"
 #include "memory/memregion.h"
 #include "memory/pfa.h"
 
@@ -35,6 +36,7 @@ static uint64_t mmio_base, mmio_next;
 static unsigned pool_used;
 static bool sealed;                         // kernel root-level upper half is final
 static uint64_t sv48_readback;              // satp after the Sv48 probe write
+static bool sv39_forced;                    // Sv48 not tried (sv39_only)
 static uint64_t boot_dtb, boot_dtb_size;
 static uint64_t initrd_base, initrd_size;
 static unsigned asid_bits;
@@ -289,6 +291,16 @@ static uint32_t be32_at(uint64_t pa)
     return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
 }
 
+// The plan's board rule: Sv39 only on the JH7110 (its U74 cores
+// have no Sv48), whatever the probe would say. The parser runs on the
+// tree's physical address here; it is position independent.
+static bool sv39_only(void)
+{
+    struct fdt f;
+    return boot_dtb && fdt_init(&f, (const void*)boot_dtb, boot_dtb_size) == 0
+        && fdt_node_is_compatible(&f, fdt_path_offset(&f, "/"), "starfive,jh7110");
+}
+
 uint64_t mmu_boot(uint64_t dtb_pa)
 {
     kernel_pa = (uint64_t)__kernel_start;   // PC-relative: the load address
@@ -297,7 +309,8 @@ uint64_t mmu_boot(uint64_t dtb_pa)
         boot_dtb = dtb_pa;
         boot_dtb_size = be32_at(dtb_pa + 4);
     }
-    for (int levels = 4; levels >= 3; levels--) {
+    sv39_forced = sv39_only();
+    for (int levels = sv39_forced ? 3 : 4; levels >= 3; levels--) {
         uint64_t root = build_boot_tables(levels);
         if (!root) {
             return 0;
@@ -337,8 +350,12 @@ void mmu_init(void)
         asid_bits++;
     }
 
-    console_printf("mmu: satp probe: sv48 %s (read back 0x%lx)\n",
-                   mmu_levels == 4 ? "accepted" : "rejected, sv39", sv48_readback);
+    if (sv39_forced) {
+        console_printf("mmu: sv39 only on starfive,jh7110, sv48 not probed\n");
+    } else {
+        console_printf("mmu: satp probe: sv48 %s (read back 0x%lx)\n",
+                       mmu_levels == 4 ? "accepted" : "rejected, sv39", sv48_readback);
+    }
     console_printf("mmu: %s, %d levels, root 0x%lx\n", mmu_levels == 4 ? "sv48" : "sv39", mmu_levels, kernel_root);
     console_printf("mmu: kernel 0x%lx at 0x%lx, direct map 0x%lx, mmio 0x%lx, user below 0x%lx\n",
                    KERNEL_VMA, kernel_pa, dmap_base, mmio_base, user_end);
@@ -474,6 +491,12 @@ int mmu_memory_init(const struct fdt* f)
     uint64_t end = chosen_u64(f, "linux,initrd-end");
     initrd_size = end > initrd_base ? end - initrd_base : 0;
     reserve(initrd_base, initrd_size, MEM_REGION_KERNEL, "initrd");
+    // A framebuffer U-Boot left on (scanned out from RAM) is not
+    // the frame allocator's either.
+    struct fdt_simplefb fb;
+    if (fdt_find_simplefb(f, &fb) == 0) {
+        reserve(fb.base, fb.size, MEM_REGION_RESERVED, "simple-framebuffer");
+    }
 
     // The root-level entries of the mmio window and of the heap arena
     // over RAM, then no new ones: every address space copies the upper

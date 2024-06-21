@@ -26,6 +26,7 @@
 #include "boot/boot_info.h"
 #include "cpu/percpu.h"
 #include "firmware/fdt.h"
+#include "firmware/fdt_dev.h"
 #include "io/serial.h"
 #include "kernel.h"
 #include "memory/heap/heap.h"
@@ -108,28 +109,31 @@ static void print_harts(void)
     console_printf("\n");
 }
 
-// /chosen stdout-path, else the first ns16550a. QEMU's OpenSBI writes
-// DBCN output to the same UART, so the switch is seamless.
+// /chosen stdout-path, else the first 16550. QEMU's OpenSBI writes
+// DBCN output to the same UART, so the switch is seamless. The
+// JH7110's UART0 is a DesignWare one, 32-bit registers 4 bytes apart
+// (fdt_dev.c's fdt_find_uart).
 static void console_to_uart(void)
 {
-    int node = fdt_stdout_node(&fdt);
-    if (node < 0 || !fdt_node_is_compatible(&fdt, node, "ns16550a")) {
-        node = fdt_find_compatible(&fdt, -1, "ns16550a");
-    }
-    struct fdt_region reg;
-    if (node < 0 || fdt_reg_cpu(&fdt, node, 0, &reg) != 0) {
-        console_printf("console: no ns16550a, staying on SBI\n");
+    struct fdt_uart u;
+    if (fdt_find_uart(&fdt, &u) != 0) {
+        console_printf("console: no 16550, staying on SBI\n");
         return;
     }
-    uart_va = mmu_map_mmio(reg.base, reg.size);
+    uart_va = mmu_map_mmio(u.base, u.size);
     if (!uart_va) {
-        console_printf("console: cannot map the ns16550a at 0x%lx\n", reg.base);
+        console_printf("console: cannot map the 16550 at 0x%lx\n", u.base);
         return;
     }
-    uart16550_init(uart_va, fdt_getprop_u32(&fdt, node, "reg-shift", 0));
+    uart16550_init(uart_va, u.reg_shift, u.io_width);
     console_set_putc(uart16550_putc);
-    uart_node = node;
-    console_printf("console: ns16550a at 0x%lx\n", reg.base);
+    uart_node = u.node;
+    const char* compat = fdt_getprop_string(&fdt, u.node, "compatible");
+    console_printf("console: %s at 0x%lx", compat ? compat : "16550", u.base);
+    if (u.reg_shift || u.io_width != 1) {
+        console_printf(", reg-shift %u, reg-io-width %u", u.reg_shift, u.io_width);
+    }
+    console_printf("\n");
 }
 
 static void print_memory(void)

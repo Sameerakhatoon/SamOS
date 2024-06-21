@@ -21,20 +21,36 @@ void*    virtio_dma_page(void);
 void     virtio_dma_free(void* page);
 uint64_t virtio_dma_phys(void* virt);
 #define virtio_mb() __sync_synchronize()
+#define virtio_dma_clean(p, n) ((void)(p), (void)(n))
+#define virtio_dma_inval(p, n) ((void)(p), (void)(n))
+#define virtio_dma_flush(p, n) ((void)(p), (void)(n))
 #else
 #include "arch/arch.h"
 #include "memory/heap/kheap.h"
 
 // One zeroed 4 KiB page. kpage_zalloc pages are page aligned, so a
 // structure that fits in one never crosses a physical page boundary;
-// multi-page buffers are translated page by page.
-static inline void*    virtio_dma_page(void)        { return kpage_zalloc(4096); }
+// multi-page buffers are translated page by page. The
+// zeroes are written back, so no dirty line of them can later land
+// on what the device wrote.
+static inline void* virtio_dma_page(void){
+    void* p = kpage_zalloc(4096);
+    if(p){
+        arch_dma_clean(p, 4096);
+    }
+    return p;
+}
 static inline void     virtio_dma_free(void* page)  { kfree(page); }
 static inline uint64_t virtio_dma_phys(void* virt)  { return paging_kernel_virt_to_phys(virt); }
 
 // The rings are shared with the device: order every ring write before
 // the index that publishes it, and the index before the notify.
 #define virtio_mb() smp_mb()
+
+// For devices that do not snoop the caches (arch.h).
+#define virtio_dma_clean(p, n) arch_dma_clean(p, n)
+#define virtio_dma_inval(p, n) arch_dma_inval(p, n)
+#define virtio_dma_flush(p, n) arch_dma_flush(p, n)
 #endif
 
 #endif

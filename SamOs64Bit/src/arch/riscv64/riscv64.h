@@ -39,6 +39,9 @@ int riscv64_trap_stack(struct cpu* c);
 // Flush `va` of `desc` (0: all of it) on every other hart that
 // may hold it, by SBI RFENCE (paging.c).
 void riscv64_tlb_shootdown(struct paging_desc* desc, uint64_t va);
+// DMA coherence from the device tree and the way to maintain
+// the caches when there is none (dma.c), before any driver.
+void riscv64_dma_init(const struct fdt* f);
 
 #define csr_read(csr) ({ uint64_t v_; __asm__ volatile("csrr %0, " #csr : "=r"(v_)); v_; })
 #define csr_write(csr, v) __asm__ volatile("csrw " #csr ", %0" : : "rK"((uint64_t)(v)) : "memory")

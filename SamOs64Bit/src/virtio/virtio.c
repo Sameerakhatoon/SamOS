@@ -7,6 +7,8 @@
 #include "virtio_io.h"
 #include "status.h"
 
+#define VIRTIO_DMA_ALIGN 64u
+
 // A reset "may take some time" (spec 4.1.4.3.2): the status reads 0
 // once the device is done. Bounded by a count, not the TSC, so the
 // core needs no timer.
@@ -82,8 +84,11 @@ int virtq_setup(struct virtio_dev* d, struct virtq* q, uint16_t index, uint16_t 
     if(!page){
         return -ENOMEM;
     }
+    // The used ring on a cache line of its own (the spec asks for
+    // 4 bytes), so dropping its lines (virtq_has_used) never drops a
+    // ring write of the driver's.
     uint32_t avail_off = 16u * size;
-    uint32_t used_off  = (avail_off + 6u + 2u * size + 3u) & ~3u;
+    uint32_t used_off  = (avail_off + 6u + 2u * size + VIRTIO_DMA_ALIGN - 1) & ~(VIRTIO_DMA_ALIGN - 1);
 
     q->dev       = d;
     q->index     = index;
@@ -135,14 +140,21 @@ int virtq_add(struct virtq* q, const struct virtq_buf* bufs, int count){
     return head;
 }
 
+// The descriptors and the available ring reach memory before the
+// device is told (a no-op where it snoops the caches).
 void virtq_kick(struct virtq* q){
+    virtio_dma_clean(q->page, q->used_phys - q->desc_phys);
     virtio_mb();                       // the index before the flag check and the doorbell
+    virtio_dma_inval(q->used, 4);
     if(!(q->used->flags & VIRTQ_USED_F_NO_NOTIFY)){
         q->dev->ops->notify(q->dev, q);
     }
 }
 
+// The used ring is the device's; its lines are dropped before
+// each look (virtio_dma_page wrote the zeroes back).
 bool virtq_has_used(struct virtq* q){
+    virtio_dma_inval(q->used, 4u + 8u * q->size);
     return q->used->idx != q->last_used;
 }
 

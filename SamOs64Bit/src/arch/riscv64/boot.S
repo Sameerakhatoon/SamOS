@@ -9,7 +9,31 @@
 
     .section .text.boot, "ax"
     .globl _start
+// The RISC-V Linux Image header (the kernel's
+// Documentation/arch/riscv/boot-image-header.rst), so U-Boot's booti
+// takes the image as it takes Linux's: code0 and code1 (a jump over
+// the header), text_offset (2 MiB, where fw_dynamic puts the next stage
+// too), image_size (the whole image, BSS and the boot pools included,
+// linker.ld), flags (bit 0: little endian), version 0.2, then the
+// magics, "RISCV" (deprecated) and "RSC\x05". 64 bytes. QEMU's -kernel
+// loads the file flat as before and runs code0.
 _start:
+    .option push
+    .option norvc
+    j real_start
+    .option pop
+    .word 0
+    .quad 0x200000
+    .quad __kernel_size
+    .quad 0
+    .word 2
+    .word 0
+    .quad 0
+    .ascii "RISCV\0\0\0"
+    .ascii "RSC\x05"
+    .word 0
+
+real_start:
     // Interrupts stay off until riscv64_main has set up the timer and
     // the PLIC.
     csrw sie, zero

@@ -14,6 +14,7 @@
 #include "drivers/ramdisk.h"    // ramdisk_driver_init
 #include "drivers/usb_msc.h"    // usb_msc_driver_init
 #include "drivers/sdhci.h"      // sdhci_driver_init
+#include "drivers/dw_mmc.h"     // dw_mmc_driver_init
 #include "status.h"
 
 struct vector* disk_driver_vec = NULL;
@@ -38,6 +39,12 @@ int disk_driver_system_load_drivers(){
     // virtio-blk, after the native controllers so their disk
     // ids do not move.
     res = disk_driver_register(virtio_blk_driver_init());
+    if(res < 0){
+        goto out;
+    }
+    // DesignWare MMC (SD, eMMC) from the device tree; nothing on
+    // a machine whose arch attached none (x86).
+    res = disk_driver_register(dw_mmc_driver_init());
     if(res < 0){
         goto out;
     }

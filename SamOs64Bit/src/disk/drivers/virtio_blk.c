@@ -97,6 +97,10 @@ static int vblk_request(struct vblk* b, uint32_t type, uint64_t sector, uint32_t
     if(virtq_add(&b->q, bufs, n) < 0){
         return -EIO;
     }
+    // The header and the status byte (its own line) to memory;
+    // the bounce buffer was cleaned or flushed by vblk_io.
+    virtio_dma_clean(h, sizeof(*h));
+    virtio_dma_flush(status, 1);
 
     disk_irq_arm(b->irq);
     virtq_kick(&b->q);
@@ -109,17 +113,29 @@ static int vblk_request(struct vblk* b, uint32_t type, uint64_t sector, uint32_t
         }
     }
     virtq_pop_used(&b->q, NULL, NULL);
+    virtio_dma_inval(status, 1);
     return *status == VIRTIO_BLK_S_OK ? 0 : -EIO;
 }
 
+// Written bounce pages go to memory before the request; pages
+// the device fills are flushed before it (no dirty line of ours may
+// land on its data) and dropped after it, before the copy.
 static void vblk_copy(struct vblk* b, uint8_t* ptr, uint32_t bytes, bool to_device){
     for(uint32_t done = 0; done < bytes; done += 4096){
         uint32_t chunk = bytes - done > 4096 ? 4096 : bytes - done;
         if(to_device){
             memcpy(b->bounce[done / 4096], ptr + done, chunk);
+            virtio_dma_clean(b->bounce[done / 4096], chunk);
         } else {
+            virtio_dma_inval(b->bounce[done / 4096], chunk);
             memcpy(ptr + done, b->bounce[done / 4096], chunk);
         }
+    }
+}
+
+static void vblk_flush_bounce(struct vblk* b, uint32_t bytes){
+    for(uint32_t done = 0; done < bytes; done += 4096){
+        virtio_dma_flush(b->bounce[done / 4096], bytes - done > 4096 ? 4096 : bytes - done);
     }
 }
 
@@ -140,6 +156,8 @@ static int vblk_io(struct disk* disk, uint64_t lba, int total, void* buf, bool w
         uint32_t bytes = (uint32_t)count * VBLK_SECTOR_SIZE;
         if(write){
             vblk_copy(b, ptr, bytes, true);
+        } else {
+            vblk_flush_bounce(b, bytes);
         }
         int res = vblk_request(b, write ? VIRTIO_BLK_T_OUT : VIRTIO_BLK_T_IN, lba, bytes);
         if(res < 0){

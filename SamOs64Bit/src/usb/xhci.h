@@ -132,12 +132,18 @@ struct usb_endpoint {
     int                td_count;
     uint64_t           td_trb[XHCI_TD_MAX_PAGES + 2];
     uint32_t           td_len[XHCI_TD_MAX_PAGES + 2];
+    // An IN transfer's pages, dropped from the caches when done.
+    void*              in_pages[XHCI_TD_MAX_PAGES];
+    volatile uint32_t  in_bytes;
 };
 
 enum { XHCI_IRQ_NONE, XHCI_IRQ_MSIX, XHCI_IRQ_MSI, XHCI_IRQ_INTX };
 
 struct xhci {
-    struct pci_device*  pci;
+    struct pci_device*  pci;            // NULL: a platform xHCI, below
+    uint64_t            mmio_phys, mmio_size;
+    uint32_t            mmio_gsi;
+    uint16_t            mmio_inti;
     volatile uint8_t*   cap;
     volatile uint8_t*   op;
     volatile uint8_t*   rt;

@@ -17,8 +17,11 @@
 #include "cpu/percpu.h"
 #include "acpi/acpi.h"
 #include "arch/riscv64/uart16550.h"
+#include "boot/cmdline.h"
+#include "disk/drivers/dw_mmc.h"
 #include "disk/drivers/ramdisk.h"
 #include "firmware/fdt.h"
+#include "firmware/fdt_dev.h"
 #include "firmware/ramfb.h"
 #include "io/pci_fdt.h"
 #include "graphics/graphics.h"
@@ -30,6 +33,7 @@
 #include "memory/memory.h"
 #include "string/string.h"
 #include "status.h"
+#include "usb/usb.h"
 
 // The ramfb mode.
 #define RAMFB_WIDTH     1024
@@ -389,6 +393,7 @@ static int ramfb_init(const struct fdt* f)
     int res = -ENOMEM;
     if (fw_cfg && frames && dma) {
         memset(frames, 0, size);      // in the direct map; black before QEMU shows it
+        arch_dma_clean(frames, size);
         res = ramfb_setup(fw_cfg, dma, paging_kernel_virt_to_phys(dma), paging_kernel_virt_to_phys(frames),
                           RAMFB_WIDTH, RAMFB_HEIGHT);
     }
@@ -413,6 +418,78 @@ static int ramfb_init(const struct fdt* f)
     return 0;
 }
 
+// The plan's second step for the JH7110's screen: a
+// "simple-framebuffer" U-Boot left running (it adds one to the tree it
+// hands over when it drove the display), 32 bits a pixel, B,G,R,X in
+// memory. mmu.c reserved its memory. 0, or < 0 with nothing set.
+static int simplefb_init(const struct fdt* f)
+{
+    struct fdt_simplefb fb;
+    if (fdt_find_simplefb(f, &fb) != 0) {
+        return -ENOENT;
+    }
+    if (!fb.bpp) {
+        console_printf("simplefb: %ux%u %s at 0x%lx not drawable, no screen\n", fb.width, fb.height,
+                       fb.format ? fb.format : "(no format)", fb.base);
+        return -EINVARG;
+    }
+    struct samos_boot_info* bi = samos_boot_info_ptr;
+    bi->fb_base   = fb.base;
+    bi->fb_size   = fb.size;
+    bi->fb_width  = fb.width;
+    bi->fb_height = fb.height;
+    bi->fb_pitch  = fb.stride / 4;
+    bi->fb_format = SAMOS_FB_FORMAT_BGRX;
+    default_graphics_info.framebuffer = (void*)bi->fb_base;
+    default_graphics_info.horizontal_resolution = fb.width;
+    default_graphics_info.vertical_resolution = fb.height;
+    default_graphics_info.pixels_per_scanline = fb.stride / 4;
+    console_printf("simplefb: %ux%u %s, stride %u, at 0x%lx\n", fb.width, fb.height, fb.format, fb.stride, fb.base);
+    return 0;
+}
+
+// The DesignWare MMC controllers (the JH7110's SD and eMMC) for
+// disk/drivers/dw_mmc.c. Their clock is U-Boot's: samos.mmc_ciu_hz=N
+// names it when the tree does not.
+static void mmc_from_fdt(const struct fdt* f)
+{
+    struct fdt_mmc m[2];
+    int n = fdt_find_dw_mmc(f, m, 2);
+    const char* hz = boot_cmdline_value("samos.mmc_ciu_hz");
+    uint32_t ciu = 0;
+    for (; hz && *hz >= '0' && *hz <= '9'; hz++) {
+        ciu = ciu * 10 + (uint32_t)(*hz - '0');
+    }
+    for (int i = 0; i < n && i < 2; i++) {
+        struct dw_mmc_params p = {
+            .phys = m[i].base, .size = m[i].size, .fifo_depth = m[i].fifo_depth,
+            .bus_width = m[i].bus_width, .ciu_hz = ciu ? ciu : m[i].ciu_hz, .max_hz = m[i].max_hz,
+            .non_removable = m[i].non_removable, .no_sd = m[i].no_sd, .no_mmc = m[i].no_mmc,
+        };
+        console_printf("dw-mmc: %s at 0x%lx, %u-bit bus%s\n", fdt_node_name(f, m[i].node), m[i].base,
+                       m[i].bus_width, m[i].non_removable ? ", non-removable" : "");
+        dw_mmc_attach(&p);
+    }
+}
+
+// XHCI hosts without PCI for usb/xhci.c: "generic-xhci", or the
+// JH7110's Cadence USB3 core when the board puts it in host mode (the
+// VisionFive 2's tree makes it a peripheral: its USB-A ports are on a
+// PCIe controller).
+static void xhci_from_fdt(const struct fdt* f)
+{
+    struct fdt_xhci x[2];
+    const char* skipped = 0;
+    int n = fdt_find_xhci(f, x, 2, &skipped);
+    for (int i = 0; i < n && i < 2; i++) {
+        console_printf("xhci: %s at 0x%lx, plic irq %u\n", fdt_node_name(f, x[i].node), x[i].base, x[i].irq);
+        usb_xhci_add_mmio(x[i].base, x[i].size, x[i].irq, ACPI_INTI_TRIGGER_LEVEL | ACPI_INTI_POLARITY_HIGH);
+    }
+    if (skipped) {
+        console_printf("xhci: %s, not a host\n", skipped);
+    }
+}
+
 // The device tree is parsed already (riscv64_main); what the shared
 // kernel needs from it before the disks is the initrd, its RAM disk.
 // And the virtio-mmio slots (the drivers probe them later), and
@@ -426,6 +503,9 @@ void arch_firmware_init(void)
         console_printf("initrd: 0x%lx, %lu KiB\n", base, size >> 10);
         ramdisk_attach(base, size);
     }
+    riscv64_dma_init(f);
+    mmc_from_fdt(f);
+    xhci_from_fdt(f);
     pci_fdt_host_init(f, pci_intx_source);
     // riscv64 virt plugs the first -device into the highest slot, as
     // arm virt does (virtio_mmio_fdt.h).
@@ -434,7 +514,7 @@ void arch_firmware_init(void)
     int res = ramfb_init(f);
     if (res == 0) {
         console_printf("ramfb: %ux%u at 0x%lx\n", RAMFB_WIDTH, RAMFB_HEIGHT, samos_boot_info_ptr->fb_base);
-    } else {
+    } else if (simplefb_init(f) != 0) {
         console_printf("ramfb: none (%d), no screen\n", res);
     }
 }

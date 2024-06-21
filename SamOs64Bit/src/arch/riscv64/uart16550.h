@@ -7,7 +7,9 @@
 #include <stdint.h>
 
 // `reg_shift`: log2 of the register stride (0 on QEMU virt).
-void uart16550_init(uintptr_t base, uint32_t reg_shift);
+// `io_width`: 4 for 32-bit register accesses (the JH7110's
+// DesignWare UART, reg-io-width 4), else bytes.
+void uart16550_init(uintptr_t base, uint32_t reg_shift, uint32_t io_width);
 void uart16550_putc(char c);
 // Receive by interrupt: raise the UART's line when a byte
 // arrives (ERBFI, and OUT2, which gates the line on PC-style boards).

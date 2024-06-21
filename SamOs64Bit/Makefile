@@ -52,7 +52,7 @@ SHARED_OBJS = kernel.o kernel_selftest.o string/string.o \
     lib/vector/vector.o lib/spinlock/spinlock.o cpu/smp.o cpu/smp_selftest.o \
     virtio/virtio.o virtio/virtio_pci.o virtio/virtio_mmio.o virtio/virtio_bus.o disk/drivers/virtio_blk.o \
     keyboard/virtio_input.o keyboard/serial_input.o disk/drivers/ramdisk.o \
-    usb/xhci.o usb/usb_hid.o disk/drivers/usb_msc.o disk/drivers/sdhci.o
+    usb/xhci.o usb/usb_hid.o disk/drivers/usb_msc.o disk/drivers/sdhci.o disk/drivers/dw_mmc.o
 
 # Freestanding, warnings are errors, no unused-parameter noise.
 COMMON_FLAGS = -g -ffreestanding -fno-builtin -nostdlib -nostartfiles -nodefaultlibs \
@@ -197,7 +197,8 @@ PORT_OBJS = arch/riscv64/boot.S.o arch/riscv64/main.o arch/riscv64/sbi.o \
     arch/riscv64/timer.o arch/riscv64/plic.o arch/riscv64/kthread.o \
     arch/riscv64/mmu.o arch/riscv64/paging.o arch/riscv64/arch.o arch/riscv64/fpu.S.o \
     arch/riscv64/uaccess.o arch/riscv64/uaccess.S.o arch/riscv64/mmu_test.o firmware/fdt.o \
-    virtio/virtio_mmio_fdt.o firmware/ramfb.o arch/riscv64/smp.o io/pci_fdt.o arch/riscv64/aia.o
+    virtio/virtio_mmio_fdt.o firmware/ramfb.o arch/riscv64/smp.o io/pci_fdt.o arch/riscv64/aia.o \
+    firmware/fdt_dev.o arch/riscv64/dma.o
 # The kernel is the shared one (kernel_main): every shared
 # object is linked, except task/uaccess.o, which uaccess.c replaces
 # (SUM and the fixup table).

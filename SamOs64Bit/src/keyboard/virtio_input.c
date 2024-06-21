@@ -146,6 +146,9 @@ static void vinput_service(void){
         bool any = false;
         while(virtq_pop_used(&v->q, &head, NULL)){
             uint64_t phys = v->q.desc[head].addr;
+            // The event is the device's (the CPU never writes one).
+            virtio_dma_inval(&v->events[(phys - v->events_phys) / sizeof(struct virtio_input_event)],
+                             sizeof(struct virtio_input_event));
             struct virtio_input_event e = v->events[(phys - v->events_phys) / sizeof(e)];
             if(e.type == EV_KEY){
                 vinput_key(e.code, e.value);

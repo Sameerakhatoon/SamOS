@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# e2e/209-sdhci-pci.sh - the SD card driver of the Raspberry Pi
+# e2e/210-sdhci-pci.sh - the SD card driver of the Raspberry Pi
 # (disk/drivers/sdhci.c) on another host: QEMU's sdhci-pci (PCI class
 # 08/05, BAR 0 assigned by the firmware) with an SD card holding a
 # FAT32 volume (64 MiB: a byte-addressed SDSC card). The card is set
@@ -38,4 +38,4 @@ e2e_run_qemu 180 sd_session
 expect_serial '^on the sd card$' "write then cat on the SD card"
 [ "$(MTOOLS_SKIP_CHECK=1 mtype -i "$sd" ::/SD.TXT 2> /dev/null)" = "on the sd card" ] ||
     e2e_fail "host: mtools does not read SD.TXT"
-echo "PASS: e2e/209 SD card on sdhci-pci: set up, FAT32 mounted, a file written and read back"
+echo "PASS: e2e/210 SD card on sdhci-pci: set up, FAT32 mounted, a file written and read back"

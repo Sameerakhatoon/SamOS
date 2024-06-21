@@ -35,6 +35,7 @@
 #include "bootmarker.h"
 #include "cpu/smp.h"
 #include "firmware/fdt.h"
+#include "firmware/fdt_dev.h"
 #include "io/serial.h"
 #include "kernel.h"
 #include "memory/heap/kheap.h"
@@ -99,27 +100,6 @@ void riscv64_hart_main(uint64_t hartid, struct hart_ticket* t)
 // ------------------------------------------------------------------
 // Bring-up on the boot hart.
 // ------------------------------------------------------------------
-
-// What the kernel needs of a hart beyond the tree's word for it: an
-// MMU (mmu-type, which an M-mode-only monitor core such as the
-// JH7110's S7 lacks) and the A extension, when riscv,isa says
-// ("rv64ima..."; newer trees may only have riscv,isa-extensions).
-static const char* hart_unfit(const struct fdt* f, int node)
-{
-    if (!fdt_getprop_string(f, node, "mmu-type")) {
-        return "no mmu-type";
-    }
-    const char* isa = fdt_getprop_string(f, node, "riscv,isa");
-    if (!isa || strlen(isa) < 4) {
-        return 0;
-    }
-    for (const char* s = isa + 4; *s && *s != '_'; s++) {
-        if (*s == 'a') {
-            return 0;
-        }
-    }
-    return "no A extension";
-}
 
 static void say_hart(uint64_t hartid, const char* what, long err)
 {
@@ -210,14 +190,14 @@ int arch_start_cpus(void)
     int node_cpus = fdt_path_offset(f, "/cpus");
     for (int n = node_cpus < 0 ? node_cpus : fdt_first_child(f, node_cpus); n >= 0; n = fdt_next_sibling(f, n)) {
         const char* type = fdt_getprop_string(f, n, "device_type");
-        const char* status = fdt_getprop_string(f, n, "status");
         struct fdt_region reg;
         if (!type || strncmp(type, "cpu", 4) != 0 || fdt_reg(f, n, 0, &reg) != 0
             || reg.base == cpus[0].arch.hart_id) {
             continue;
         }
-        const char* unfit = status && strncmp(status, "okay", 5) != 0 && strncmp(status, "ok", 3) != 0
-                          ? "disabled in the device tree" : hart_unfit(f, n);
+        // fdt_dev.c's rules (status, an MMU, the A extension);
+        // on the JH7110 they leave out hart 0, the S7 monitor core.
+        const char* unfit = fdt_hart_unfit(f, n);
         if (!unfit && next == SAMOS_MAX_CPUS) {
             unfit = "SAMOS_MAX_CPUS reached";
         }

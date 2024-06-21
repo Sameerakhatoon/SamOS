@@ -211,4 +211,11 @@ static inline void arch_memcpy(void* d, const void* s, size_t n){
 extern uint64_t aarch64_boot_markers[];
 #define ARCH_BOOT_MARKER_SLOTS    ((volatile uint64_t*)aarch64_boot_markers)
 
+// DMA cache maintenance (arch.h): coherent on QEMU's virt. A
+// board whose devices do not snoop fills these in with dc cvac,
+// dc ivac and dc civac.
+static inline void arch_dma_clean(const volatile void* va, size_t size){ }
+static inline void arch_dma_inval(const volatile void* va, size_t size){ }
+static inline void arch_dma_flush(const volatile void* va, size_t size){ }
+
 #endif

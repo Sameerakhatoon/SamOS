@@ -48,6 +48,15 @@
 //   PAGING_IS_WRITEABLE, PAGING_ACCESS_FROM_ALL, PAGING_NO_EXECUTE,
 //   PAGING_CACHE_DISABLED, phys_to_virt, PAGING_PHYS_TO_VIRT,
 //   PAGING_IS_DIRECT_MAP
+//   DMA cache maintenance for memory a device reads or writes
+//   (no-ops where devices snoop the CPU caches):
+//     arch_dma_clean(va, size)  write dirty lines back: before the
+//                               device reads what the CPU wrote
+//     arch_dma_inval(va, size)  drop the lines: before the CPU reads
+//                               what the device wrote (whole lines go,
+//                               so the CPU must not have written them)
+//     arch_dma_flush(va, size)  both, for memory written on both sides
+//                               or a buffer before a device fills it
 
 struct cpu;
 struct samos_boot_info;

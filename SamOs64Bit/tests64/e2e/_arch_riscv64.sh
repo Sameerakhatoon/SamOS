@@ -47,7 +47,10 @@ _e2e_riscv64_cmdline() {
         | tr '\r\n\t' '   ' | tr -cd ' -~' | sed 's/ *$//'
 }
 
-# E2E_RISCV64_CPU=rv64,sv48=off runs the suite in Sv39.
+# E2E_RISCV64_CPU=rv64,sv48=off runs the suite in Sv39. The VisionFive 2 port:
+# E2E_RISCV64_APPEND adds words to the command line, e.g.
+# E2E_RISCV64_CPU=rv64,zicbom=true E2E_RISCV64_APPEND=samos.dma_noncoherent
+# runs it with every DMA buffer maintained by cbo.* (arch/riscv64/dma.c).
 e2e_arch_qemu_args() {
     local disk=virtio-blk-device kbd=${E2E_RISCV64_KBD:-virtio-keyboard-device}
     [ "${E2E_BOOT_BUS:-}" = virtio ] && disk=virtio-blk-pci
@@ -56,7 +59,7 @@ e2e_arch_qemu_args() {
         -cpu "${E2E_RISCV64_CPU:-rv64}"
         -bios default
         -kernel "$E2E_RISCV64_KERNEL"
-        -append "$(_e2e_riscv64_cmdline)"
+        -append "$(_e2e_riscv64_cmdline)${E2E_RISCV64_APPEND:+ $E2E_RISCV64_APPEND}"
         -global virtio-mmio.force-legacy=false
         -drive "file=$E2E_IMAGE,format=raw,if=none,id=os,snapshot=on"
         -device "$disk,drive=os"

@@ -88,6 +88,10 @@ struct usb_device {
 // plugged in. Idempotent; the first of the disk mount and keyboard_init
 // does the work.
 void usb_init(void);
+// An xHCI without PCI (device tree "generic-xhci", a Cadence
+// USB3 core in host mode): its registers and its interrupt line (a
+// GSI with ACPI MPS INTI flags; 0 polls). Before usb_init.
+void usb_xhci_add_mmio(uint64_t phys, uint64_t size, uint32_t gsi, uint16_t inti);
 
 // Control transfer on endpoint 0 (len <= 4096). Bytes moved, or < 0.
 int usb_control(struct usb_device* dev, uint8_t type, uint8_t req, uint16_t value,

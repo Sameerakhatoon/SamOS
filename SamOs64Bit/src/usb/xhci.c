@@ -64,6 +64,11 @@ static uint64_t dma_phys(void* p){ return paging_kernel_virt_to_phys(p); }
 // on its no-memory path instead of the controller getting a truncated
 // address. kpage_zalloc has no below-4-GiB request; the heap hands out
 // low frames first, so this only bites once those are gone.
+// For controllers that do not snoop the caches (arch.h's
+// arch_dma_*, no-ops elsewhere) the zeroes are written back at once,
+// so no dirty line of them can later land on what the controller
+// wrote; every structure below is cleaned after the CPU writes it and
+// dropped before the CPU reads what the controller wrote.
 static void* hc_dma_page(struct xhci* hc){
     void* p = kpage_zalloc(4096);
     if(p && hc->dma_limit && dma_phys(p) + 4096 > hc->dma_limit){
@@ -73,6 +78,9 @@ static void* hc_dma_page(struct xhci* hc){
             hc->dma_refused = true;
             serial_write("xhci: a DMA page above what the 32-bit controller reaches, refused\n");
         }
+    }
+    if(p){
+        arch_dma_clean(p, 4096);
     }
     return p;
 }
@@ -125,12 +133,14 @@ static uint64_t ring_push(struct xhci_ring* r, uint64_t param, uint32_t status, 
     t->status = status;
     smp_wmb();
     t->control = (control & ~TRB_CYCLE) | r->cycle;
+    arch_dma_clean(t, sizeof(*t));
     if(++r->enq == XHCI_RING_TRBS - 1){
         volatile struct xhci_trb* link = &r->trb[r->enq];
         link->param  = r->phys;
         link->status = 0;
         smp_wmb();
         link->control = TRB_TYPE(TRB_LINK) | TRB_TC | (control & TRB_CH) | r->cycle;
+        arch_dma_clean(link, sizeof(*link));
         r->enq = 0;
         r->cycle ^= 1;
     }
@@ -205,6 +215,7 @@ static void xhci_drain_locked(struct xhci* hc){
     bool any = false;
     for(int guard = 0; guard < XHCI_RING_TRBS * 4; guard++){
         volatile struct xhci_trb* e = &hc->ev[hc->ev_deq];
+        arch_dma_inval(e, sizeof(*e));
         uint32_t control = e->control;
         if((control & TRB_CYCLE) != hc->ev_cycle){
             break;
@@ -366,7 +377,8 @@ static void xhci_setup_irq(struct xhci* hc){
     }
     hc->irq_slot = xhci_hc_count - 1;
     INTERRUPT_CALLBACK_FUNCTION handler = xhci_irq_handler[hc->irq_slot];
-    int msi = boot_cmdline_has("samos.usb_intx") ? -ENOENT : xhci_setup_msi(hc, handler);
+    // A platform (mmio) controller has no MSI capability to read.
+    int msi = !hc->pci || boot_cmdline_has("samos.usb_intx") ? -ENOENT : xhci_setup_msi(hc, handler);
     if(msi >= 0){
         q->enabled = true;
         serial_write(hc->irq_kind == XHCI_IRQ_MSIX ? "xhci: interrupts by MSI-X" : "xhci: interrupts by MSI");
@@ -375,12 +387,14 @@ static void xhci_setup_irq(struct xhci* hc){
         serial_write("\n");
         return;
     }
-    uint16_t inti = 0;
-    int gsi = pci_intx_gsi(hc->pci, &inti);
+    uint16_t inti = hc->mmio_inti;
+    int gsi = hc->pci ? pci_intx_gsi(hc->pci, &inti) : hc->mmio_gsi ? (int)hc->mmio_gsi : -1;
     if(gsi < 0){
         return;
     }
-    pci_intx_enable(hc->pci);
+    if(hc->pci){
+        pci_intx_enable(hc->pci);
+    }
     int line = arch_irq_attach_gsi((uint32_t)gsi, inti, XHCI_IRQ_SLOT_BASE + hc->irq_slot, false, handler);
     if(line < 0){
         return;
@@ -474,6 +488,14 @@ bool usb_transfer_done(struct usb_endpoint* ep){
     if(!ep->done){
         xhci_poll(ep->dev->hc);
     }
+    // An IN transfer's pages are the controller's until here.
+    if(ep->done && ep->in_bytes){
+        smp_rmb();
+        for(uint32_t done = 0; done < ep->in_bytes; done += 4096){
+            arch_dma_inval(ep->in_pages[done / 4096], ep->in_bytes - done > 4096 ? 4096 : ep->in_bytes - done);
+        }
+        ep->in_bytes = 0;
+    }
     return ep->done;
 }
 
@@ -512,8 +534,21 @@ int usb_transfer_start(struct usb_endpoint* ep, void** pages, uint32_t len){
         return -EIO;
     }
     struct xhci* hc = d->hc;
+    // OUT data to memory; IN pages flushed now, dropped when the
+    // transfer is done (usb_transfer_done).
+    bool in = ep->addr & USB_EP_IN;
+    for(uint32_t done = 0; done < len; done += 4096){
+        uint32_t chunk = len - done > 4096 ? 4096 : len - done;
+        if(in){
+            arch_dma_flush(pages[done / 4096], chunk);
+            ep->in_pages[done / 4096] = pages[done / 4096];
+        } else {
+            arch_dma_clean(pages[done / 4096], chunk);
+        }
+    }
     spin_lock(&hc->lock);
     ep_begin(ep);
+    ep->in_bytes = in ? len : 0;
     uint32_t done = 0;
     do {
         uint32_t chunk = len - done > 4096 ? 4096 : len - done;
@@ -557,6 +592,9 @@ int usb_control(struct usb_device* d, uint8_t type, uint8_t req, uint16_t value,
     bool in = type & USB_RT_IN;
     if(!in && len){
         memcpy(d->buf_page, data, len);
+        arch_dma_clean(d->buf_page, len);
+    } else if(len){
+        arch_dma_flush(d->buf_page, len);
     }
     uint64_t setup = type | (uint32_t)req << 8 | (uint32_t)value << 16 |
                      (uint64_t)index << 32 | (uint64_t)len << 48;
@@ -577,6 +615,7 @@ int usb_control(struct usb_device* d, uint8_t type, uint8_t req, uint16_t value,
         ep_reset(ep);
     }
     if(res > 0 && in){
+        arch_dma_inval(d->buf_page, res);
         memcpy(data, d->buf_page, res);
     }
     return res;
@@ -635,6 +674,7 @@ struct usb_endpoint* usb_endpoint_open(struct usb_device* d, const struct usb_en
     if(dci > d->max_dci){
         d->max_dci = dci;
     }
+    arch_dma_inval(dev_ctx(d, 0), d->hc->ctx_size);
     memcpy(in_ctx(d, 0), dev_ctx(d, 0), d->hc->ctx_size);
     uint32_t* slot = (uint32_t*)in_ctx(d, 0);
     slot[0] = (slot[0] & ~(0x1Fu << 27)) | (uint32_t)d->max_dci << 27;
@@ -646,6 +686,7 @@ struct usb_endpoint* usb_endpoint_open(struct usb_device* d, const struct usb_en
     e[3] = (uint32_t)(ep->ring.phys >> 32);
     e[4] = (xfer == USB_EP_INTERRUPT ? ep->mps : 512u) | esit << 16;
     d->ep[dci] = ep;
+    arch_dma_clean(d->in_page, 4096);
     if(xhci_command(d->hc, dma_phys(d->in_page),
                     TRB_TYPE(TRB_CONFIGURE_ENDPOINT) | (uint32_t)d->slot << 24, NULL) != XHCI_CC_SUCCESS){
         d->ep[dci] = NULL;
@@ -725,6 +766,7 @@ static int usb_address(struct xhci* hc, struct usb_device* d){
     d->ep[1] = ep0;
     d->max_dci = 1;
     hc->dcbaa[slot] = dma_phys(d->ctx_page);
+    arch_dma_clean(&hc->dcbaa[slot], 8);
     hc->slot_dev[slot] = d;
     // Packet size before the descriptor says: 8 at low and full speed
     // (full speed corrected below), 64 at high, 512 at super speed.
@@ -740,6 +782,7 @@ static int usb_address(struct xhci* hc, struct usb_device* d){
     e[2] = (uint32_t)ep0->ring.phys | 1;
     e[3] = (uint32_t)(ep0->ring.phys >> 32);
     e[4] = 8;
+    arch_dma_clean(d->in_page, 4096);
     if(xhci_command(hc, dma_phys(d->in_page), TRB_TYPE(TRB_ADDRESS_DEVICE) | (uint32_t)slot << 24, NULL)
        != XHCI_CC_SUCCESS){
         return -EIO;
@@ -753,6 +796,7 @@ static int usb_address(struct xhci* hc, struct usb_device* d){
         icc[0] = 0;
         icc[1] = 2;                                 // Evaluate Context: EP0
         e[1] = (e[1] & 0xFFFF) | (uint32_t)mps << 16;
+        arch_dma_clean(d->in_page, 4096);
         if(xhci_command(hc, dma_phys(d->in_page), TRB_TYPE(TRB_EVALUATE_CONTEXT) | (uint32_t)slot << 24, NULL)
            != XHCI_CC_SUCCESS){
             return -EIO;
@@ -803,6 +847,7 @@ static void usb_release(struct xhci* hc, struct usb_device* d){
     if(d->slot){
         xhci_command(hc, 0, TRB_TYPE(TRB_DISABLE_SLOT) | (uint32_t)d->slot << 24, NULL);
         hc->dcbaa[d->slot] = 0;
+        arch_dma_clean(&hc->dcbaa[d->slot], 8);
         hc->slot_dev[d->slot] = NULL;
     }
     hc->port_dev[d->port] = NULL;
@@ -976,16 +1021,24 @@ static void xhci_intel_port_switch(struct pci_device* dev){
 
 static int xhci_start(struct xhci* hc){
     struct pci_device* dev = hc->pci;
-    uint64_t base = dev->bars[0].addr & ~0xFULL;
-    uint64_t size = dev->bars[0].size ? dev->bars[0].size : 0x10000;
-    if(dev->bars[0].type != PCI_DEVICE_IO_MEMORY || !base){
+    uint64_t base = hc->mmio_phys, size = hc->mmio_size ? hc->mmio_size : 0x10000;
+    if(dev){
+        base = dev->bars[0].addr & ~0xFULL;
+        size = dev->bars[0].size ? dev->bars[0].size : 0x10000;
+        if(dev->bars[0].type != PCI_DEVICE_IO_MEMORY){
+            return -EIO;
+        }
+    }
+    if(!base){
         return -EIO;
     }
     hc->cap = paging_map_mmio(base, size, PAGING_CACHE_DISABLED);
     if(!hc->cap){
         return -EIO;
     }
-    pci_enable_bus_master(dev);
+    if(dev){
+        pci_enable_bus_master(dev);
+    }
     uint32_t hcs1 = mmio_read32(hc->cap + XHCI_CAP_HCSPARAMS1);
     uint32_t hcs2 = mmio_read32(hc->cap + XHCI_CAP_HCSPARAMS2);
     uint32_t hcc1 = mmio_read32(hc->cap + XHCI_CAP_HCCPARAMS1);
@@ -1058,6 +1111,8 @@ static int xhci_start(struct xhci* hc){
             array[i] = dma_phys(p);
         }
         hc->dcbaa[0] = dma_phys(array);
+        arch_dma_clean(array, 4096);
+        arch_dma_clean(hc->dcbaa, 8);
     }
     op_write(hc, XHCI_OP_CONFIG, hc->max_slots);
     write64(hc->op + XHCI_OP_DCBAAP, dma_phys(dcbaa));
@@ -1070,6 +1125,7 @@ static int xhci_start(struct xhci* hc){
     uint64_t* seg = erst;
     seg[0] = hc->ev_phys;
     seg[1] = XHCI_RING_TRBS;
+    arch_dma_clean(seg, 16);
     mmio_write32(hc->rt + XHCI_IR0_ERSTSZ, 1);
     write64(hc->rt + XHCI_IR0_ERDP, hc->ev_phys);
     write64(hc->rt + XHCI_IR0_ERSTBA, dma_phys(erst));
@@ -1088,15 +1144,22 @@ static int xhci_start(struct xhci* hc){
     }
 
     serial_write("xhci: ");
-    serial_write(itoa(dev->addr.bus));
-    serial_write(":");
-    serial_write(itoa(dev->addr.slot));
-    serial_write(".");
-    serial_write(itoa(dev->addr.func));
-    serial_write(" ");
-    write_hex4(dev->vendor);
-    serial_write(":");
-    write_hex4(dev->device_id);
+    if(dev){
+        serial_write(itoa(dev->addr.bus));
+        serial_write(":");
+        serial_write(itoa(dev->addr.slot));
+        serial_write(".");
+        serial_write(itoa(dev->addr.func));
+        serial_write(" ");
+        write_hex4(dev->vendor);
+        serial_write(":");
+        write_hex4(dev->device_id);
+    } else {
+        serial_write("mmio 0x");
+        for(int i = 12; i >= 0; i -= 4){
+            write_hex4((uint16_t)(base >> (4 * i)));
+        }
+    }
     serial_write(", ");
     serial_write(itoa(hc->max_slots));
     serial_write(" slots, ");
@@ -1111,7 +1174,9 @@ static int xhci_start(struct xhci* hc){
     serial_write(" scratchpads, running");
     serial_write(hc->irq.enabled ? "\n" : ", polled\n");
 
-    xhci_intel_port_switch(dev);
+    if(dev){
+        xhci_intel_port_switch(dev);
+    }
     // Port power, where the controller leaves it to software (PPC).
     bool powered = false;
     for(uint8_t p = 1; p <= hc->max_ports; p++){
@@ -1158,6 +1223,42 @@ static void usb_tick(void){
     }
 }
 
+// Platform controllers (usb.h), started after the PCI ones.
+static struct xhci xhci_mmio[XHCI_MAX_HCS];
+static int xhci_mmio_count;
+
+void usb_xhci_add_mmio(uint64_t phys, uint64_t size, uint32_t gsi, uint16_t inti){
+    if(xhci_mmio_count < XHCI_MAX_HCS){
+        struct xhci* m = &xhci_mmio[xhci_mmio_count++];
+        m->mmio_phys = phys;
+        m->mmio_size = size;
+        m->mmio_gsi  = gsi;
+        m->mmio_inti = inti;
+    }
+}
+
+// `pci` or the platform controller `m`.
+static void xhci_add(struct pci_device* pci, const struct xhci* m){
+    struct xhci* hc = kzalloc(sizeof(*hc));
+    if(!hc){
+        return;
+    }
+    if(m){
+        *hc = *m;
+    }
+    hc->pci = pci;
+    hc->irq_slot = -1;
+    spin_lock_init(&hc->lock, "usb", LOCK_LEVEL_USB, false);
+    spin_lock_init(&hc->cmd_lock, "usb_cmd", LOCK_LEVEL_USB_CMD, false);
+    xhci_hcs[xhci_hc_count++] = hc;
+    if(xhci_start(hc) < 0){
+        serial_write("xhci: controller not started\n");
+        xhci_hc_count--;
+        return;                                     // its pages leak: rare
+    }
+    xhci_ports_scan(hc, true);
+}
+
 void usb_init(void){
     static bool started;
     if(started){
@@ -1165,6 +1266,10 @@ void usb_init(void){
     }
     started = true;
     usb_bsp = this_cpu();
+    // Test hook: samos.usb_as_mmio drives each PCI xHCI as a
+    // platform one (BAR 0 and its INTx GSI), the path a device-tree
+    // xHCI takes, which no QEMU machine of the ports has.
+    bool as_mmio = boot_cmdline_has("samos.usb_as_mmio");
     size_t total = pci_device_count();
     for(size_t i = 0; i < total && xhci_hc_count < XHCI_MAX_HCS; i++){
         struct pci_device* dev = NULL;
@@ -1172,21 +1277,18 @@ void usb_init(void){
            pci_cfg_read_byte(dev->addr.bus, dev->addr.slot, dev->addr.func, PCI_HEADER_PROG_IF_OFFSET) != 0x30){
             continue;
         }
-        struct xhci* hc = kzalloc(sizeof(*hc));
-        if(!hc){
-            break;
+        if(as_mmio){
+            uint16_t inti = 0;
+            int gsi = pci_intx_gsi(dev, &inti);
+            pci_enable_bus_master(dev);
+            pci_intx_enable(dev);
+            usb_xhci_add_mmio(dev->bars[0].addr & ~0xFULL, dev->bars[0].size, gsi < 0 ? 0 : (uint32_t)gsi, inti);
+            continue;
         }
-        hc->pci = dev;
-        hc->irq_slot = -1;
-        spin_lock_init(&hc->lock, "usb", LOCK_LEVEL_USB, false);
-        spin_lock_init(&hc->cmd_lock, "usb_cmd", LOCK_LEVEL_USB_CMD, false);
-        xhci_hcs[xhci_hc_count++] = hc;
-        if(xhci_start(hc) < 0){
-            serial_write("xhci: controller not started\n");
-            xhci_hc_count--;
-            continue;                               // its pages leak: rare
-        }
-        xhci_ports_scan(hc, true);
+        xhci_add(dev, NULL);
+    }
+    for(int i = 0; i < xhci_mmio_count && xhci_hc_count < XHCI_MAX_HCS; i++){
+        xhci_add(NULL, &xhci_mmio[i]);
     }
     if(xhci_hc_count){
         smp_input_register(usb_service);

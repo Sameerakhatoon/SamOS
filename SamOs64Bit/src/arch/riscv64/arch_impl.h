@@ -236,4 +236,33 @@ static inline void arch_memcpy(void* d, const void* s, size_t n){
 // half at all. The window's last page is never handed out.
 #define ARCH_SMP_TEST_VA          mmu_scratch_va()
 
+// ------------------------------------------------------------------
+// DMA cache maintenance (arch.h, dma.c): nothing to do unless
+// the device tree says dma-noncoherent (or samos.dma_noncoherent);
+// then Zicbom's cbo.* when the harts have it, else a SiFive cache
+// controller's Flush64 register.
+// ------------------------------------------------------------------
+
+enum { RISCV64_DMA_CLEAN, RISCV64_DMA_INVAL, RISCV64_DMA_FLUSH };
+extern int riscv64_dma_mode;            // 0: coherent
+void riscv64_dma_op(const volatile void* va, size_t size, int op);
+
+static inline void arch_dma_clean(const volatile void* va, size_t size){
+    if(riscv64_dma_mode){
+        riscv64_dma_op(va, size, RISCV64_DMA_CLEAN);
+    }
+}
+
+static inline void arch_dma_inval(const volatile void* va, size_t size){
+    if(riscv64_dma_mode){
+        riscv64_dma_op(va, size, RISCV64_DMA_INVAL);
+    }
+}
+
+static inline void arch_dma_flush(const volatile void* va, size_t size){
+    if(riscv64_dma_mode){
+        riscv64_dma_op(va, size, RISCV64_DMA_FLUSH);
+    }
+}
+
 #endif

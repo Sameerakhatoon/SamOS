@@ -58,6 +58,8 @@ SECTIONS
     __kernel_end = .;
     /* The shared kernel's name for it (memtest.c). */
     samos_kernel_end = .;
+    /* The Image header's image_size (boot.S), a number. */
+    __kernel_size = ABSOLUTE(__kernel_end - __kernel_start);
 
     /DISCARD/ : {
         *(.comment) *(.note .note.*) *(.eh_frame .eh_frame_hdr)

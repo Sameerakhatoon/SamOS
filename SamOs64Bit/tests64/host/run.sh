@@ -62,3 +62,21 @@ for cc in aarch64-linux-gnu-gcc riscv64-linux-gnu-gcc; do
     done
     echo "virtio: core and mmio transport build with $cc"
 done
+
+# The DesignWare MMC driver against a register model (QEMU has
+# no dw_mmc), and a FAT32 card image read back through it.
+mflags="-std=gnu99 -fno-builtin -Wall -Wextra -Werror -Wno-unused-parameter -DDW_MMC_HOST_TEST -I$root/src"
+gcc -O1 -g $mflags -fsanitize=address,undefined -fno-sanitize-recover=all -o "$out/dw_mmc_test" \
+    "$here/dw_mmc_test.c" "$root/src/disk/drivers/dw_mmc.c"
+mkfs.fat -F 32 -n SAMOS -C "$out/fat32.img" 65536 > /dev/null
+"$out/dw_mmc_test" "$out/fat32.img"
+
+# The board devices of a device tree (firmware/fdt_dev.c) on a
+# VisionFive 2 tree built by tests64/arch/dtb-jh7110.py, and the
+# riscv64 UART's 32-bit register accesses.
+python3 -I "$root/tests64/arch/dtb-jh7110.py" board "$out/vf2.dtb"
+python3 -I "$root/tests64/arch/dtb-jh7110.py" board "$out/vf2-host.dtb" --usb-host --s7-okay
+gcc -O1 -g -std=gnu99 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all \
+    -I"$root/src" -o "$out/board_test" "$here/board_test.c" "$root/src/firmware/fdt_dev.c" \
+    "$root/src/firmware/fdt.c" "$root/src/arch/riscv64/uart16550.c"
+"$out/board_test" "$out" "$here/fixtures"
