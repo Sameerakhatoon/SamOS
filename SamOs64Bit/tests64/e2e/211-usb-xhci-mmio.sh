@@ -7,7 +7,7 @@
 # that path (BAR 0, its INTx GSI). A keyboard, a mouse and a stick:
 # enumerated and bound, `ls 1:/` typed through the USB keyboard (PS/2
 # off) lists the stick, its transfers end at the interrupt.
-# e2e-requires: xhci (qemu-xhci on PCI, x86 machines and OVMF; on aarch64 virt nothing assigns PCI BARs and there is no MSI)
+# e2e-requires: x86 xhci (samos.usb_as_mmio through usb_cmdline and q35's INTx GSI; riscv64-jh7110.sh covers the ports' device tree side)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_usb_lib.sh"

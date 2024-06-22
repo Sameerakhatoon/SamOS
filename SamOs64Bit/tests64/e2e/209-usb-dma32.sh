@@ -9,7 +9,7 @@
 #   2. samos.usb_dma32=1, a 1 MiB limit no page meets: the controller
 #      is refused cleanly ("controller not started") and the kernel
 #      goes on to the shell, typed through PS/2.
-# e2e-requires: xhci (qemu-xhci on PCI, x86 machines and OVMF; on aarch64 virt nothing assigns PCI BARs and there is no MSI)
+# e2e-requires: x86 xhci (q35 with RAM above 4 GiB, samos.usb_dma32 through usb_cmdline, PS/2 for part 2: x86 only)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_usb_lib.sh"

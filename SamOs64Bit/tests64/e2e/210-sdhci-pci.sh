@@ -6,7 +6,7 @@
 # up (CMD0/8, ACMD41, CMD2/3/9/7, ACMD6), becomes a disk, its FAT32
 # mounts; the shell writes a file on it and reads it back, and mtools
 # reads it on the host.
-# e2e-requires: x86 (sdhci-pci needs BARs a firmware assigned; aarch64 virt under -kernel has none yet)
+# e2e-requires: x86 (the test boots -machine pc with OVMF; sdhci-pci on the ports, whose BARs the shared allocator now assigns, is not tried yet)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 
