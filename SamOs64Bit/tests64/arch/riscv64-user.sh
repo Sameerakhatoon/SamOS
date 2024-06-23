@@ -36,22 +36,27 @@ fails=0
 checks=0
 
 # boot <name> <append> <regex>...: QEMU with $cpu until every regex is
-# in the output, or 180 s pass (a failure guard only; the raw output
-# has \r\n, so a regex here ends without $); output in
-# $tmp/<mode>-<name>.log without \r.
+# in the output, or ARCH_TIMEOUT seconds pass (a failure guard only;
+# the raw output has \r\n, so a regex here ends without $); output in
+# $tmp/<mode>-<name>.log without \r. The guard was 1800 polls
+# and at host load ~48 the sched boot most likely overran it (B's last
+# line missing; 3 of 3 pass alone), as riscv64-mmu's boots did.
 boot() {
-    local log="$tmp/$mode-$1.log"
+    local log="$tmp/$mode-$1.log" name=$1
     qemu-system-riscv64 -machine virt -cpu "$cpu" -m 512M -nographic -bios default \
         -kernel "$kernel" -initrd "$initrd" -append "samos.test=1 $2" < /dev/null > "$log.raw" 2>&1 &
-    local pid=$! left=1800 done re
+    local pid=$! deadline=$((SECONDS + ${ARCH_TIMEOUT:-600})) done re
     shift 2
-    while [ $left -gt 0 ] && kill -0 $pid 2>/dev/null; do
+    while kill -0 $pid 2>/dev/null; do
         done=1
         for re in "$@"; do
             grep -aEq "$re" "$log.raw" 2>/dev/null || { done=0; break; }
         done
         [ $done -eq 1 ] && break
-        left=$((left - 1))
+        if [ $SECONDS -ge $deadline ]; then
+            echo "  ($mode $name: timed out after ${ARCH_TIMEOUT:-600}s)"
+            break
+        fi
         sleep 0.1
     done
     sleep 0.3

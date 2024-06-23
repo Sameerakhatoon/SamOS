@@ -39,20 +39,25 @@ fails=0
 checks=0
 
 # boot <name> <mem> <append>: QEMU with $cpu until it powers off (or
-# the kernel halts, or 60 s pass, a failure guard only); output in
-# $tmp/<name>.log without the \r of \r\n.
+# the kernel halts, or ARCH_TIMEOUT seconds pass, a failure guard only);
+# output in $tmp/<name>.log without the \r of \r\n. The guard
+# was 600 polls (about 60 s), and the 2 GiB boots (every frame written
+# and read back under TCG) overran it on a host at load ~46.
 boot() {
     local log="$tmp/$1.log"
     qemu-system-riscv64 -machine virt -cpu "$cpu" -m "$2" -nographic -bios default \
         -kernel "$kernel" -append "$3 samos.bringup" < /dev/null > "$log.raw" 2>&1 &
-    local pid=$! left=600
+    local pid=$! deadline=$((SECONDS + ${ARCH_TIMEOUT:-600}))
     powered_off=0
-    while [ $left -gt 0 ]; do
+    while :; do
         kill -0 $pid 2>/dev/null || { powered_off=1; break; }
-        if [ $left -gt 5 ] && grep -q 'riscv64: halted' "$log.raw" 2>/dev/null; then
-            left=5
+        if [ $SECONDS -ge $deadline ]; then
+            echo "  ($1: timed out after ${ARCH_TIMEOUT:-600}s)"
+            break
         fi
-        left=$((left - 1))
+        if [ $deadline -gt $((SECONDS + 1)) ] && grep -q 'riscv64: halted' "$log.raw" 2>/dev/null; then
+            deadline=$((SECONDS + 1))
+        fi
         sleep 0.1
     done
     kill $pid 2>/dev/null
