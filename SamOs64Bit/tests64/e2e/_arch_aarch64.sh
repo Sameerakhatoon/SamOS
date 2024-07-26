@@ -25,6 +25,10 @@
 #                              device (virtio-keyboard-pci), or none (a
 #                              USB keyboard types)
 #   E2E_AARCH64_MACHINE_OPTS   appended to -machine (",its=off": no ITS)
+#
+# E2E_NET=pci or mmio: a virtio-net-pci or virtio-net-device NIC
+# (e2e_net_args). Without it QEMU still adds its default NIC on virt (a
+# virtio-net-pci on the user network), which the kernel finds as eth0.
 
 E2E_OS_IMG="$E2E_ROOT/bin/aarch64/os.img"
 E2E_QEMU_BIN=qemu-system-aarch64
@@ -33,7 +37,7 @@ E2E_AARCH64_EFI="$E2E_ROOT/bin/aarch64/BOOTAA64.EFI"
 E2E_AARCH64_AAVMF=/usr/share/AAVMF
 # What QEMU virt has: PCIe and virtio-mmio; the aarch64 SMP work: several CPUs (PSCI
 # CPU_ON); S-PAR: NVMe, xHCI and virtio on PCI.
-E2E_ARCH_PROVIDES="aarch64 pci virtio-mmio smp nvme xhci virtio-pci"
+E2E_ARCH_PROVIDES="aarch64 pci virtio-mmio smp nvme xhci virtio-pci net"
 
 e2e_arch_build() {
     bash "$E2E_ROOT/arch-build.sh" aarch64 || return 1
@@ -81,6 +85,7 @@ e2e_arch_qemu_args() {
             -device ramfb
         )
         [ "$kbd" = none ] || E2E_QEMU_ARGS+=(-device "$kbd")
+        _e2e_aarch64_net
         return
     fi
     E2E_QEMU_ARGS+=(
@@ -94,6 +99,14 @@ e2e_arch_qemu_args() {
         -device ramfb
     )
     [ "$kbd" = none ] || E2E_QEMU_ARGS+=(-device "$kbd")
+    _e2e_aarch64_net
+}
+
+_e2e_aarch64_net() {
+    case "${E2E_NET:-}" in
+        pci)  e2e_net_args virtio-net-pci ;;
+        mmio) e2e_net_args virtio-net-device ;;
+    esac
 }
 
 # The kernel prints where its marker page is ("boot markers at pa").

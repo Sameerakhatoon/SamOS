@@ -173,3 +173,42 @@ void samos_terminal_readline(char* out, int max, bool output_while_typing){
     }
     out[i] = 0x00;
 }
+
+// Dotted quads. Host order: 10.0.2.2 is 0x0A000202.
+int samos_inet_pton(const char* str, unsigned int* ip){
+    unsigned int v = 0;
+    for(int i = 0; i < 4; i++){
+        unsigned int part = 0;
+        int digits = 0;
+        while(*str >= '0' && *str <= '9' && digits < 3){
+            part = part * 10 + (unsigned int)(*str++ - '0');
+            digits++;
+        }
+        if(!digits || part > 255 || (i < 3 && *str++ != '.')){
+            return -1;
+        }
+        v = v << 8 | part;
+    }
+    if(*str){
+        return -1;
+    }
+    *ip = v;
+    return 0;
+}
+
+void samos_inet_ntop(unsigned int ip, char* out){
+    for(int i = 3; i >= 0; i--){
+        unsigned int part = (ip >> (i * 8)) & 0xFF;
+        if(part >= 100){
+            *out++ = (char)('0' + part / 100);
+        }
+        if(part >= 10){
+            *out++ = (char)('0' + part / 10 % 10);
+        }
+        *out++ = (char)('0' + part % 10);
+        if(i){
+            *out++ = '.';
+        }
+    }
+    *out = 0;
+}

@@ -52,7 +52,7 @@ SHARED_OBJS = kernel.o kernel_selftest.o string/string.o \
     lib/vector/vector.o lib/spinlock/spinlock.o cpu/smp.o cpu/smp_selftest.o \
     virtio/virtio.o virtio/virtio_pci.o virtio/virtio_mmio.o virtio/virtio_bus.o disk/drivers/virtio_blk.o \
     keyboard/virtio_input.o keyboard/serial_input.o disk/drivers/ramdisk.o \
-    usb/xhci.o usb/usb_hid.o disk/drivers/usb_msc.o disk/drivers/sdhci.o disk/drivers/dw_mmc.o
+    usb/xhci.o usb/usb_hid.o disk/drivers/usb_msc.o disk/drivers/sdhci.o disk/drivers/dw_mmc.o     net/netdev.o net/virtio_net.o net/net.o isr80h/net.o     net/samtcpip/port.o net/samtcpip/log.o net/samtcpip/gluethread/glthread.o net/samtcpip/graph.o     net/samtcpip/net.o net/samtcpip/utils.o net/samtcpip/comm.o net/samtcpip/Layer2/layer2.o     net/samtcpip/Layer2/l2switch.o net/samtcpip/Layer3/layer3.o net/samtcpip/Layer3/icmp.o     net/samtcpip/Layer3/pmtu.o net/samtcpip/Layer5/ping.o
 
 # Freestanding, warnings are errors, no unused-parameter noise.
 COMMON_FLAGS = -g -ffreestanding -fno-builtin -nostdlib -nostartfiles -nodefaultlibs \

@@ -151,7 +151,7 @@ void smp_call(struct cpu* target, void (*fn)(void*), void* arg){
 }
 
 // virtio-input and USB each register one.
-#define SMP_INPUT_FNS 4
+#define SMP_INPUT_FNS 6        // The network is the fourth
 static void (*smp_input_fn[SMP_INPUT_FNS])(void);
 
 void smp_handle_ipi(enum arch_ipi ipi, struct trap_frame* frame){

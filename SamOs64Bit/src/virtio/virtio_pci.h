@@ -10,10 +10,11 @@
 //
 // Interrupts: PCI INTx (pci_intx_gsi). Each GSI a virtio function
 // arrives on is a "line" (virtio_bus.h).
-// MSI-X is not used: QEMU offers it, but INTx is what AHCI and PATA
-// already do, and the disk wait steers a line by its GSI. A
-// function on a bus other than 0, or a chipset pci_intx_gsi does not
-// know, gets no line and its driver polls.
+// MSI-X is not used by the disk drivers: QEMU offers it, but INTx is
+// what AHCI and PATA already do, and the disk wait steers a line by its
+// GSI. virtio-net takes it (virtio_pci_msix). A function on
+// a bus other than 0, or a chipset pci_intx_gsi does not know, gets no
+// line and its driver polls.
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -30,5 +31,14 @@ int virtio_pci_probe(uint32_t device_id, int (*attach)(struct virtio_dev* d, voi
 // is the first one there; `fn(ctx)` runs in the interrupt handler when
 // the device's ISR shows a used-ring update. NULL without a route.
 struct virtio_line* virtio_pci_intx(struct virtio_dev* d, bool masked, void (*fn)(void* ctx), void* ctx);
+
+// One MSI-X message for the whole function (table entry 0, every
+// queue on vector 0, no configuration interrupt), sent to CPU `c` on
+// completion slot `slot` (arch_irq_msi). After virtio_negotiate (its
+// reset clears the vectors) and before the queues are set up. The
+// arch's line number, or < 0 without MSI-X (the caller takes INTx).
+struct cpu;
+struct trap_frame;
+int virtio_pci_msix(struct virtio_dev* d, unsigned slot, struct cpu* c, void (*handler)(struct trap_frame* frame));
 
 #endif

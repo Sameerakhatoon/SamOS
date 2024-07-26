@@ -52,6 +52,7 @@
 #include "cpu/percpu.h"           // Per-CPU data
 #include "cpu/smp.h"              // APs, IPIs, panic stop
 #include "cpu/smp_selftest.h"     // IPI and shootdown checks
+#include "net/netdev.h"            // Networking
 
 // L87 - bss-resident default_graphics_info lives in the arch's entry
 // code (x86: kernel.asm), which stashes the UEFI framebuffer params
@@ -528,6 +529,10 @@ void kernel_main(void)
     // subsystems are up. Each probe writes a 1/0 result into
     // its dedicated marker slot; host-side tests in
     // tests64/e2e/feature-*.sh dump the markers and assert.
+    // The NICs, the loopback and the network stack, before the
+    // APs start (net/netdev.h).
+    net_init();
+
     kernel_selftest();
     // Only writes to disks labelled SMTEST (test images).
     storage_selftest();

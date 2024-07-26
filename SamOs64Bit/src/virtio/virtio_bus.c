@@ -144,6 +144,13 @@ struct virtio_line* virtio_line_attach(struct virtio_dev* d, uint32_t gsi, uint1
     return l;
 }
 
+int virtio_msix(struct virtio_dev* d, unsigned slot, struct cpu* c, INTERRUPT_CALLBACK_FUNCTION handler){
+    if(mmio_slot_of(d) || !arch_irq_routable()){
+        return -ENOENT;
+    }
+    return virtio_pci_msix(d, slot, c, handler);
+}
+
 struct virtio_line* virtio_irq(struct virtio_dev* d, bool masked, void (*fn)(void* ctx), void* ctx){
     struct virtio_mmio_slot* s = mmio_slot_of(d);
     if(!s){

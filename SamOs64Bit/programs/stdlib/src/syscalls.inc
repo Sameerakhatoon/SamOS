@@ -42,3 +42,5 @@ SYSCALL samos_readdir,               46
 SYSCALL samos_time,                  48
 SYSCALL samos_shutdown,              49
 SYSCALL samos_reboot,                50
+SYSCALL samos_net_info,              60
+SYSCALL samos_net_ping,              61

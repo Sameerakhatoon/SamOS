@@ -29,6 +29,16 @@ long          samos_time(void);     // Seconds since 1970 UTC, -1 on error
 void          samos_shutdown(void); // Power off, does not return
 void          samos_reboot(void);   // Reset, does not return
 
+// The network. net_info: 0 ifconfig, 1 arp, 2 route, as text
+// into buf; its length or a negative status. net_ping: one ICMP echo
+// to `ip` (host order, a.b.c.d is a << 24 | ...), blocking: the round
+// trip in microseconds, or a negative status (-12: no reply in time).
+long samos_net_info(int what, char* buf, long size);
+long samos_net_ping(unsigned int ip, unsigned int timeout_ms);
+// "a.b.c.d" to a host-order address: 0 or -1; and back (16 bytes).
+int  samos_inet_pton(const char* str, unsigned int* ip);
+void samos_inet_ntop(unsigned int ip, char* out);
+
 struct command_argument {
     char argument[512];
     struct command_argument* next;

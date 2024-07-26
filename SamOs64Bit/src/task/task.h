@@ -26,6 +26,7 @@ enum task_block_reason {
     TASK_BLOCK_NONE,
     TASK_BLOCK_KEY,     // getkey_block: a key for its process
     TASK_BLOCK_WAIT,    // waitpid: a child to exit
+    TASK_BLOCK_NET,     // A reply, a packet or a timeout (net/net.h)
 };
 
 struct task {
@@ -90,8 +91,8 @@ void  task_tick(struct trap_frame* frame);
 // the ticks counted so far (the BSP's).
 void  task_clock(struct trap_frame* frame);
 uint64_t task_clock_ticks(void);
-// `fn` runs on the BSP's tick, before the scheduler (one hook:
-// polled USB input).
+// `fn` runs on the BSP's tick, before the scheduler (polled USB
+// input; the network driver work: the network's timers and polling, up to four hooks).
 void  task_clock_register(void (*fn)(void));
 
 // Multi-CPU scheduling.

@@ -7,7 +7,8 @@ E2E_OS_IMG="$(cd "$E2E_ROOT/.." 2>/dev/null && pwd)/bin/os.img"
 E2E_QEMU_BIN=qemu-system-x86_64
 E2E_OVMF="${E2E_OVMF:-/usr/share/ovmf/OVMF.fd}"
 # Every feature a test can ask for but virtio-mmio (QEMU virt only).
-E2E_ARCH_PROVIDES="x86 pci ps2 ide ahci nvme acpi apic legacy-pic vga uefi smp virtio-pci xhci"
+# Net, a virtio-net-pci NIC when a test sets E2E_NET=pci.
+E2E_ARCH_PROVIDES="x86 pci ps2 ide ahci nvme acpi apic legacy-pic vga uefi smp virtio-pci xhci net"
 
 e2e_arch_build() {
     echo "x86_64: build bin/os.img with ./build.sh at the repo root" >&2
@@ -37,6 +38,10 @@ e2e_arch_qemu_args() {
     else
         E2E_QEMU_ARGS+=(-drive "file=$E2E_IMAGE,format=raw,if=ide,snapshot=on")
     fi
+    case "${E2E_NET:-}" in
+        pci)  e2e_net_args virtio-net-pci ;;
+        mmio) e2e_fail "E2E_NET=mmio: x86 pc and q35 have no virtio-mmio" ;;
+    esac
 }
 
 # The loader's fixed boot data area (src/bootmarker.h).

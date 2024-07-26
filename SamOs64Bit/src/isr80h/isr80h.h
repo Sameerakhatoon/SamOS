@@ -66,6 +66,9 @@ enum SystemCommands {
     SYSTEM_COMMAND51_CPU_STATS,    // long cpu_stats(struct cpu_stat* out, long max): CPUs online
     SYSTEM_COMMAND52_MEM_STATS,    // long mem_stats(struct kheap_stats* out)
     SYSTEM_COMMAND53_CPU_CURRENT,  // long cpu_current(void): index of the CPU running the caller
+    // The network (net/net.h). 54-59 are left for other branches.
+    SYSTEM_COMMAND60_NET_INFO = 60, // long net_info(int what, char* buf, long size)
+    SYSTEM_COMMAND61_NET_PING,     // long net_ping(unsigned int ip, unsigned int timeout_ms)
 };
 
 void isr80h_register_commands();

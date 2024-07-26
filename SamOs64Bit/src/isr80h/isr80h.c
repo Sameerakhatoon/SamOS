@@ -12,6 +12,7 @@
 #include "graphics.h" // L166 - command 20 graphics pixels
 #include "time.h"     // L198 - command 25 udelay
 #include "platform.h" // Commands 48-50
+#include "net.h"      // Commands 60-61
 
 static ISR80H_COMMAND isr80h_commands[SAMOS_MAX_ISR80H_COMMANDS];
 
@@ -108,4 +109,6 @@ void isr80h_register_commands(){
     isr80h_register_command(SYSTEM_COMMAND51_CPU_STATS,            isr80h_command51_cpu_stats);
     isr80h_register_command(SYSTEM_COMMAND52_MEM_STATS,            isr80h_command52_mem_stats);
     isr80h_register_command(SYSTEM_COMMAND53_CPU_CURRENT,          isr80h_command53_cpu_current);
+    isr80h_register_command(SYSTEM_COMMAND60_NET_INFO,             isr80h_command60_net_info);
+    isr80h_register_command(SYSTEM_COMMAND61_NET_PING,             isr80h_command61_net_ping);
 }

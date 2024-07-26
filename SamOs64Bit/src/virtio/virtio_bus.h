@@ -43,6 +43,13 @@ int virtio_probe(uint32_t device_id, int (*attach)(struct virtio_dev* d, void* c
 // left).
 struct virtio_line* virtio_irq(struct virtio_dev* d, bool masked, void (*fn)(void* ctx), void* ctx);
 
+// A message-signalled interrupt for `d` instead of a line
+// (virtio_pci_msix): the arch's line number, or < 0 for an MMIO slot or
+// a function or platform without MSI-X.
+struct cpu;
+struct trap_frame;
+int virtio_msix(struct virtio_dev* d, unsigned slot, struct cpu* c, void (*handler)(struct trap_frame* frame));
+
 // The transports' half of virtio_irq: `d` on line `gsi`.
 struct virtio_line* virtio_line_attach(struct virtio_dev* d, uint32_t gsi, uint16_t inti, bool masked,
                                        void (*fn)(void* ctx), void* ctx);

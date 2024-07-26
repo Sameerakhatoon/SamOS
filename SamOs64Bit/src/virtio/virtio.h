@@ -31,6 +31,7 @@
 
 #define VIRTIO_F_VERSION_1         32
 
+#define VIRTIO_ID_NET              1
 #define VIRTIO_ID_BLOCK            2
 #define VIRTIO_ID_INPUT            18
 
@@ -118,6 +119,7 @@ struct virtio_dev {
     uint32_t                 device_id;    // VIRTIO_ID_*
     uint64_t                 features;     // negotiated
     void*                    bus;          // transport private (pci: its struct virtio_pci*, mmio: the register base)
+    bool                     msix;         // Every queue on MSI-X vector 0 (virtio_msix)
 };
 
 // Reset, ACKNOWLEDGE, DRIVER, then accept `wanted` & offered plus

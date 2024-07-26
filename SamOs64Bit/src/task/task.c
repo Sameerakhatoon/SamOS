@@ -44,6 +44,7 @@
 #include "cpu/smp.h"
 #include "lib/spinlock/spinlock.h"
 #include "io/serial.h"
+#include "net/net.h"           // net_task_gone
 #include "loader/formats/elfloader.h"  // L65 - elf loader back
 
 static int  task_init(struct task* task, struct process* process);
@@ -239,6 +240,8 @@ static struct task* task_steal(struct cpu* me){
 // ------------------------------------------------------------------
 
 int task_free(struct task* task){
+    // Nothing in the network may wake it any more.
+    net_task_gone(task);
     // Lecture 113 - paging_desc lives on the process now, so the
     // free path moves there. task_free only releases the task
     // record itself; the descriptor is torn down when the
@@ -606,21 +609,28 @@ void task_resched(struct trap_frame* frame){
 // Every arch's timer interrupt ends here (x86: the clock handler on
 // the PIT or LAPIC timer vector). Every CPU has its own timer;
 // the tick count is the BSP's.
+// Up to TASK_CLOCK_HOOKS hooks (polled USB input, the network).
+#define TASK_CLOCK_HOOKS 4
 static volatile uint64_t clock_ticks;
-static void (*clock_hook)(void);
+static void (*clock_hooks[TASK_CLOCK_HOOKS])(void);
 
 void task_clock(struct trap_frame* frame){
     if(this_cpu()->index == 0){
         clock_ticks++;
-        if(clock_hook){
-            clock_hook();
+        for(int i = 0; i < TASK_CLOCK_HOOKS && clock_hooks[i]; i++){
+            clock_hooks[i]();
         }
     }
     task_tick(frame);
 }
 
 void task_clock_register(void (*fn)(void)){
-    clock_hook = fn;
+    for(int i = 0; i < TASK_CLOCK_HOOKS; i++){
+        if(!clock_hooks[i] || clock_hooks[i] == fn){
+            clock_hooks[i] = fn;
+            return;
+        }
+    }
 }
 
 uint64_t task_clock_ticks(void){

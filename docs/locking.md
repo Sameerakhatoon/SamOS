@@ -21,6 +21,7 @@ The x86-64 kernel runs on every CPU the MADT lists. This file is the lock list: 
 | 40 | `disk` | `disk_lock`, one for every disk (`disk/disk.c`) | yes | One CPU at a time in any disk driver, and the sector caches. Taken at the `disk_read_block` / `disk_write_block` boundary and around `diskstreamer_read` / `diskstreamer_write`. Never inside `disk/drivers/*`. One lock, not one per disk: two PATA drives share a channel's registers and IRQ, the AHCI ports of an HBA share its line and wait flag, and a completion wait steers that line to its own CPU (last section). |
 | 44 | `usb_cmd` | `usb/xhci.c`, one per xHCI | no | One xHCI command at a time (`xhci_command`): enqueue, doorbell, poll for its completion. |
 | 46 | `usb` | `usb/xhci.c`, one per xHCI | no | The controller's event ring and every producer ring (command and transfer rings) and the transfer state they drain into. Taken by the xHCI interrupt handler, also inside a disk wait. |
+| 48 | `net` | `net/netdev.c` (`net_lock`) | no | The whole network stack, one lock as SamTcpIp's one ingress mutex was: the NICs' queues, the packet backlog, ARP, routes, sockets and TCBs, the waiters. Taken by the socket and network syscalls, the BSP's tick hook and the NIC's `ARCH_IPI_INPUT` work, never in a disk wait. |
 | 50 | `sched` | `task/task.c` | no | Every CPU's run queue and sleep list, task states, `task->cpu`, the kill flags, the task list. |
 | 60 | `kmem` | `memory/heap/kheap.c` (`kmem_lock`) | yes | The PFA, the multiheap, the slabs and the kernel half of the page tables (`paging_map` of an address at or above the direct map). One lock because it is one structure: the multiheap's sub-heap is the PFA's frame table, and mapping an arena page allocates page tables from the heap again. |
 | 65 | `ioapic` | `io/apic.c` | no | The IOAPIC's IOREGSEL/IOWIN register pair: `ioapic_set_masked`, `ioapic_route_gsi`, `ioapic_set_dest`. |
@@ -42,6 +43,8 @@ The x86-64 kernel runs on every CPU the MADT lists. This file is the lock list: 
 - `disk` > `usb_cmd` > `usb`: a USB stick transfer, a stall cleared; `disk` > `usb` in the xHCI handler inside the wait.
 - `kmem` > `smp` > `serial`: a kernel-half unmap sends a shootdown.
 - `vfs` > `rtc`: a FAT write stamps the entry with the RTC time.
+- `net` > `sched`: a packet or a timer wakes a task blocked on a socket.
+- `net` > `kmem`: packet buffers, ARP entries, TCBs.
 - anything > `serial`: printing.
 
 ## Not under any lock, and why

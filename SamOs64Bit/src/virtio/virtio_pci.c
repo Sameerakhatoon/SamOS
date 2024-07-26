@@ -11,6 +11,7 @@
 #define PCI_CAP_POINTER             0x34
 #define PCI_SUBSYSTEM_ID            0x2E
 #define PCI_CAP_ID_VENDOR           0x09
+#define PCI_CAP_ID_MSIX             0x11
 
 // struct virtio_pci_cap (spec 4.1.4)
 #define VIRTIO_PCI_CAP_CFG_TYPE     3
@@ -31,10 +32,12 @@ enum {
 #define VPCI_DEVICE_FEATURE         0x04
 #define VPCI_DRIVER_FEATURE_SELECT  0x08
 #define VPCI_DRIVER_FEATURE         0x0C
+#define VPCI_MSIX_CONFIG            0x10
 #define VPCI_DEVICE_STATUS          0x14
 #define VPCI_CONFIG_GENERATION      0x15
 #define VPCI_QUEUE_SELECT           0x16
 #define VPCI_QUEUE_SIZE             0x18
+#define VPCI_QUEUE_MSIX_VECTOR      0x1A
 #define VPCI_QUEUE_ENABLE           0x1C
 #define VPCI_QUEUE_NOTIFY_OFF       0x1E
 #define VPCI_QUEUE_DESC             0x20
@@ -105,6 +108,9 @@ static int vpci_queue_enable(struct virtio_dev* d, struct virtq* q){
     vpci_write64(c + VPCI_QUEUE_DRIVER, q->avail_phys);
     vpci_write64(c + VPCI_QUEUE_DEVICE, q->used_phys);
     q->notify = p->notify + (uint32_t)mmio_read16(c + VPCI_QUEUE_NOTIFY_OFF) * p->notify_mult;
+    if(d->msix){
+        mmio_write16(c + VPCI_QUEUE_MSIX_VECTOR, 0);
+    }
     mmio_write16(c + VPCI_QUEUE_ENABLE, 1);
     return mmio_read16(c + VPCI_QUEUE_ENABLE) ? 0 : -EIO;
 }
@@ -257,4 +263,51 @@ struct virtio_line* virtio_pci_intx(struct virtio_dev* d, bool masked, void (*fn
         pci_intx_enable(p->pci);
     }
     return l;
+}
+
+// ---- MSI-X ------------------------------------------------------
+
+#define VIRTIO_MSI_NO_VECTOR        0xFFFF
+
+static uint8_t vpci_find_cap(struct pci_device* dev, uint8_t id){
+    uint8_t b = dev->addr.bus, s = dev->addr.slot, f = dev->addr.func;
+    if(!(pci_cfg_read_word(b, s, f, PCI_HEADER_STATUS_OFFSET) & PCI_STATUS_CAP_LIST)){
+        return 0;
+    }
+    uint8_t ptr = pci_cfg_read_byte(b, s, f, PCI_CAP_POINTER) & 0xFC;
+    for(int guard = 0; ptr && guard < 48; guard++){
+        if(pci_cfg_read_byte(b, s, f, ptr) == id){
+            return ptr;
+        }
+        ptr = pci_cfg_read_byte(b, s, f, ptr + 1) & 0xFC;
+    }
+    return 0;
+}
+
+int virtio_pci_msix(struct virtio_dev* d, unsigned slot, struct cpu* c, INTERRUPT_CALLBACK_FUNCTION handler){
+    struct virtio_pci* p = vpci(d);
+    struct pci_device* dev = p->pci;
+    uint8_t b = dev->addr.bus, s = dev->addr.slot, f = dev->addr.func;
+    uint8_t cap = vpci_find_cap(dev, PCI_CAP_ID_MSIX);
+    if(!cap){
+        return -ENOENT;
+    }
+    uint32_t table = pci_cfg_read_dword(b, s, f, cap + 4);
+    volatile uint8_t* entry = vpci_map(dev, table & 7, table & ~7u, 16);
+    uint64_t addr;
+    uint32_t data;
+    int line = entry ? arch_irq_msi(dev, slot, c, handler, &addr, &data) : -ENOENT;
+    if(line < 0){
+        return line;
+    }
+    mmio_write32(entry + 12, 1);              // masked while it changes
+    mmio_write32(entry + 0, (uint32_t)addr);
+    mmio_write32(entry + 4, (uint32_t)(addr >> 32));
+    mmio_write32(entry + 8, data);
+    mmio_write32(entry + 12, 0);
+    uint16_t ctrl = pci_cfg_read_word(b, s, f, cap + 2);
+    pci_cfg_write_word(b, s, f, cap + 2, (ctrl & ~0x4000) | 0x8000);
+    mmio_write16(p->common + VPCI_MSIX_CONFIG, VIRTIO_MSI_NO_VECTOR);
+    d->msix = true;
+    return line;
 }

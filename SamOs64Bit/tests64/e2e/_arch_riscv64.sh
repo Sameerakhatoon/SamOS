@@ -25,11 +25,15 @@
 #                              USB keyboard types)
 #   E2E_RISCV64_MACHINE_OPTS   appended to -machine (",aia=aplic-imsic":
 #                              APLIC and IMSIC instead of the PLIC)
+#
+# E2E_NET=pci or mmio: the NIC is a virtio-net-pci or
+# virtio-net-device on E2E_NETDEV (e2e_net_args) instead of the plain
+# virtio-net-pci every boot has.
 
 E2E_OS_IMG="$E2E_ROOT/bin/riscv64/os.img"
 E2E_QEMU_BIN=qemu-system-riscv64
 E2E_RISCV64_KERNEL="$E2E_ROOT/bin/riscv64/kernel.img"
-E2E_ARCH_PROVIDES="riscv64 pci virtio-mmio smp nvme xhci virtio-pci"
+E2E_ARCH_PROVIDES="riscv64 pci virtio-mmio smp nvme xhci virtio-pci net"
 
 e2e_arch_build() {
     bash "$E2E_ROOT/arch-build.sh" riscv64
@@ -64,9 +68,11 @@ e2e_arch_qemu_args() {
         -drive "file=$E2E_IMAGE,format=raw,if=none,id=os,snapshot=on"
         -device "$disk,drive=os"
         -device ramfb
-        -netdev user,id=net0
-        -device virtio-net-pci,netdev=net0
     )
+    case "${E2E_NET:-}" in
+        mmio) e2e_net_args virtio-net-device ;;
+        *)    e2e_net_args virtio-net-pci ;;
+    esac
     [ "$kbd" = none ] || E2E_QEMU_ARGS+=(-device "$kbd")
 }
 

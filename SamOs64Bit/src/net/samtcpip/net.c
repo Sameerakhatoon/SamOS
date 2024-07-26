@@ -1,0 +1,218 @@
+#include "port.h"
+#include "graph.h"
+#include "net.h"
+#include "utils.h"
+
+// Forward declarations.
+static unsigned int hash_code(void* ptr, unsigned int size);
+void                init_node_nw_prop(NodeNwProp* p);
+void                init_intf_nw_prop(IntfNwProps* p);
+void                interface_assign_mac_address(Interface* intf);
+bool                node_set_device_type(Node* node, unsigned int flag);
+bool                node_set_loopback_address(Node* node, char* ip_addr);
+bool                node_set_intf_ip_address(Node* node, char* local_if, char* ip_addr, char mask);
+bool                node_unset_intf_ip_address(Node* node, char* local_if);
+Interface*          node_get_matching_subnet_interface(Node* node, char* ip_addr);
+unsigned int        get_access_intf_operating_vlan_id(Interface* intf);
+bool                is_trunk_interface_vlan_enabled(Interface* intf, unsigned int vlan_id);
+void                dump_nw_graph(Graph* graph);
+void                dump_node_nw_props(Node* node);
+void                dump_intf_props(Interface* intf);
+
+// ch5/6/8: opaque-friendly init. Full table types live next to
+// their owning module (Layer2/layer2.h for L2 tables, Layer3/layer3.h
+// for the routing table); these trampolines keep net.c free of
+// layer-specific includes.
+extern void init_arp_table(ArpTable** arp_table);
+extern void init_mac_table(MacTable** mac_table);
+extern void init_rt_table(RtTable** rt_table);
+
+// ch8: auto-install a directly-connected route when an interface
+// IP or the loopback gets assigned.
+extern void rt_table_add_direct_route(RtTable* rt_table, char* ip_addr, char mask);
+
+// Cheap multiplicative hash used to derive a 4-byte MAC seed from
+// any pointer's content. Not a real OUI - just stable-within-a-run
+// + unique per interface so debug output is recognisable.
+static unsigned int hash_code(void* ptr, unsigned int size){
+    unsigned int value = 0;
+    char*        str   = (char*)ptr;
+    for(unsigned int i = 0; i < size; i++){
+        value += (unsigned char)*str;
+        value *= 97;
+        str++;
+    }
+    return value;
+}
+
+void init_node_nw_prop(NodeNwProp* p){
+    p->flags             = 0;
+    p->is_lb_addr_config = false;
+    memset(p->lb_addr.ip_addr, 0, sizeof(p->lb_addr.ip_addr));
+    // ch5: every Node gets an empty ARP table at creation time.
+    init_arp_table(&p->arp_table);
+    // ch6: empty mac-learning table.
+    init_mac_table(&p->mac_table);
+    // ch8: empty L3 routing table.
+    init_rt_table(&p->rt_table);
+}
+
+void init_intf_nw_prop(IntfNwProps* p){
+    // L2.
+    memset(p->mac_add.mac, 0, sizeof(p->mac_add.mac));
+    p->intf_l2_mode = L2_MODE_UNKNOWN;
+    memset(p->vlans, 0, sizeof(p->vlans));
+    p->is_ipadd_config_backup = false;
+    // L3.
+    p->is_ipadd_config = false;
+    memset(p->ip_add.ip_addr, 0, sizeof(p->ip_add.ip_addr));
+    p->mask = 0;
+    p->mtu  = SIM_INTF_DEFAULT_MTU;
+}
+
+// ch5: with MacAddr shrunk to 6 bytes, the ch2 "concat name into
+// MAC" heuristic no longer fits. Hash the Interface*'s content into
+// a 4-byte seed and pad to 6.
+void interface_assign_mac_address(Interface* intf){
+    unsigned int seed = hash_code(intf, sizeof(*intf));
+    memset(IF_MAC(intf), 0, 6);
+    memcpy(IF_MAC(intf), &seed, sizeof(unsigned int));
+    // A real peer (the host kernel on the TAP side) rejects a
+    // multicast source MAC. Force byte 0 to unicast (I/G bit 0
+    // clear) and locally administered (U/L bit 1 set), the IEEE
+    // convention for software-assigned addresses.
+    IF_MAC(intf)[0] = (char)(((unsigned char)IF_MAC(intf)[0] & 0xFE) | 0x02);
+}
+
+bool node_set_device_type(Node* node, unsigned int flag){
+    node->node_nw_prop.flags |= flag;
+    return true;
+}
+
+bool node_set_loopback_address(Node* node, char* ip_addr){
+    bool ok = false;
+    assert(ip_addr);
+    if(node->node_nw_prop.flags & HUB){
+        assert(0);
+    }
+    if(!(node->node_nw_prop.flags & L3_ROUTER)){
+        assert(0);
+    }
+    node->node_nw_prop.is_lb_addr_config = true;
+    strncpy(NODE_LO_ADDR(node), ip_addr, 15);
+    NODE_LO_ADDR(node)[15] = '\0';
+    // ch8: loopback is a /32 self-route.
+    rt_table_add_direct_route(NODE_RT_TABLE(node), ip_addr, 32);
+    ok = true;
+    return ok;
+}
+
+bool node_set_intf_ip_address(Node* node, char* local_if, char* ip_addr, char mask){
+    bool       ok   = false;
+    Interface* intf = get_node_if_by_name(node, local_if);
+    if(!intf){
+        goto out;
+    }
+    strncpy(IF_IP(intf), ip_addr, 15);
+    IF_IP(intf)[15] = '\0';
+    intf->intf_nw_props.mask           = mask;
+    intf->intf_nw_props.is_ipadd_config = true;
+    // ch8: bringing up an L3 interface installs the corresponding
+    // directly-connected subnet route.
+    rt_table_add_direct_route(NODE_RT_TABLE(node), ip_addr, mask);
+    ok = true;
+out:
+    return ok;
+}
+
+bool node_unset_intf_ip_address(Node* node, char* local_if){
+    Interface* intf = get_node_if_by_name(node, local_if);
+    if(!intf){
+        return false;
+    }
+    memset(IF_IP(intf), 0, 16);
+    intf->intf_nw_props.mask           = 0;
+    intf->intf_nw_props.is_ipadd_config = false;
+    return true;
+}
+
+// ch5: walk the Node's interfaces; apply each interface's mask to
+// both its own IP and the lookup IP; the first matching pair is the
+// owning subnet.
+Interface* node_get_matching_subnet_interface(Node* node, char* ip_addr){
+    char intf_subnet[16];
+    char lookup_subnet[16];
+    for(int i = 0; i < MAX_INTF_PER_NODE; i++){
+        Interface* intf = node->intf[i];
+        if(!intf){
+            return 0;
+        }
+        if(!intf->intf_nw_props.is_ipadd_config){
+            continue;
+        }
+        memset(intf_subnet,   0, sizeof(intf_subnet));
+        memset(lookup_subnet, 0, sizeof(lookup_subnet));
+        apply_mask(IF_IP(intf), intf->intf_nw_props.mask, intf_subnet);
+        apply_mask(ip_addr,     intf->intf_nw_props.mask, lookup_subnet);
+        if(strncmp(intf_subnet, lookup_subnet, 16) == 0){
+            return intf;
+        }
+    }
+    return 0;
+}
+
+void dump_node_nw_props(Node* node){
+    printf("\nNode Name = %s\n", node->node_name);   // No simulator UDP port
+    printf("\t node flags : %u\n", node->node_nw_prop.flags);
+    if(node->node_nw_prop.is_lb_addr_config){
+        printf("\t  lo addr : %s/32\n", NODE_LO_ADDR(node));
+    }
+}
+
+void dump_intf_props(Interface* intf){
+    dump_interface(intf);
+    if(intf->intf_nw_props.is_ipadd_config){
+        printf("\t IP Addr = %s/%u", IF_IP(intf), intf->intf_nw_props.mask);
+    } else {
+        printf("\t IP Addr = %s/%u", "Nil", 0);
+    }
+    printf("\t MAC : %02x:%02x:%02x:%02x:%02x:%02x\n",
+           intf->intf_nw_props.mac_add.mac[0], intf->intf_nw_props.mac_add.mac[1],
+           intf->intf_nw_props.mac_add.mac[2], intf->intf_nw_props.mac_add.mac[3],
+           intf->intf_nw_props.mac_add.mac[4], intf->intf_nw_props.mac_add.mac[5]);
+}
+
+void dump_nw_graph(Graph* graph){
+    GlThread* curr = 0;
+    printf("Topology Name = %s\n", graph->topology_name);
+    ITERATE_GLTHREAD_BEGIN(&graph->node_list, curr){
+        Node* node = graph_glue_to_node(curr);
+        dump_node_nw_props(node);
+        for(int i = 0; i < MAX_INTF_PER_NODE; i++){
+            Interface* intf = node->intf[i];
+            if(!intf){
+                break;
+            }
+            dump_intf_props(intf);
+        }
+    } ITERATE_GLTHREAD_END(&graph->node_list, curr);
+}
+
+// ch7: ACCESS-mode VLAN ID lookup. ACCESS interfaces carry exactly
+// one VLAN in vlans[0] (0 if none assigned). Asserts the mode.
+unsigned int get_access_intf_operating_vlan_id(Interface* intf){
+    assert(IF_L2_MODE(intf) == ACCESS);
+    return intf->intf_nw_props.vlans[0];
+}
+
+// ch7: TRUNK-mode VLAN membership check. Scan all slots; a 0 slot
+// is "empty" (so vlan_id == 0 never matches an in-use slot).
+bool is_trunk_interface_vlan_enabled(Interface* intf, unsigned int vlan_id){
+    assert(IF_L2_MODE(intf) == TRUNK);
+    for(unsigned int i = 0; i < MAX_VLAN_MEMBERSHIP; i++){
+        if(intf->intf_nw_props.vlans[i] == vlan_id){
+            return true;
+        }
+    }
+    return false;
+}

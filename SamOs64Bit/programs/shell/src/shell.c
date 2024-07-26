@@ -2,8 +2,10 @@
 // program launch.
 //
 // Builtins: help, echo (with > and >>), clear, exit, ls, cat,
-// mkdir, write, rm, rmdir, date, shutdown, reboot. Anything else is
-// looked up on the boot filesystem and started as a program.
+// mkdir, write, rm, rmdir, date, shutdown, reboot, ifconfig, arp,
+// route, ping.
+// Anything else is looked up on the boot filesystem and started as a
+// program.
 
 #include "shell.h"
 #include "stdio.h"
@@ -65,6 +67,10 @@ static int shell_rmdir(int argc, char** argv);
 static int shell_date(int argc, char** argv);
 static int shell_shutdown(int argc, char** argv);
 static int shell_reboot(int argc, char** argv);
+static int shell_ifconfig(int argc, char** argv);
+static int shell_arp(int argc, char** argv);
+static int shell_route(int argc, char** argv);
+static int shell_ping(int argc, char** argv);
 
 static const struct shell_builtin shell_builtins[] = {
     {"help",  "help              list the builtins",           shell_help},
@@ -80,6 +86,10 @@ static const struct shell_builtin shell_builtins[] = {
     {"date",     "date              print the date and time (UTC)", shell_date},
     {"shutdown", "shutdown          power off",                     shell_shutdown},
     {"reboot",   "reboot            restart the machine",           shell_reboot},
+    {"ifconfig", "ifconfig          network interfaces",            shell_ifconfig},
+    {"arp",      "arp               the ARP cache",                 shell_arp},
+    {"route",    "route             the routing table",             shell_route},
+    {"ping",     "ping ip [count]   ICMP echo, count times (default 4)", shell_ping},
 };
 #define SHELL_BUILTIN_COUNT (sizeof(shell_builtins) / sizeof(shell_builtins[0]))
 
@@ -212,6 +222,63 @@ static int shell_reboot(int argc, char** argv){
     printf("rebooting\n");
     samos_reboot();
     return 1;
+}
+
+// The network: the kernel's tables as text (SamTcpIp's own
+// dumps), and ping through the net_ping syscall.
+#define SHELL_NET_INFO_MAX  4096
+#define SHELL_PING_TIMEOUT  2000
+
+static int shell_net_info(int what){
+    char* buf = malloc(SHELL_NET_INFO_MAX);
+    if(!buf){
+        return 1;
+    }
+    long n = samos_net_info(what, buf, SHELL_NET_INFO_MAX);
+    if(n < 0){
+        printf("no network\n");
+    } else {
+        print(buf);
+    }
+    free(buf);
+    return n < 0;
+}
+
+static int shell_ifconfig(int argc, char** argv){
+    return shell_net_info(0);
+}
+
+static int shell_arp(int argc, char** argv){
+    return shell_net_info(1);
+}
+
+static int shell_route(int argc, char** argv){
+    return shell_net_info(2);
+}
+
+static int shell_ping(int argc, char** argv){
+    unsigned int ip;
+    if(argc < 2 || samos_inet_pton(argv[1], &ip) < 0){
+        printf("usage: ping a.b.c.d [count]\n");
+        return 1;
+    }
+    int count = argc > 2 ? atoi(argv[2]) : 4;
+    int received = 0;
+    printf("PING %s\n", argv[1]);
+    for(int seq = 1; seq <= count; seq++){
+        long us = samos_net_ping(ip, SHELL_PING_TIMEOUT);
+        if(us >= 0){
+            printf("reply from %s: seq=%d time=%ld.%03ld ms\n", argv[1], seq, us / 1000, us % 1000);
+            received++;
+        } else {
+            printf("no reply from %s: seq=%d\n", argv[1], seq);
+        }
+        if(seq < count){
+            samos_sleep_ms(500);
+        }
+    }
+    printf("%s: %d sent, %d received\n", argv[1], count, received);
+    return received == 0;
 }
 
 static int shell_exit(int argc, char** argv){
