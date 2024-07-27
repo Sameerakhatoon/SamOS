@@ -88,11 +88,15 @@ shell_boot() {
 }
 
 # shell_cmd <line> [seconds]: the next prompt the shell prints after
-# the command is the sentinel, as in e2e/126.
+# the command is the sentinel, as in e2e/126. The offset is
+# taken after the line's echo, before Enter: taken earlier, a prompt
+# that reached the log after it made the echoed "> <line>" itself match
+# and the command was cut off at once (riscv64 e2e/192).
 shell_cmd() {
     local before
+    shell_type "$1"
     before=$(shell_log_size)
-    shell_type "$1"$'\n'
+    shell_type $'\n'
     shell_wait_prompt "$before" "${2:-30}" || e2e_log "no prompt after: $1"
 }
 
