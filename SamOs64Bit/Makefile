@@ -30,6 +30,17 @@
 
 ARCH ?= x86_64
 
+# USERCC=samcc compiles the C of every user program (stdlib,
+# blank, shell, hello, ktest, rvtest) with SamCompiler
+# (tools/samcc-cc.sh, SAMCC names it) instead of gcc. The assembly
+# files, crt0 sources and the link stay gcc's. gcc is the default.
+USERCC ?= gcc
+ifeq ($(USERCC),samcc)
+SAMCC_CC = bash $(abspath ./tools/samcc-cc.sh)
+else ifneq ($(USERCC),gcc)
+$(error USERCC must be gcc or samcc)
+endif
+
 .PHONY: all clean user_programs user_programs_clean shared_check
 
 # ------------------------------------------------------------------
@@ -101,13 +112,23 @@ $(BUILD)/%.asm.o: ./src/%.asm
 # Lecture 200 - the recursive-make calls use `$(MAKE) -C` so
 # the parent's make-flags + jobserver propagate cleanly. Order
 # matters: stdlib first, then everything that links against it.
+ifdef SAMCC_CC
+USER_MAKE_ARGS = UCC="$(SAMCC_CC) x86_64-elf-gcc x86_64"
+endif
+# `clean` keeps the programs' objects, so they are cleaned here
+# when the compiler changes: always for samcc (SamCompiler itself may
+# have changed), and on the first gcc build after a samcc one.
+USERCC_STAMP = ./build/usercc.stamp
 user_programs:
-	$(MAKE) -C ./programs/stdlib all
-	$(MAKE) -C ./programs/blank  all
-	$(MAKE) -C ./programs/shell  all
-	$(MAKE) -C ./programs/hello  all
+	@if [ "$(USERCC)" = samcc ] || [ "$$(cat $(USERCC_STAMP) 2>/dev/null || echo gcc)" != "$(USERCC)" ]; then \
+	    $(MAKE) user_programs_clean > /dev/null; fi
+	@mkdir -p ./build && echo $(USERCC) > $(USERCC_STAMP)
+	$(MAKE) -C ./programs/stdlib all $(USER_MAKE_ARGS)
+	$(MAKE) -C ./programs/blank  all $(USER_MAKE_ARGS)
+	$(MAKE) -C ./programs/shell  all $(USER_MAKE_ARGS)
+	$(MAKE) -C ./programs/hello  all $(USER_MAKE_ARGS)
 	$(MAKE) -C ./programs/simple all
-	$(MAKE) -C ./programs/ktest  all
+	$(MAKE) -C ./programs/ktest  all $(USER_MAKE_ARGS)
 
 # The user stdlib as a sysroot for another compiler
 # (SamCompiler's -target=samos-x86_64): include/ holds the stdlib
@@ -211,6 +232,8 @@ endif
 
 BUILD   = ./build/$(ARCH)
 CC      = $(CROSS)gcc
+# The user programs' compiler, SamCompiler for USERCC=samcc.
+USER_CC = $(if $(SAMCC_CC),$(SAMCC_CC) $(CC) $(ARCH),$(CC))
 AR      = $(CROSS)ar
 OBJCOPY = $(CROSS)objcopy
 NOPIC   = -fno-pic -fno-pie -fno-stack-protector -fno-asynchronous-unwind-tables
@@ -274,11 +297,11 @@ all: $(RAMDISK)
 
 $(USER_BUILD)/%.o: ./programs/%.c
 	@mkdir -p $(@D)
-	$(CC) $(USER_CFLAGS) -I$(<D) -I$(<D)/.. -c $< -o $@
+	$(USER_CC) $(USER_CFLAGS) -I$(<D) -I$(<D)/.. -c $< -o $@
 
 $(USER_BUILD)/%.S.o: ./programs/%.S
 	@mkdir -p $(@D)
-	$(CC) $(USER_CFLAGS) -c $< -o $@
+	$(USER_CC) $(USER_CFLAGS) -c $< -o $@
 
 $(USER_BUILD)/blank.elf: $(USER_BUILD)/blank/blank.o
 $(USER_BUILD)/hello.elf: $(USER_BUILD)/hello/src/hello.o
@@ -370,11 +393,11 @@ $(BUILD)/user/%.o: ./programs/stdlib/arch/$(ARCH)/%.S
 ifdef USER_ARCH_CFLAGS
 $(USER_DIR)/libc/%.o: ./programs/stdlib/src/%.c
 	@mkdir -p $(@D)
-	$(CC) $(USER_CFLAGS) -c $< -o $@
+	$(USER_CC) $(USER_CFLAGS) -c $< -o $@
 
 $(USER_DIR)/libc/%.S.o: ./programs/stdlib/arch/$(ARCH)/%.S
 	@mkdir -p $(@D)
-	$(CC) $(USER_CFLAGS) -c $< -o $@
+	$(USER_CC) $(USER_CFLAGS) -c $< -o $@
 
 $(USER_DIR)/blank.elf: ./programs/blank/blank.c
 $(USER_DIR)/hello.elf: ./programs/hello/src/hello.c
@@ -382,7 +405,7 @@ $(USER_DIR)/shell.elf: ./programs/shell/src/shell.c
 $(USER_DIR)/rvtest.elf: ./programs/rvtest/rvtest.c ./programs/rvtest/regs.S
 $(USER_DIR)/ktest.elf: ./programs/ktest/ktest.c ./programs/ktest/arch/riscv64/regs.S
 $(USER_ELFS): $(USER_LIBC) $(USER_LD)
-	$(CC) $(USER_CFLAGS) -I./programs/shell/src -T $(USER_LD) -Wl,-z,max-page-size=0x1000 \
+	$(USER_CC) $(USER_CFLAGS) -I./programs/shell/src -T $(USER_LD) -Wl,-z,max-page-size=0x1000 \
 	    -Wl,--build-id=none -static -o $@ $(filter %.c %.S,$^) $(USER_LIBC) -lgcc
 
 # mtools on the image file, as build.sh does for x86 (8.3 names).

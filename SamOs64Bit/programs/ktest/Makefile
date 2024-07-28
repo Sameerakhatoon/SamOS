@@ -1,3 +1,5 @@
+# The C compiler; the top Makefile sets it for USERCC=samcc.
+UCC ?= x86_64-elf-gcc
 # ktest: user-mode probes for the trap and task-switch paths.
 # The e2e tests start it through CMDLINE.TXT (samos.run=KTEST.ELF ...).
 FILES=./build/ktest.o ./build/regs.asm.o
@@ -10,7 +12,7 @@ all: ./ktest.elf
 
 ./build/ktest.o: ./ktest.c
 	mkdir -p build
-	x86_64-elf-gcc $(INCLUDES) -g -ffreestanding -fno-builtin -Werror -Wall -nostdlib -nostartfiles -nodefaultlibs -O0 -std=gnu99 -c ./ktest.c -o ./build/ktest.o
+	$(UCC) $(INCLUDES) -g -ffreestanding -fno-builtin -Werror -Wall -nostdlib -nostartfiles -nodefaultlibs -O0 -std=gnu99 -c ./ktest.c -o ./build/ktest.o
 
 ./build/regs.asm.o: ./regs.asm
 	mkdir -p build

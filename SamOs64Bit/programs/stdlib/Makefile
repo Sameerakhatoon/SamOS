@@ -1,3 +1,5 @@
+# The C compiler; the top Makefile sets it for USERCC=samcc.
+UCC ?= x86_64-elf-gcc
 FILES=./build/start.asm.o ./build/start.o ./build/samos.asm.o ./build/samos.o ./build/stdlib.o ./build/stdio.o ./build/string.o ./build/memory.o ./build/file.o
 INCLUDES=-I./src
 FLAGS=-g -ffreestanding
@@ -11,7 +13,7 @@ all: $(FILES)
 
 ./build/start.o: ./src/start.c
 	mkdir -p build
-	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/start.c -o ./build/start.o
+	$(UCC) $(INCLUDES) $(FLAGS) -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/start.c -o ./build/start.o
 
 ./build/samos.asm.o: ./arch/x86_64/samos.asm
 	mkdir -p build
@@ -19,28 +21,28 @@ all: $(FILES)
 
 ./build/samos.o: ./src/samos.c
 	mkdir -p build
-	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/samos.c -o ./build/samos.o
+	$(UCC) $(INCLUDES) $(FLAGS) -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/samos.c -o ./build/samos.o
 
 ./build/stdlib.o: ./src/stdlib.c
 	mkdir -p build
-	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/stdlib.c -o ./build/stdlib.o
+	$(UCC) $(INCLUDES) $(FLAGS) -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/stdlib.c -o ./build/stdlib.o
 
 ./build/stdio.o: ./src/stdio.c
 	mkdir -p build
-	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/stdio.c -o ./build/stdio.o
+	$(UCC) $(INCLUDES) $(FLAGS) -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/stdio.c -o ./build/stdio.o
 
 ./build/string.o: ./src/string.c
 	mkdir -p build
-	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/string.c -o ./build/string.o
+	$(UCC) $(INCLUDES) $(FLAGS) -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/string.c -o ./build/string.o
 
 ./build/memory.o: ./src/memory.c
 	mkdir -p build
-	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/memory.c -o ./build/memory.o
+	$(UCC) $(INCLUDES) $(FLAGS) -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/memory.c -o ./build/memory.o
 
 # Lecture 105 - userland fopen wrapper.
 ./build/file.o: ./src/file.c
 	mkdir -p build
-	x86_64-elf-gcc $(INCLUDES) $(FLAGS) -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/file.c -o ./build/file.o
+	$(UCC) $(INCLUDES) $(FLAGS) -nostdlib -nostartfiles -nodefaultlibs -fno-builtin -Wall -O0 -std=gnu99 -c ./src/file.c -o ./build/file.o
 
 clean:
 	rm -rf $(FILES) ./stdlib.elf

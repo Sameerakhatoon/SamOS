@@ -1,3 +1,5 @@
+# The C compiler; the top Makefile sets it for USERCC=samcc.
+UCC ?= x86_64-elf-gcc
 FILES=./build/blank.o
 INCLUDES=-I../stdlib/src
 
@@ -11,7 +13,7 @@ all: $(FILES) ./blank.bin ./blank.elf
 
 ./build/blank.o: ./blank.c
 	mkdir -p build
-	x86_64-elf-gcc $(INCLUDES) -ffreestanding -falign-jumps -falign-functions -falign-labels -falign-loops -fstrength-reduce -fomit-frame-pointer -finline-functions -Wno-unused-function -fno-builtin -Werror -Wno-unused-label -Wno-cpp -Wno-unused-parameter -nostdlib -nostartfiles -nodefaultlibs -Wall -O0 -std=gnu99 -c ./blank.c -o ./build/blank.o
+	$(UCC) $(INCLUDES) -ffreestanding -falign-jumps -falign-functions -falign-labels -falign-loops -fstrength-reduce -fomit-frame-pointer -finline-functions -Wno-unused-function -fno-builtin -Werror -Wno-unused-label -Wno-cpp -Wno-unused-parameter -nostdlib -nostartfiles -nodefaultlibs -Wall -O0 -std=gnu99 -c ./blank.c -o ./build/blank.o
 
 clean:
 	rm -rf $(FILES) ./blank.elf ./blank.bin
