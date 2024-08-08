@@ -10,9 +10,16 @@
 // keyboard_push, as virtio-input does: one set of modifiers and one
 // Caps Lock with PS/2, and the focused process gets the same bytes.
 // A key is a press when its usage appears in a report and a release
-// when it is gone from the next one. No typematic repeat (the host
-// makes it for USB keyboards; SamOS has none yet). Caps Lock sets the
-// keyboard's LED with SET_REPORT.
+// when it is gone from the next one. Caps Lock sets the keyboard's LED
+// with SET_REPORT.
+//
+// Typematic repeat: a PS/2 keyboard repeats a held key itself, a USB
+// one reports it once (SET_IDLE(0): reports only on change), so the
+// host repeats it. As a PS/2 keyboard after reset (SamOS never sets
+// its rate): the last key pressed, after 500 ms, about 10.9 times a
+// second, as its make code again; it stops when that key is released
+// or another is pressed. Modifiers and the lock keys do not repeat.
+// usb_hid_repeat runs on the BSP's tick (xhci.c's usb_tick).
 //
 // A mouse moves the PS/2 cursor when there is one, else a cursor of
 // its own registered with the mouse layer (mouse.c calls
@@ -24,6 +31,7 @@
 
 #include "usb.h"
 #include "xhci.h"
+#include "arch/arch.h"
 #include "keyboard/keyboard.h"
 #include "keyboard/classic.h"
 #include "mouse/mouse.h"
@@ -42,6 +50,8 @@
 #define HID_PROTOCOL_KEYBOARD   1
 #define HID_PROTOCOL_MOUSE      2
 #define HID_REPORT_MAX          8
+#define HID_REPEAT_DELAY_MS     500             // PS/2 defaults
+#define HID_REPEAT_PERIOD_MS    92              // 10.9 per second
 
 struct usb_hid {
     struct usb_device*   dev;
@@ -52,6 +62,8 @@ struct usb_hid {
     bool                 mouse;
     uint8_t              leds;
     uint8_t              last[HID_REPORT_MAX];
+    volatile uint8_t     repeat_usage;  // the key that repeats, 0 none
+    volatile uint64_t    repeat_at;     // arch_counter of its next repeat
 };
 
 static struct usb_hid* hid_devices[HID_MAX_DEVICES];
@@ -123,6 +135,12 @@ static bool hid_has(const uint8_t* r, uint8_t u){
     return false;
 }
 
+// Every key with a scancode repeats but Caps Lock, Num Lock and Scroll
+// Lock (a repeat would toggle them again).
+static bool hid_repeats(uint8_t u){
+    return hid_usage(u) && u != 0x39 && u != 0x47 && u != 0x53;
+}
+
 static void hid_keyboard_report(struct usb_hid* h, const uint8_t* r){
     if(r[2] == 1){
         return;                     // phantom state: too many keys down
@@ -137,9 +155,17 @@ static void hid_keyboard_report(struct usb_hid* h, const uint8_t* r){
             hid_key(hid_usage(h->last[i]), false);
         }
     }
+    if(h->repeat_usage && !hid_has(r, h->repeat_usage)){
+        h->repeat_usage = 0;
+    }
     for(int i = 2; i < 8; i++){
         if(r[i] > 3 && !hid_has(h->last, r[i])){
             hid_key(hid_usage(r[i]), true);
+            h->repeat_usage = 0;
+            if(hid_repeats(r[i])){
+                h->repeat_at = arch_counter() + arch_counter_hz() / 1000 * HID_REPEAT_DELAY_MS;
+                h->repeat_usage = r[i];
+            }
         }
     }
     memcpy(h->last, (void*)r, 8);
@@ -202,6 +228,25 @@ void usb_hid_service(void){
             hid_mouse_report(h, r);
         } else if(n >= 3){
             hid_keyboard_report(h, r);
+        }
+    }
+}
+
+void usb_hid_repeat(void){
+    static uint32_t repeats;
+    uint64_t now = arch_counter();
+    uint64_t period = arch_counter_hz() / 1000 * HID_REPEAT_PERIOD_MS;
+    for(int i = 0; i < hid_count; i++){
+        struct usb_hid* h = hid_devices[i];
+        uint8_t u = h->repeat_usage;
+        if(!u || h->mouse || h->dev->gone || (int64_t)(now - h->repeat_at) < 0){
+            continue;
+        }
+        // One repeat per period; a late tick does not catch up.
+        h->repeat_at = (int64_t)(now - h->repeat_at) > (int64_t)period ? now + period : h->repeat_at + period;
+        hid_key(hid_usage(u), true);
+        if(++repeats == 1){
+            serial_write("usb-hid: first key repeat\n");
         }
     }
 }

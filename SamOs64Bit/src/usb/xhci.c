@@ -13,7 +13,10 @@
 // Enable Slot, Address Device, the device descriptor (the first 8
 // bytes, then the whole with the right EP0 packet size), the first
 // configuration, SET_CONFIGURATION, and the first class driver that
-// takes an interface. No hubs: a hub is enumerated and left unbound.
+// takes an interface. A hub (usb_hub.c) resets its own ports and hands
+// each device to usb_device_attach, which addresses it with its route
+// string and, at low or full speed behind a high-speed hub, that hub's
+// transaction translator.
 //
 // Events: one consumer at a time under hc->lock (the event ring and
 // every producer ring). Completion of a command or a transfer is a
@@ -678,6 +681,13 @@ struct usb_endpoint* usb_endpoint_open(struct usb_device* d, const struct usb_en
     memcpy(in_ctx(d, 0), dev_ctx(d, 0), d->hc->ctx_size);
     uint32_t* slot = (uint32_t*)in_ctx(d, 0);
     slot[0] = (slot[0] & ~(0x1Fu << 27)) | (uint32_t)d->max_dci << 27;
+    if(d->is_hub){
+        // Hub (bit 26), single TT (MTT bit 25 clear: alternate setting
+        // 0), Number of Ports, TT Think Time (xHCI 6.2.2, 4.5.2).
+        slot[0] = (slot[0] & ~(1u << 25)) | 1u << 26;
+        slot[1] = (slot[1] & 0x00FFFFFFu) | (uint32_t)d->hub_ports << 24;
+        slot[2] = (slot[2] & ~(3u << 16)) | (uint32_t)(d->hub_ttt & 3) << 16;
+    }
     uint32_t* e = (uint32_t*)in_ctx(d, dci);
     uint32_t esit = xfer == USB_EP_INTERRUPT ? ep->mps * (burst + 1u) : 0;
     e[0] = (xfer == USB_EP_INTERRUPT ? (uint32_t)ep_interval(d, ed->bInterval) << 16 : 0);
@@ -775,8 +785,9 @@ static int usb_address(struct xhci* hc, struct usb_device* d){
     uint32_t* icc = d->in_page;
     icc[1] = 3;                                     // A0 slot, A1 EP0
     uint32_t* s = (uint32_t*)in_ctx(d, 0);
-    s[0] = 1u << 27 | (uint32_t)d->speed << 20;
+    s[0] = 1u << 27 | (uint32_t)d->speed << 20 | (d->route & 0xFFFFF);
     s[1] = (uint32_t)d->port << 16;
+    s[2] = (uint32_t)d->tt_slot | (uint32_t)d->tt_port << 8;
     uint32_t* e = (uint32_t*)in_ctx(d, 1);
     e[1] = 3u << 1 | (uint32_t)XHCI_EP_CONTROL << 3 | (uint32_t)d->mps0 << 16;
     e[2] = (uint32_t)ep0->ring.phys | 1;
@@ -832,7 +843,7 @@ static void usb_bind(struct usb_device* d){
         if(intf->bAlternateSetting){
             continue;
         }
-        if(usb_hid_probe(d, intf) == 0 || usb_msc_probe(d, intf) == 0){
+        if(usb_hub_probe(d, intf) == 0 || usb_hid_probe(d, intf) == 0 || usb_msc_probe(d, intf) == 0){
             return;
         }
     }
@@ -850,7 +861,9 @@ static void usb_release(struct xhci* hc, struct usb_device* d){
         arch_dma_clean(&hc->dcbaa[d->slot], 8);
         hc->slot_dev[d->slot] = NULL;
     }
-    hc->port_dev[d->port] = NULL;
+    if(!d->parent && hc->port_dev[d->port] == d){
+        hc->port_dev[d->port] = NULL;
+    }
 }
 
 // Reset the port if it is not enabled yet; its speed, or < 0.
@@ -875,6 +888,93 @@ static int xhci_port_reset(struct xhci* hc, uint8_t port){
     return (v >> 10) & 0xF;
 }
 
+void usb_write_location(struct usb_device* d){
+    if(d->parent){
+        serial_write("hub slot ");
+        serial_write(itoa(d->parent->slot));
+        serial_write(" port ");
+        serial_write(itoa(d->hub_port));
+    } else {
+        serial_write("port ");
+        serial_write(itoa(d->port));
+    }
+}
+
+// Address, describe and bind `d` (its hc, port, speed and, behind a
+// hub, route and TT fields already set). False when it failed (the
+// slot is freed again).
+static bool usb_enumerate(struct xhci* hc, struct usb_device* d){
+    int res = usb_address(hc, d);
+    serial_write("usb: ");
+    usb_write_location(d);
+    if(d->parent){
+        serial_write(" (route 0x");
+        char r[6];
+        int n = 0;
+        for(int i = 16; i >= 0; i -= 4){
+            if((d->route >> i) || i == 0){
+                r[n++] = "0123456789abcdef"[(d->route >> i) & 0xF];
+            }
+        }
+        r[n] = 0;
+        serial_write(r);
+        serial_write(") ");
+    } else {
+        serial_write(hc->port_major[d->port] == 3 ? " (USB 3) " : " (USB 2) ");
+    }
+    serial_write(speed_name(d->speed));
+    serial_write(" speed");
+    if(d->tt_slot){
+        serial_write(", TT slot ");
+        serial_write(itoa(d->tt_slot));
+        serial_write(" port ");
+        serial_write(itoa(d->tt_port));
+    }
+    if(res < 0){
+        serial_write(", enumeration failed\n");
+        d->gone = true;
+        usb_release(hc, d);
+        return false;
+    }
+    serial_write(", slot ");
+    serial_write(itoa(d->slot));
+    serial_write(", ");
+    write_hex4(d->desc.idVendor);
+    serial_write(":");
+    write_hex4(d->desc.idProduct);
+    serial_write(" ");
+    serial_write(d->product);
+    serial_write("\n");
+    usb_bind(d);
+    return true;
+}
+
+struct usb_device* usb_device_attach(struct usb_device* hub, uint8_t port, uint8_t speed){
+    struct usb_device* d = kzalloc(sizeof(*d));
+    if(!d){
+        return NULL;
+    }
+    d->hc       = hub->hc;
+    d->port     = hub->port;
+    d->speed    = speed;
+    d->parent   = hub;
+    d->hub_port = port;
+    d->depth    = hub->depth + 1;
+    d->route    = hub->route | (uint32_t)(port & 0xF) << (4 * hub->depth);
+    // The transaction translator a low- or full-speed device's split
+    // transactions go through: the nearest high-speed hub above it.
+    if(speed == USB_SPEED_LOW || speed == USB_SPEED_FULL){
+        if(hub->speed == USB_SPEED_HIGH){
+            d->tt_slot = hub->slot;
+            d->tt_port = port;
+        } else {
+            d->tt_slot = hub->tt_slot;
+            d->tt_port = hub->tt_port;
+        }
+    }
+    return usb_enumerate(d->hc, d) ? d : NULL;
+}
+
 static void xhci_port_attach(struct xhci* hc, uint8_t port){
     int speed = xhci_port_reset(hc, port);
     if(speed <= 0){
@@ -891,31 +991,14 @@ static void xhci_port_attach(struct xhci* hc, uint8_t port){
     d->port = port;
     d->speed = speed;
     hc->port_dev[port] = d;
-    int res = usb_address(hc, d);
-    serial_write("usb: port ");
-    serial_write(itoa(port));
-    serial_write(hc->port_major[port] == 3 ? " (USB 3) " : " (USB 2) ");
-    serial_write(speed_name(d->speed));
-    serial_write(" speed");
-    if(res < 0){
-        serial_write(", enumeration failed\n");
-        d->gone = true;
-        usb_release(hc, d);
-        return;
-    }
-    serial_write(", slot ");
-    serial_write(itoa(d->slot));
-    serial_write(", ");
-    write_hex4(d->desc.idVendor);
-    serial_write(":");
-    write_hex4(d->desc.idProduct);
-    serial_write(" ");
-    serial_write(d->product);
-    serial_write("\n");
-    usb_bind(d);
+    usb_enumerate(hc, d);
 }
 
-static void xhci_port_detach(struct xhci* hc, struct usb_device* d){
+void usb_device_detach(struct usb_device* d){
+    struct xhci* hc = d->hc;
+    if(d->gone){
+        return;
+    }
     d->gone = true;
     spin_lock(&hc->lock);
     for(int i = 1; i < 32; i++){
@@ -926,11 +1009,12 @@ static void xhci_port_detach(struct xhci* hc, struct usb_device* d){
         }
     }
     spin_unlock(&hc->lock);
-    serial_write("usb: port ");
-    serial_write(itoa(d->port));
+    serial_write("usb: ");
+    usb_write_location(d);
     serial_write(" disconnected, slot ");
     serial_write(itoa(d->slot));
     serial_write("\n");
+    usb_hub_disconnect(d);                          // what is behind it goes first
     usb_hid_disconnect(d);
     usb_msc_disconnect(d);
     usb_release(hc, d);
@@ -946,7 +1030,8 @@ static void xhci_ports_scan(struct xhci* hc, bool all){
         op_write(hc, XHCI_OP_PORTSC(port), portsc_neutral(v) | PORTSC_CSC);
         struct usb_device* d = hc->port_dev[port];
         if(d && (!(v & PORTSC_CCS) || (v & PORTSC_CSC))){
-            xhci_port_detach(hc, d);
+            usb_device_detach(d);
+            hc->port_dev[port] = NULL;
             d = NULL;
         }
         if(!d && (v & PORTSC_CCS)){
@@ -1204,6 +1289,7 @@ static void usb_service(void){
             xhci_ports_scan(hc, false);
         }
     }
+    usb_hub_service();
     usb_hid_service();
 }
 
@@ -1213,14 +1299,16 @@ void usb_input_kick(struct xhci* hc){
     }
 }
 
-// Polled controllers: their input work runs on the BSP's tick.
+// Polled controllers: their input work runs on the BSP's tick. Held
+// keys repeat from here too, whatever the controller.
 static void usb_tick(void){
     for(int i = 0; i < xhci_hc_count; i++){
         if(!xhci_hcs[i]->irq.enabled){
             usb_service();
-            return;
+            break;
         }
     }
+    usb_hid_repeat();
 }
 
 // Platform controllers (usb.h), started after the PCI ones.

@@ -22,7 +22,9 @@
 // irq set), else poll. Devices found at boot become disks in the
 // driver's mount, after the native and virtio disks so their ids do
 // not move; one plugged in later is only logged (no hot-plug mount).
-// An unplugged disk stays in the table and fails every request.
+// An unplugged disk is marked gone with its partitions (disk_mark_gone):
+// its id stays taken, its files no longer open (no such file or
+// directory) and its blocks fail without reaching the driver.
 //
 // Writes: the stick is the point of USB storage (a file written on the
 // machine reads back elsewhere), so a USB disk is writable on bare
@@ -396,9 +398,12 @@ void usb_msc_disconnect(struct usb_device* dev){
         if(msc_devices[i]->dev == dev){
             msc_devices[i]->broken = true;
             if(msc_devices[i]->disk){
+                int views = disk_mark_gone(msc_devices[i]->disk);
                 serial_write("usb-msc: disk ");
                 serial_write(itoa(msc_devices[i]->disk->id));
-                serial_write(" gone, its requests fail from now on\n");
+                serial_write(" gone, marked removed with ");
+                serial_write(itoa(views));
+                serial_write(views == 1 ? " partition\n" : " partitions\n");
             }
         }
     }

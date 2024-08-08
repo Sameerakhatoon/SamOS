@@ -58,6 +58,12 @@ struct disk {
     // disk.c: internal disks on real hardware start read-only.
     bool                read_only;
 
+    // The device went away (a USB stick pulled out): set on the
+    // REAL disk and every partition view of it by disk_mark_gone. Its
+    // files no longer open and its blocks fail at once, without a
+    // driver call. The struct and its id stay (nothing frees disks).
+    volatile bool       gone;
+
     void*               fs_private;
 
     // Lecture 183 - disk-driver-side opaque pointer (PATA per-
@@ -103,6 +109,9 @@ int          disk_create_partition(struct disk* disk,
                                    struct disk** partition_disk_out);
 
 void*        disk_private_data_driver(struct disk* disk);
+// A removable REAL disk went away: mark it and its partition
+// views gone. Returns how many partition views there were.
+int          disk_mark_gone(struct disk* hardware_disk);
 
 // Lecture 206 - absolute-LBA + byte-offset accessors.
 uint64_t     disk_real_sector(struct disk* idisk, uint64_t lba);

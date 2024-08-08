@@ -128,6 +128,12 @@ static int file_resolve_path(const char* path, struct path_root** root_out, stru
         pathparser_free(root_path);
         return -EIO;
     }
+    // Its device went away (a USB stick pulled out): the drive
+    // is not there any more.
+    if(disk->gone || (disk->hardware_disk && disk->hardware_disk->gone)){
+        pathparser_free(root_path);
+        return -ENOENT;
+    }
     *root_out = root_path;
     *disk_out = disk;
     return 0;

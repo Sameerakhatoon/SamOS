@@ -3,8 +3,8 @@
 # q35 with i8042=off, through the monitor's device_del / device_add.
 #   - The keyboard pulled out: the port's disconnect is seen, the slot
 #     freed; a new keyboard plugged in is enumerated, bound, and types.
-#   - The stick pulled out: its disk fails every request from then on
-#     (cat reports an error, nothing hangs or faults); a stick plugged
+#   - The stick pulled out: its disk is marked gone (its files no
+#     longer open, nothing hangs or faults); a stick plugged
 #     in after boot is enumerated and bound but not mounted (no
 #     hot-plug mount yet).
 # e2e-requires: xhci (qemu-xhci on PCI)
@@ -50,8 +50,8 @@ expect_serial 'usb: port [5-8] disconnected, slot [0-9]+$' "keyboard unplug seen
 [ "$(tr -d '\r' < "$E2E_SERIAL" | grep -Ec 'usb-hid: keyboard, slot')" -eq 2 ] || e2e_fail "the new keyboard was not bound"
 expect_serial '^after replug$' "the new keyboard types"
 expect_serial 'usb: port [1-4] disconnected, slot [0-9]+$' "stick unplug seen"
-expect_serial 'usb-msc: disk 1 gone, its requests fail from now on$' "stick's disk failed"
-expect_serial '^cat: 1:/USBHELLO.TXT: read error$' "reading the gone stick fails"
+expect_serial 'usb-msc: disk 1 gone, marked removed with 0 partitions$' "stick's disk marked gone"
+expect_serial '^cat: 1:/USBHELLO.TXT: no such file or directory$' "the gone stick's files no longer open"
 expect_serial '^still typing$' "the shell lives on after the stick went"
 expect_serial 'usb-msc: slot [0-9]+, bulk-only, endpoints [0-9]+ IN [0-9]+ OUT, [0-9]+-byte packets, plugged in after boot: not mounted$' \
     "late stick bound, not mounted"

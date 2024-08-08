@@ -259,9 +259,27 @@ struct disk* disk_get(int index){
     return disk;
 }
 
+int disk_mark_gone(struct disk* hardware_disk){
+    int views = 0;
+    int total = disk_count();
+    for(int i = 0; i < total; i++){
+        struct disk* d = disk_get(i);
+        if(d && d != hardware_disk && d->hardware_disk == hardware_disk){
+            d->gone = true;
+            views++;
+        }
+    }
+    hardware_disk->gone = true;
+    return views;
+}
+
 static int disk_check_range(struct disk* idisk, uint64_t lba, int total){
     if(total <= 0){
         return -EINVARG;
+    }
+    // A disk whose device went away fails without a driver call.
+    if(idisk->gone || (idisk->hardware_disk && idisk->hardware_disk->gone)){
+        return -EIO;
     }
     if(idisk->total_sectors &&
        (lba >= idisk->total_sectors || (uint64_t)total > idisk->total_sectors - lba)){

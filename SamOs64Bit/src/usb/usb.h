@@ -8,10 +8,12 @@
 // kpage_zalloc and paging_kernel_virt_to_phys), so the Pi 4's VL805 and the
 // VisionFive 2's Cadence controller can reuse it.
 //
-// One device per root port: no hubs, so no route strings and no
-// transaction translators. A device is bound to the first interface
-// a class driver takes: HID boot keyboard or mouse, or mass storage
-// bulk-only SCSI.
+// A device sits on a root port or behind hubs (usb_hub.c): its route
+// string names the hub ports below the root port (one nibble per tier,
+// five tiers), and a low- or full-speed device behind a high-speed hub
+// names that hub's transaction translator. A device is bound to the
+// first interface a class driver takes: hub, HID boot keyboard or
+// mouse, or mass storage bulk-only SCSI.
 
 #include <stdint.h>
 #include <stdbool.h>
@@ -67,8 +69,17 @@ struct usb_endpoint;
 struct usb_device {
     struct xhci*         hc;
     uint8_t              slot;
-    uint8_t              port;          // root hub port, 1-based
+    uint8_t              port;          // root hub port, 1-based (a hub's for devices behind it)
     uint8_t              speed;         // USB_SPEED_*
+    struct usb_device*   parent;        // the hub it is plugged into, NULL on a root port
+    uint8_t              hub_port;      // its port on that hub, 1-based
+    uint8_t              depth;         // hubs between it and the root port
+    uint32_t             route;         // route string (xHCI 4.3.3, USB 3.2 10.16.2.6)
+    uint8_t              tt_slot;       // low/full speed behind a high-speed hub: that hub's slot
+    uint8_t              tt_port;       // and the port of it the device is under
+    bool                 is_hub;        // set by usb_hub.c before its endpoint is opened:
+    uint8_t              hub_ports;     //   the slot context's Hub, Number of Ports
+    uint8_t              hub_ttt;       //   and TT Think Time fields
     uint8_t              max_dci;       // highest endpoint context in use
     uint16_t             mps0;
     struct usb_device_descriptor desc;
@@ -129,10 +140,26 @@ uint8_t usb_endpoint_address(struct usb_endpoint* ep);
 // `in_iface` is set. NULL when there is none.
 const uint8_t* usb_config_next(struct usb_device* dev, const uint8_t* from, uint8_t type, bool in_iface);
 
+// Hubs (usb_hub.c): a device found on port `port` of `hub`, already
+// reset and enabled there at `speed`: give it a slot (route string, TT
+// fields), enumerate and bind it. NULL when that failed.
+struct usb_device* usb_device_attach(struct usb_device* hub, uint8_t port, uint8_t speed);
+// A device that went away (its root port or its hub port): fail its
+// transfers, tell its class driver (a hub detaches what is behind it
+// first), free its slot. The struct stays.
+void usb_device_detach(struct usb_device* dev);
+// "port N" for a root port device, "hub slot H port N" behind a hub.
+void usb_write_location(struct usb_device* dev);
+
 // Class drivers. probe returns 0 when it took the device.
+int  usb_hub_probe(struct usb_device* dev, const struct usb_interface_descriptor* intf);
+void usb_hub_disconnect(struct usb_device* dev);
+void usb_hub_service(void);
 int  usb_hid_probe(struct usb_device* dev, const struct usb_interface_descriptor* intf);
 void usb_hid_disconnect(struct usb_device* dev);
 void usb_hid_service(void);
+// Typematic repeat of a held key, on the BSP's tick.
+void usb_hid_repeat(void);
 // mouse.c, once the mouse layer is up: USB mice move `ps2`'s cursor,
 // or one of their own registered then when `ps2` is NULL.
 struct mouse;
