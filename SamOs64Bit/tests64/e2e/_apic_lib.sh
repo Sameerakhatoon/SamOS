@@ -16,7 +16,7 @@ apic_check() {
     }
     e2e_run_qemu 300 _apic_mon
     expect_serial '^apic: lapic id 0 version 0x[0-9a-f]+, ioapic gsi 0-23, 8259 masked 0x000000000000ffff$' "$m: IOAPIC found, both 8259s masked"
-    expect_serial '^apic: lapic timer [0-9]+ kHz \(divide 16\), measured against PIT channel 2$' "$m: LAPIC timer calibrated"
+    expect_serial '^apic: lapic timer [0-9]+ kHz \(divide 16\), measured against HPET$' "$m: LAPIC timer calibrated (against the HPET, QEMU's default)"
     local khz
     khz=$(tr -d '\r' < "$E2E_SERIAL" | sed -nE 's/^apic: lapic timer ([0-9]+) kHz.*/\1/p' | head -n 1)
     # QEMU's APIC bus runs at 1 GHz: 62500 kHz after divide 16.

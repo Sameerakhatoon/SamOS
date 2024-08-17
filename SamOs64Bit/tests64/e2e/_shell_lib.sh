@@ -79,11 +79,15 @@ shell_wait_prompt() {
     return 1
 }
 
+# E2E_SHELL_BOOT_TIMEOUT (seconds per wait, default 120): a
+# boot under TCG on a host with load 40+ took over 6 minutes to the
+# selftest (most of it in memtest).
 shell_boot() {
-    e2e_wait_serial '^e2e: user selftest done' 120 || true
+    local limit=${E2E_SHELL_BOOT_TIMEOUT:-120}
+    e2e_wait_serial '^e2e: user selftest done' "$limit" || true
     sleep 1
     printf 'sendkey ret\n'
-    e2e_wait_serial "$SHELL_BANNER" 120 || return 1
+    e2e_wait_serial "$SHELL_BANNER" "$limit" || return 1
     sleep 1
 }
 

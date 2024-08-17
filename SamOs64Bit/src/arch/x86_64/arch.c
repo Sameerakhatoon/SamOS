@@ -10,6 +10,7 @@
 #include "arch/x86_64/cpuid.h"
 #include "arch/x86_64/tsc.h"
 #include "arch/x86_64/pit.h"
+#include "arch/x86_64/refclock.h"
 #include "arch/x86_64/irq.h"
 #include "arch/x86_64/idt.h"
 #include "arch/x86_64/apic.h"
@@ -27,7 +28,8 @@
 
 // Check the CPU and set CR0, CR4 and EFER before any code that
 // depends on them. TSC frequency, checked against PIT
-// channel 2.
+// channel 2. Only CPUID's value here; it is measured in
+// arch_firmware_init, once the ACPI tables name the clocks.
 void arch_early_init(void){
     cpu_init();
     tsc_init();
@@ -205,12 +207,18 @@ void arch_irq_wait_end(uint64_t state){
 // channel 2) instead, at the same rate. If the LAPIC timer measures 0,
 // the PIT ticks through the IOAPIC (IRQ_enable routes IRQ0 to its
 // GSI); samos.lapic_timer_fail forces that path for e2e/179.
+// The LAPIC timer is calibrated against the reference clock
+// (HPET, ACPI PM timer or PIT channel 2). The PIT tick stays the
+// fallback; on a PC without a PIT there is then no tick, said here.
 bool arch_timer_start(uint32_t hz){
     smp_tick_hz = hz;
     if(apic_active() && !boot_cmdline_has("samos.lapic_timer_fail") &&
        lapic_timer_calibrate() == 0){
         lapic_timer_start(hz);
         return true;
+    }
+    if(!pit_present()){
+        serial_write("timer: no PIT for the fallback tick, the scheduler will not tick\n");
     }
     serial_write(apic_active() ? "apic: IOAPIC with PIT tick\n"
                                : "apic: legacy 8259 and PIT tick\n");
@@ -239,9 +247,13 @@ TIME_MICROSECONDS arch_uptime_us(void){
 // Firmware tables, port I/O and PCI configuration space
 // ------------------------------------------------------------------
 
-// The ACPI tables from the loader's RSDP.
+// The ACPI tables from the loader's RSDP. Then the
+// reference clock (HPET, ACPI PM timer or PIT channel 2) and the TSC
+// frequency measured against it.
 void arch_firmware_init(void){
     acpi_init(samos_boot_info_ptr->acpi_rsdp);
+    refclock_init();
+    tsc_calibrate();
 }
 
 uint8_t  arch_pio_read8(uint16_t port)  { return insb(port); }

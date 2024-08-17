@@ -20,6 +20,7 @@
 #include "arch/x86_64/io.h"
 #include "io/serial.h"
 #include "arch/x86_64/pit.h"
+#include "arch/x86_64/refclock.h"
 #include "acpi/acpi.h"
 #include "arch/x86_64/paging.h"
 #include "string/string.h"
@@ -321,6 +322,13 @@ int apic_init(void){
 // windows). Not against the TSC: under QEMU TCG the TSC follows
 // the host clock while the PIT and the LAPIC timer follow QEMU's
 // virtual clock, and the TSC route came out 10 to 25 % fast.
+// Across the reference clock's windows instead (refclock.c:
+// HPET, else ACPI PM timer, else PIT channel 2), so a PC without a
+// PIT still gets a tick. A result under 100 kHz (no real LAPIC timer
+// runs that slowly after divide 16; a missing PIT measured 1 kHz)
+// counts as a failed calibration.
+#define LAPIC_TIMER_MIN_HZ    100000u
+
 static uint64_t lapic_timer_elapsed(void){
     return 0xFFFFFFFFu - lapic_read(LAPIC_TIMER_CURRENT);
 }
@@ -329,12 +337,18 @@ int lapic_timer_calibrate(void){
     lapic_write(LAPIC_TIMER_DIVIDE, LAPIC_DIVIDE_16);
     lapic_write(LAPIC_LVT_TIMER, LVT_MASKED | APIC_VECTOR_TIMER);
     lapic_write(LAPIC_TIMER_INIT, 0xFFFFFFFF);
-    timer_hz = pit_measure_hz(lapic_timer_elapsed);
+    timer_hz = refclock_measure_hz(lapic_timer_elapsed);
     lapic_write(LAPIC_TIMER_INIT, 0);
     serial_write("apic: lapic timer ");
     serial_write(itoa((int)(timer_hz / 1000)));
-    serial_write(" kHz (divide 16), measured against PIT channel 2\n");
-    return timer_hz ? 0 : -EIO;
+    serial_write(" kHz (divide 16), measured against ");
+    serial_write(refclock_long_name());
+    serial_write("\n");
+    if(timer_hz < LAPIC_TIMER_MIN_HZ){
+        timer_hz = 0;
+        return -EIO;
+    }
+    return 0;
 }
 
 // Interprocessor interrupts through the ICR. The high

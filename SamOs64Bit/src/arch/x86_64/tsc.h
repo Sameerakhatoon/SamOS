@@ -13,9 +13,13 @@
 
 typedef uint64_t TIME_TSC;
 
-// Measure the frequency (CPUID checked against PIT channel
-// 2) and record the boot TSC. tsc_frequency calls it on first use.
+// Record the boot TSC and a first frequency (CPUID, else
+// 1 GHz); tsc_frequency calls it on first use. tsc_calibrate
+// measures it against the reference clock (refclock.h) once the ACPI
+// tables are read, and keeps CPUID's value when the two agree
+// within 2 %.
 void              tsc_init(void);
+void              tsc_calibrate(void);
 TIME_MICROSECONDS tsc_uptime_microseconds(void);
 TIME_TSC          tsc_frequency(void);
 void              udelay(TIME_MICROSECONDS microseconds);

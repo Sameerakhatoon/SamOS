@@ -28,10 +28,11 @@ _wait_all() {
 e2e_run_qemu 700 _wait_all
 
 # The TSC and the PIT are x86's; riscv64's time CSR has the
-# device tree's timebase.
+# device tree's timebase. The TSC is measured against the HPET
+# (QEMU's default; refclock.c).
 case " $E2E_ARCH_PROVIDES " in
-*" x86 "*) expect_serial '^tsc: cpuid [0-9]+ kHz, pit [1-9][0-9]* kHz, using [1-9][0-9]* kHz$' \
-    "TSC calibrated against the PIT, frequency not 0" ;;
+*" x86 "*) expect_serial '^tsc: cpuid [0-9]+ kHz, hpet [1-9][0-9]* kHz, using [1-9][0-9]* kHz$' \
+    "TSC calibrated against the HPET, frequency not 0" ;;
 esac
 expect_serial '^SPIN A done ms [0-9]+$' "spinner A finished"
 expect_serial '^SPIN B done ms [0-9]+$' "spinner B finished"

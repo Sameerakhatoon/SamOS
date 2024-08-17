@@ -132,6 +132,15 @@ struct acpi_info {
     bool     have_reset_reg;
     struct acpi_gas reset_reg;
     uint8_t  reset_value;
+    // The PM timer (3.579545 MHz), a reference clock for the
+    // TSC and LAPIC timer on a PC without a PIT. Address 0 = absent
+    // (hardware-reduced ACPI has none).
+    struct acpi_gas pm_tmr;
+    bool     pm_tmr_32bit;         // FADT flags TMR_VAL_EXT, else 24 bits
+
+    // HPET table: the event timer block, 0 = no table (or one
+    // not in memory space).
+    uint64_t hpet_phys;
 
     // \_S5 from the DSDT
     bool     s5_found;

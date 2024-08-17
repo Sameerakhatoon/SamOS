@@ -16,14 +16,19 @@
 //   - divided by a frequency of 0 when neither leaf had one.
 // tsc_init now measures the TSC against PIT channel 2 and keeps the
 // CPUID value only when it agrees with the measurement.
+//
+// Against the reference clock (refclock.c: HPET, ACPI PM timer
+// or PIT channel 2), which needs the ACPI tables: tsc_init, early,
+// only takes CPUID's value (or 1 GHz) for the time before them, and
+// tsc_calibrate measures once acpi_init has run.
 
 #include "tsc.h"
 #include "cpuid.h"
-#include "pit.h"
+#include "refclock.h"
 #include "kernel.h"
 #include "string/string.h"
 
-// Used when neither CPUID nor the PIT gives a frequency, so nothing
+// Used when neither CPUID nor the reference clock gives a frequency, so nothing
 // ever divides by zero. Timing is then only roughly right.
 #define TSC_FALLBACK_HZ  1000000000ULL
 
@@ -61,22 +66,31 @@ static void tsc_print_khz(const char* label, uint64_t hz){
 
 void tsc_init(void){
     uint64_t cpuid_hz = tsc_cpuid_frequency();
-    uint64_t pit_hz   = pit_measure_tsc_hz();
-    uint64_t hz       = pit_hz;
+    tsc_freq_val = cpuid_hz ? cpuid_hz : TSC_FALLBACK_HZ;
+    tsc_boot     = read_tsc();
+}
+
+// After refclock_init. Prints "tsc: cpuid N kHz, <clock> N
+// kHz, using N kHz", <clock> one of hpet, pmtimer, pit or none.
+void tsc_calibrate(void){
+    uint64_t cpuid_hz = tsc_cpuid_frequency();
+    uint64_t ref_hz   = refclock_measure_hz(read_tsc);
+    uint64_t hz       = ref_hz;
     // CPUID is exact when it is right; trust it within 2 % of the
     // measurement.
-    if(cpuid_hz && pit_hz &&
-       cpuid_hz > pit_hz - pit_hz / 50 && cpuid_hz < pit_hz + pit_hz / 50){
+    if(cpuid_hz && ref_hz &&
+       cpuid_hz > ref_hz - ref_hz / 50 && cpuid_hz < ref_hz + ref_hz / 50){
         hz = cpuid_hz;
     }
     if(!hz){
         hz = cpuid_hz ? cpuid_hz : TSC_FALLBACK_HZ;
     }
     tsc_freq_val = hz;
-    tsc_boot     = read_tsc();
 
     tsc_print_khz("tsc: cpuid ", cpuid_hz);
-    tsc_print_khz(", pit ", pit_hz);
+    print(", ");
+    print(refclock_short_name());
+    tsc_print_khz(" ", ref_hz);
     tsc_print_khz(", using ", hz);
     print("\n");
 }

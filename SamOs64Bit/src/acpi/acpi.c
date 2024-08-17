@@ -85,11 +85,24 @@ struct acpi_fadt {
     struct acpi_gas x_pm1b_evt_blk;
     struct acpi_gas x_pm1a_cnt_blk; // offset 172
     struct acpi_gas x_pm1b_cnt_blk; // offset 184
+    struct acpi_gas x_pm2_cnt_blk;
+    struct acpi_gas x_pm_tmr_blk;   // offset 208
+} __attribute__((packed));
+
+// HPET description table (IA-PC HPET spec 1.0a, 3.2.4).
+struct acpi_hpet {
+    struct acpi_sdt_header hdr;
+    uint32_t event_timer_block_id;
+    struct acpi_gas base;           // offset 40
+    uint8_t  hpet_number;
+    uint16_t min_tick;
+    uint8_t  page_protection;
 } __attribute__((packed));
 
 #define FADT_HAS(f, field) \
     ((f)->hdr.length >= __builtin_offsetof(struct acpi_fadt, field) + sizeof((f)->field))
 
+#define FADT_FLAG_TMR_VAL_EXT    (1u << 8)
 #define FADT_FLAG_RESET_REG_SUP  (1u << 10)
 #define PM1_SCI_EN               0x0001
 #define PM1_SLP_TYP_SHIFT        10
@@ -338,6 +351,12 @@ static void acpi_parse_fadt(struct acpi_fadt* f){
     }
     acpi_pm1_reg(&info.pm1a_cnt, f->pm1a_cnt_blk, &f->x_pm1a_cnt_blk, FADT_HAS(f, x_pm1a_cnt_blk));
     acpi_pm1_reg(&info.pm1b_cnt, f->pm1b_cnt_blk, &f->x_pm1b_cnt_blk, FADT_HAS(f, x_pm1b_cnt_blk));
+    // The PM timer block is 4 bytes; a shorter length means none.
+    acpi_pm1_reg(&info.pm_tmr, FADT_HAS(f, pm_tmr_len) && f->pm_tmr_len >= 4 ? f->pm_tmr_blk : 0,
+                 &f->x_pm_tmr_blk, FADT_HAS(f, x_pm_tmr_blk));
+    if(FADT_HAS(f, flags) && (f->flags & FADT_FLAG_TMR_VAL_EXT)){
+        info.pm_tmr_32bit = true;
+    }
     if(f->hdr.revision >= 2 && FADT_HAS(f, reset_value) &&
        (f->flags & FADT_FLAG_RESET_REG_SUP) && f->reset_reg.address){
         info.have_reset_reg = true;
@@ -400,6 +419,13 @@ int acpi_init(uint64_t rsdp_phys){
     }
     if((t = acpi_find_table("FACP", 0))){
         acpi_parse_fadt((struct acpi_fadt*)t);
+    }
+    // The HPET, when its block is in memory space.
+    if((t = acpi_find_table("HPET", 0)) && t->length >= sizeof(struct acpi_hpet)){
+        struct acpi_hpet* h = (struct acpi_hpet*)t;
+        if(h->base.space_id == ACPI_GAS_MEMORY && h->base.address){
+            info.hpet_phys = h->base.address;
+        }
     }
     if((t = acpi_find_table("SPCR", 0))){
         acpi_parse_spcr(t);

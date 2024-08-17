@@ -50,6 +50,33 @@ static uint64_t pit_measure_once(uint64_t (*read)(void)){
     return (end - start) * PIT_CAL_DIVISOR;
 }
 
+// Is there an 8254 at all? Channel 2, mode 0, counting down
+// from 0xFFFF with the gate on: a latched read must change within a
+// few thousand reads. Without a PIT the ports float (0xFF) and port
+// 0x61 never shows OUT2, which pit_measure_once would only notice
+// after PIT_CAL_MAX_POLLS reads (seconds on real hardware).
+bool pit_present(void){
+    uint8_t gate = insb(PIT_GATE_PORT);
+    outb(PIT_GATE_PORT, (gate & ~0x02) | 0x01);
+    outb(PIT_COMMAND, 0xB0);
+    outb(PIT_CHANNEL2, 0xFF);
+    outb(PIT_CHANNEL2, 0xFF);
+    uint16_t first = 0;
+    bool moved = false;
+    for(int i = 0; i < 100000 && !moved; i++){
+        outb(PIT_COMMAND, 0x80);                     // latch channel 2
+        uint16_t v = insb(PIT_CHANNEL2);
+        v |= (uint16_t)insb(PIT_CHANNEL2) << 8;
+        if(i == 0){
+            first = v;
+        } else if(v != first){
+            moved = true;
+        }
+    }
+    outb(PIT_GATE_PORT, gate);
+    return moved;
+}
+
 // Median of three windows, so one window stretched by the host
 // descheduling the VM does not decide the frequency.
 uint64_t pit_measure_hz(uint64_t (*read)(void)){

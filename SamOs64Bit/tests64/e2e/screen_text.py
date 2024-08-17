@@ -69,7 +69,13 @@ def read_font(path):
 def main():
     w, h, px = read_ppm(sys.argv[1])
     glyphs = read_font(sys.argv[2])
-    bg = px[0:3]
+    # The most common colour, not pixel (0,0): the mouse cursor
+    # sits at the top left until the mouse moves.
+    counts = {}
+    for i in range(0, len(px) - 2, 3 * 7):
+        k = px[i:i + 3]
+        counts[k] = counts.get(k, 0) + 1
+    bg = max(counts, key=counts.get)
 
     def ink(x, y):
         i = (y * w + x) * 3

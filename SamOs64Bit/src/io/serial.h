@@ -9,6 +9,7 @@
 // read kernel output without the framebuffer. QEMU exposes it via
 // `-serial stdio` or `-serial file:PATH`.
 
+#include <stdbool.h>
 
 void serial_init(void);
 void serial_putc(char c);
@@ -23,5 +24,10 @@ void serial_write_hex_unlocked(unsigned long long value);
 // start, kept even without a UART.
 #define SERIAL_BOOT_LOG_SIZE  (64 * 1024)
 const char* serial_boot_log_get(unsigned int* len);
+// A UART answered at serial_init (false on a PC without one).
+bool serial_present(void);
+// While fn is set, every character serial_putc gets also goes
+// to fn (kernel.c: the screen, for framebuffer logging). NULL stops it.
+void serial_set_mirror(void (*fn)(char c));
 
 #endif

@@ -253,6 +253,39 @@ EFI_STATUS ReadFileFromCurrentFilesystem(CHAR16* FileName,
 // is BGRX; otherwise switch to the BGRX mode closest to 1024x768; fall
 // back to an RGBX mode (the kernel swaps red and blue). BitMask and
 // BltOnly modes have no linear framebuffer we understand.
+//
+// Real firmware: the mode it leaves set can be anything (the
+// panel's 3840 x 2160, 1366 x 768, a pitch wider than the width), and
+// some list modes that are not usable. A usable mode is 32-bit BGRX or
+// RGBX with a pitch of at least its width. Among those, a mode no
+// larger than GOP_MAX_WIDTH x GOP_MAX_HEIGHT and at least 640 x 480
+// "fits": the kernel keeps two copies of the screen in RAM and redraws
+// in software, so a 4K screen costs 64 MiB and seconds per redraw.
+// Order: fits, then BGRX, then closest to 1024 x 768. The firmware's
+// mode is kept when it is BGRX and fits.
+#define GOP_MAX_WIDTH   1920
+#define GOP_MAX_HEIGHT  1200
+#define GOP_SCORE_TIER  1000000
+
+STATIC INT64 GopModeScore(CONST EFI_GRAPHICS_OUTPUT_MODE_INFORMATION* M)
+{
+    BOOLEAN Bgrx = M->PixelFormat == PixelBlueGreenRedReserved8BitPerColor;
+    if ((!Bgrx && M->PixelFormat != PixelRedGreenBlueReserved8BitPerColor) ||
+        M->HorizontalResolution == 0 || M->VerticalResolution == 0 ||
+        M->PixelsPerScanLine < M->HorizontalResolution) {
+        return -1;
+    }
+    BOOLEAN Fits = M->HorizontalResolution >= 640 && M->VerticalResolution >= 480 &&
+                   M->HorizontalResolution <= GOP_MAX_WIDTH && M->VerticalResolution <= GOP_MAX_HEIGHT;
+    INT64 Dx = (INT64)M->HorizontalResolution - 1024;
+    INT64 Dy = (INT64)M->VerticalResolution - 768;
+    INT64 Distance = (Dx < 0 ? -Dx : Dx) + (Dy < 0 ? -Dy : Dy);
+    if (Distance >= GOP_SCORE_TIER) {
+        Distance = GOP_SCORE_TIER - 1;
+    }
+    return (Fits ? 4 : 0) * GOP_SCORE_TIER + (Bgrx ? 2 : 1) * GOP_SCORE_TIER - Distance;
+}
+
 STATIC EFI_STATUS SetupGraphics(struct samos_boot_info* Info)
 {
     EFI_GRAPHICS_OUTPUT_PROTOCOL* Gop = NULL;
@@ -262,8 +295,17 @@ STATIC EFI_STATUS SetupGraphics(struct samos_boot_info* Info)
         return Status;
     }
 
-    EFI_GRAPHICS_PIXEL_FORMAT CurrentFormat = Gop->Mode->Info->PixelFormat;
-    if (CurrentFormat != PixelBlueGreenRedReserved8BitPerColor) {
+    // Keep the firmware's mode only when it is BGRX and within
+    // the size limit; otherwise the best mode by GopModeScore.
+    EFI_GRAPHICS_OUTPUT_MODE_INFORMATION* Current = Gop->Mode->Info;
+    BOOLEAN KeepCurrent = Current->PixelFormat == PixelBlueGreenRedReserved8BitPerColor &&
+                          GopModeScore(Current) >= 4 * GOP_SCORE_TIER &&
+                          Gop->Mode->FrameBufferBase != 0;
+    Print(L"GOP: %u modes, current %u (%u x %u, pitch %u, format %u)%s\n",
+          Gop->Mode->MaxMode, Gop->Mode->Mode, Current->HorizontalResolution,
+          Current->VerticalResolution, Current->PixelsPerScanLine, Current->PixelFormat,
+          KeepCurrent ? L", kept" : L"");
+    if (!KeepCurrent) {
         INT64  BestScore = -1;
         UINT32 BestMode  = Gop->Mode->Mode;
         for (UINT32 Mode = 0; Mode < Gop->Mode->MaxMode; Mode++) {
@@ -272,15 +314,7 @@ STATIC EFI_STATUS SetupGraphics(struct samos_boot_info* Info)
             if (EFI_ERROR(Gop->QueryMode(Gop, Mode, &SizeOfInfo, &ModeInfo))) {
                 continue;
             }
-            INT64 Score = -1;
-            INT64 Dx = (INT64)ModeInfo->HorizontalResolution - 1024;
-            INT64 Dy = (INT64)ModeInfo->VerticalResolution - 768;
-            INT64 Distance = (Dx < 0 ? -Dx : Dx) + (Dy < 0 ? -Dy : Dy);
-            if (ModeInfo->PixelFormat == PixelBlueGreenRedReserved8BitPerColor) {
-                Score = 2000000 - Distance;
-            } else if (ModeInfo->PixelFormat == PixelRedGreenBlueReserved8BitPerColor) {
-                Score = 1000000 - Distance;
-            }
+            INT64 Score = GopModeScore(ModeInfo);
             FreePool(ModeInfo);
             if (Score > BestScore) {
                 BestScore = Score;
@@ -294,10 +328,17 @@ STATIC EFI_STATUS SetupGraphics(struct samos_boot_info* Info)
         if (BestMode != Gop->Mode->Mode) {
             Status = Gop->SetMode(Gop, BestMode);
             if (EFI_ERROR(Status)) {
-                Print(L"Error: GOP SetMode(%u) failed: %r\n", BestMode, Status);
-                return Status;
+                // The old mode is still set: use it if we can.
+                Print(L"GOP SetMode(%u) failed: %r\n", BestMode, Status);
+                if (GopModeScore(Gop->Mode->Info) < 0) {
+                    return Status;
+                }
             }
         }
+    }
+    if (Gop->Mode->FrameBufferBase == 0 || GopModeScore(Gop->Mode->Info) < 0) {
+        Print(L"Error: GOP mode %u has no linear framebuffer\n", Gop->Mode->Mode);
+        return EFI_UNSUPPORTED;
     }
 
     EFI_GRAPHICS_OUTPUT_MODE_INFORMATION* ModeInfo = Gop->Mode->Info;
@@ -652,7 +693,17 @@ UefiMain(IN EFI_HANDLE       ImageHandle,
         // -nographic or no display device: the kernel runs on the UART.
         Info->fb_format = SAMOS_FB_FORMAT_NONE;
 #else
-        return Status;
+        // A PC whose GOP has no mode we can draw to (BltOnly,
+        // bitmask, no GOP at all on a headless board) still boots:
+        // the kernel draws into RAM it never shows (the refused
+        // format), and the serial port and BOOTLOG.TXT carry the boot.
+        Print(L"No usable framebuffer: booting without screen output\n");
+        Info->fb_base   = 0;
+        Info->fb_size   = 0;
+        Info->fb_width  = 640;
+        Info->fb_height = 480;
+        Info->fb_pitch  = 640;
+        Info->fb_format = SAMOS_FB_FORMAT_NONE;
 #endif
     }
 

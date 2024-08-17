@@ -46,6 +46,7 @@
 #include "mouse/mouse.h"          // L150 - mouse_system_init / load_static_drivers
 #include "io/serial.h"            // COM1 console
 #include "boot/boot_info.h"       // Loader handoff block
+#include "boot/cmdline.h"         // samos.fblog
 #include "acpi/acpi.h"            // ACPI tables, shutdown, reboot
 #include "io/rtc.h"               // Wall-clock time
 #include "fs/fat/fat.h"           // RTC time for FAT timestamps
@@ -79,13 +80,60 @@ void terminal_writechar(char c, char colour)
     terminal_write(system_terminal, c);
 }
 
+// Framebuffer logging. On a PC without a UART (or with
+// samos.fblog) the boot's serial lines (acpi:, apic:, refclock:,
+// xhci:, usb:, ...) also go to the system terminal: what was written
+// before it existed is replayed, and serial_putc mirrors the rest
+// until the first process starts. print() then leaves the screen to
+// the mirror, so its lines are not drawn twice.
+static bool fblog_active;
+
+static void fblog_putc(char c)
+{
+    // The same rule as print(): skipped under a lock that comes after
+    // the graphics lock.
+    if (!system_terminal || !gfx_lock_for_print())
+    {
+        return;
+    }
+    terminal_writechar(c, 15);
+    gfx_unlock();
+}
+
+static void fblog_start(void)
+{
+    if (!system_terminal || (serial_present() && !boot_cmdline_has("samos.fblog")))
+    {
+        return;
+    }
+    unsigned int len = 0;
+    const char* log = serial_boot_log_get(&len);
+    for (unsigned int i = 0; i < len; i++)
+    {
+        fblog_putc(log[i]);
+    }
+    fblog_active = true;
+    serial_set_mirror(fblog_putc);
+    print(serial_present() ? "fblog: serial lines on the screen (samos.fblog)\n"
+                           : "fblog: no serial port, serial lines on the screen\n");
+}
+
+static void fblog_stop(void)
+{
+    if (fblog_active)
+    {
+        serial_set_mirror(NULL);
+        fblog_active = false;
+    }
+}
+
 void print(const char* str)
 {
     // Mirror every kernel print to COM1 (see io/serial.h).
     serial_write(str);
     // The screen is the graphics lock's; skipped when
     // the caller holds a lock that comes after it in the order.
-    if (!system_terminal || !gfx_lock_for_print())
+    if (fblog_active || !system_terminal || !gfx_lock_for_print())
     {
         return;
     }
@@ -506,6 +554,8 @@ void kernel_main(void)
                                           system_font_local, font_color,
                                           TERMINAL_FLAG_BACKSPACE_ALLOWED);
     }
+    // No UART (or samos.fblog): the serial lines on the screen.
+    fblog_start();
 
     // Lecture 50/55 - the TSS is built and loaded by
     // arch_trap_init.
@@ -588,6 +638,9 @@ void kernel_main(void)
     // and `task_run_first_ever_task` never returns either.
     {
         struct process* user_selftest_proc = 0;
+        // The boot is logged; from here on the processes own
+        // the screen (their output also goes to serial_putc).
+        fblog_stop();
         kernel_load_cmdline_programs();
         if(process_load_switch("@:/BLANK.ELF", &user_selftest_proc) == SAMOS_ALL_OK){
             print("e2e: running user-side BLANK.ELF selftest\n");

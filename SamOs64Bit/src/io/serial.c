@@ -65,11 +65,30 @@ const char* serial_boot_log_get(unsigned int* len)
     return serial_boot_log;
 }
 
+// Framebuffer logging: while set, every character written here
+// (UART or not) also goes to `fn` (kernel.c: the system terminal).
+static void (*serial_mirror)(char c);
+
+void serial_set_mirror(void (*fn)(char c))
+{
+    serial_mirror = fn;
+}
+
+bool serial_present(void)
+{
+    return serial_ready;
+}
+
 void serial_putc(char c)
 {
     if (!smp_active() && serial_boot_log_len < SERIAL_BOOT_LOG_SIZE)
     {
         serial_boot_log[serial_boot_log_len++] = c;
+    }
+    void (*mirror)(char) = serial_mirror;
+    if (mirror)
+    {
+        mirror(c);
     }
     if (!serial_ready)
     {

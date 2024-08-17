@@ -11,7 +11,11 @@
 #define PIT_INPUT_HZ   1193182
 #define PIT_TICK_HZ    100         // 100 Hz, a 10 ms tick
 
+#include <stdbool.h>
+
 void     pit_init(uint32_t hz);
+// False on a PC without an 8254 (channel 2 does not count).
+bool     pit_present(void);
 
 // TSC cycles per second measured against channel 2, or 0 when the
 // channel never reached its terminal count.

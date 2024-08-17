@@ -91,7 +91,7 @@ FLAGS = $(COMMON_FLAGS) -mno-red-zone -mgeneral-regs-only -mcmodel=kernel -falig
 ARCH_OBJS = arch/x86_64/kernel.asm.o arch/x86_64/early_fault.o arch/x86_64/cpu.o \
     arch/x86_64/arch.o arch/x86_64/paging.o arch/x86_64/paging.asm.o \
     arch/x86_64/io.asm.o arch/x86_64/cpuid.o arch/x86_64/tsc.o arch/x86_64/tsc.asm.o \
-    arch/x86_64/pit.o arch/x86_64/apic.o arch/x86_64/idt.o arch/x86_64/idt.asm.o \
+    arch/x86_64/pit.o arch/x86_64/refclock.o arch/x86_64/apic.o arch/x86_64/idt.o arch/x86_64/idt.asm.o \
     arch/x86_64/irq.o arch/x86_64/task.asm.o arch/x86_64/tss.asm.o arch/x86_64/gdt.o \
     arch/x86_64/smp.o arch/x86_64/ap_trampoline.asm.o
 
