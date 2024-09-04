@@ -51,12 +51,12 @@ expect_serial "$SHELL_BANNER" "shell up"
 expect_serial '^once$' "a short press types one character"
 # Not anchored: the line lands in the middle of the shell's echo.
 expect_serial 'usb-hid: first key repeat$' "a held key repeats"
-line=$(tr -d '\r' < "$E2E_SERIAL" | grep -E '^x+y$' | head -n 1)
+line=$(tr -d '\r' < "$E2E_SERIAL" | grep -aE '^x+y$' | head -n 1)
 [ -n "$line" ] || e2e_fail "no line of x's then y"
 xs=$(( ${#line} - 1 ))
 e2e_log "x held 2 s gave $xs x's (1 + about 16 repeats expected)"
 [ "$xs" -ge 6 ] && [ "$xs" -le 40 ] || e2e_fail "x held 2 s gave $xs x's, not 6 to 40"
-zline=$(tr -d '\r' < "$E2E_SERIAL" | grep -E '^Z+ shifted$' | head -n 1)
+zline=$(tr -d '\r' < "$E2E_SERIAL" | grep -aE '^Z+ shifted$' | head -n 1)
 [ -n "$zline" ] || e2e_fail "Shift+z held: no line of capital Z's (Shift lost during the repeat?)"
 zs=$(( ${#zline} - 8 ))
 e2e_log "Shift+z held 1.5 s gave $zs Z's"

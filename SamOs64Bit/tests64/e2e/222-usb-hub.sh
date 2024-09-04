@@ -63,7 +63,11 @@ expect_serial "$SHELL_BANNER" "shell up through the keyboard behind the hub"
 expect_serial '^USBHELLO\.TXT' "ls 1:/ typed on the hub keyboard lists the stick behind the hub"
 expect_serial '^hello from the usb stick$' "the stick behind the hub reads"
 expect_serial '^usb-hid: cursor registered with the mouse layer$' "mouse two hubs down has a cursor"
-expect_serial 'usb-hid: first mouse report, cursor at 670,420$' "mouse_move moved it by 30,20"
+# the cursor starts at the centre of the screen (x86 1280x800, the
+# ports' ramfb 1024x768), as in 203.
+cursor=670,420
+[ "$E2E_ARCH" = x86_64 ] || cursor=542,404
+expect_serial "usb-hid: first mouse report, cursor at $cursor\$" "mouse_move moved it by 30,20"
 [ -s "$E2E_DUMP" ] || e2e_fail "no marker dump"
 keys=$(usb_count 195)
 e2e_log "USB key events: $keys"
