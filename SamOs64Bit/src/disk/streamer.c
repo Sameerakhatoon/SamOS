@@ -122,6 +122,52 @@ static void diskstreamer_cache_fill(struct disk* disk, uint64_t lba, int sectors
     }
 }
 
+// A direct run: from the cache when it holds every sector, else only
+// the sectors it misses are read, one command per run of misses. The
+// cache is direct-mapped, so a file of a few hundred sectors can share
+// a slot with the FAT or a directory sector that every open reads
+// again: reading the whole run on any miss then read the whole file
+// over PIO on every load (192-smp-stress, 50x slower spawns once
+// KTEST.ELF grew past slot 1023 and wrapped onto the FAT's slot).
+static int diskstreamer_read_run(struct disk* disk, uint64_t lba, int sectors, char* out){
+    struct disk_stream_cache* cache = disk->cache;
+    int64_t ss = disk->sector_size;
+    if(diskstreamer_cache_run(disk, lba, sectors, out)){
+        return 0;
+    }
+    if(!cache || ss > DISK_STREAMER_MAX_CACHE_SECTOR_SIZE){
+        return disk_read_block(disk, lba, sectors, out);
+    }
+    int i = 0;
+    while(i < sectors){
+        uint64_t abs_lba = disk_real_sector(disk, lba + i);
+        struct disk_stream_cache_slot* slot = diskstreamer_cache_slot(cache, abs_lba);
+        if(slot->valid && slot->lba == abs_lba){
+            memcpy(out + i * ss, slot->buf, ss);
+            cache->hits++;
+            i++;
+            continue;
+        }
+        int j = i + 1;
+        while(j < sectors){
+            uint64_t a = disk_real_sector(disk, lba + j);
+            struct disk_stream_cache_slot* sl = diskstreamer_cache_slot(cache, a);
+            if(sl->valid && sl->lba == a){
+                break;
+            }
+            j++;
+        }
+        int res = disk_read_block(disk, lba + i, j - i, out + i * ss);
+        if(res < 0){
+            return res;
+        }
+        cache->misses += j - i;
+        diskstreamer_cache_fill(disk, lba + i, j - i, out + i * ss);
+        i = j;
+    }
+    return 0;
+}
+
 struct disk_stream* diskstreamer_new(int disk_id){
     return diskstreamer_new_from_disk(disk_get(disk_id));
 }
@@ -182,12 +228,9 @@ static int diskstreamer_read_locked(struct disk_stream* stream, void* out, int t
             if(sectors > 128){
                 sectors = 128;
             }
-            if(!diskstreamer_cache_run(stream->disk, lba, sectors, dst)){
-                int res = disk_read_block(stream->disk, lba, sectors, dst);
-                if(res < 0){
-                    return res;
-                }
-                diskstreamer_cache_fill(stream->disk, lba, sectors, dst);
+            int res = diskstreamer_read_run(stream->disk, lba, sectors, dst);
+            if(res < 0){
+                return res;
             }
             dst         += sectors * ss;
             stream->pos += sectors * ss;
