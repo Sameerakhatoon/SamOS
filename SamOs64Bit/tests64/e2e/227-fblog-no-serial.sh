@@ -45,20 +45,24 @@ e2e_run_qemu $((${E2E_SHELL_BOOT_TIMEOUT:-240} + 60)) _mon_flag
 expect_serial '^fblog: serial lines on the screen \(samos\.fblog\)$' "samos.fblog: framebuffer logging on"
 [ -s "$ppm" ] || e2e_fail "samos.fblog: no screendump"
 python3 "$here/screen_text.py" "$ppm" "$font" > "$txt" || e2e_fail "screen_text.py failed"
-grep -q '^fblog: serial lines on the screen (samos.fblog)$' "$txt" \
-    || e2e_fail "samos.fblog: the fblog line is not on the screen ($(tail -n 5 "$txt"))"
-# Every serial-only line read back whole (no '?': the mouse cursor or a
-# window can cover a few cells) is a line of the serial log, and there
-# are some.
+# BLANK.ELF can start before the dump (the guest runs on while the
+# monitor is told to stop, more of it on an idle host), and its
+# windows and the mouse cursor then cover cells of these rows:
+# screen_text.py reads them as '?', and screen_match.py matches the
+# cells that are left against the serial log.
 tr -d '\r' < "$E2E_SERIAL" > "$E2E_TMP/serial.txt"
-n=0
-while IFS= read -r row; do
-    grep -qxF -- "$row" "$E2E_TMP/serial.txt" || e2e_fail "screen row not in the serial log: '$row'"
-    n=$((n + 1))
-done < <(grep -E "$serial_only" "$txt" | grep -vF '?' | awk 'length($0) < 150')
+python3 "$here/screen_match.py" "$txt" "$E2E_TMP/serial.txt" '^fblog: serial lines on the s' > "$E2E_TMP/match-fblog.txt"
+grep -q '^match: ' "$E2E_TMP/match-fblog.txt" \
+    || e2e_fail "samos.fblog: the fblog line is not on the screen ($(tail -n 5 "$txt"))"
+# Every serial-only row read back is a line of the serial log, the
+# covered cells aside, and there are some.
+python3 "$here/screen_match.py" "$txt" "$E2E_TMP/serial.txt" "$serial_only" > "$E2E_TMP/match.txt"
+bad=$(grep -m1 '^nomatch: ' "$E2E_TMP/match.txt")
+[ -z "$bad" ] || e2e_fail "screen row not in the serial log: '${bad#nomatch: }'"
+n=$(grep -c '^match: ' "$E2E_TMP/match.txt")
 [ "$n" -ge 5 ] || e2e_fail "samos.fblog: only $n serial-only lines on the screen"
 e2e_log "samos.fblog: $n serial-only lines on the screen, each in the serial log"
-grep -Eq '^apic: lapic timer [0-9]+ kHz' "$txt" || e2e_fail "samos.fblog: the apic: lapic timer line is not on the screen"
+grep -Eq '^apic: lapic timer [0-9]+ k' "$txt" || e2e_fail "samos.fblog: the apic: lapic timer line is not on the screen"
 
 # ---- 2. no serial port ----
 _set_cmdline ''

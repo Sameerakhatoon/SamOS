@@ -52,7 +52,7 @@ _boot() {
 
 # _screen_ok <name> <w> <h>: the screendump has that size and at least
 # 5 rows that are serial log lines (a window or the mouse cursor may
-# cover part of the boot text).
+# cover part of the boot text: those cells are left out).
 _screen_ok() {
     local name=$1 w=$2 h=$3
     [ -s "$ppm" ] || e2e_fail "$name: no screendump"
@@ -60,10 +60,9 @@ _screen_ok() {
         || e2e_fail "$name: screendump is not $w x $h ($(head -c 20 "$ppm" | tr '\n' ' '))"
     python3 "$here/screen_text.py" "$ppm" "$font" > "$E2E_TMP/screen-$name.txt" || e2e_fail "screen_text.py failed"
     tr -d '\r' < "$E2E_SERIAL" > "$E2E_TMP/serial.txt"
-    local n=0 row
-    while IFS= read -r row; do
-        grep -qxF -- "$row" "$E2E_TMP/serial.txt" && n=$((n + 1))
-    done < <(grep -E '^[a-z]+: ' "$E2E_TMP/screen-$name.txt")
+    # Cells under BLANK.ELF's windows read as '?' (screen_match.py).
+    local n
+    n=$(python3 "$here/screen_match.py" "$E2E_TMP/screen-$name.txt" "$E2E_TMP/serial.txt" '^[a-z]+: ' | grep -c '^match: ')
     [ "$n" -ge 5 ] || e2e_fail "$name: only $n screen rows match serial lines (pitch or size wrong?)"
     e2e_log "$name: ${w}x${h} screen, $n rows read back as serial lines"
 }
