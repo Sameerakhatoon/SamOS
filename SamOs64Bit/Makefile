@@ -63,7 +63,13 @@ SHARED_OBJS = kernel.o kernel_selftest.o string/string.o \
     lib/vector/vector.o lib/spinlock/spinlock.o cpu/smp.o cpu/smp_selftest.o \
     virtio/virtio.o virtio/virtio_pci.o virtio/virtio_mmio.o virtio/virtio_bus.o disk/drivers/virtio_blk.o \
     keyboard/virtio_input.o keyboard/serial_input.o disk/drivers/ramdisk.o \
-    usb/xhci.o usb/usb_hid.o usb/usb_hub.o disk/drivers/usb_msc.o disk/drivers/sdhci.o disk/drivers/dw_mmc.o     net/netdev.o net/virtio_net.o net/net.o isr80h/net.o     net/samtcpip/port.o net/samtcpip/log.o net/samtcpip/gluethread/glthread.o net/samtcpip/graph.o     net/samtcpip/net.o net/samtcpip/utils.o net/samtcpip/comm.o net/samtcpip/Layer2/layer2.o     net/samtcpip/Layer2/l2switch.o net/samtcpip/Layer3/layer3.o net/samtcpip/Layer3/icmp.o     net/samtcpip/Layer3/pmtu.o net/samtcpip/Layer5/ping.o
+    usb/xhci.o usb/usb_hid.o usb/usb_hub.o disk/drivers/usb_msc.o disk/drivers/sdhci.o disk/drivers/dw_mmc.o \
+    net/netdev.o net/virtio_net.o net/net.o net/socket.o isr80h/net.o \
+    net/samtcpip/port.o net/samtcpip/log.o net/samtcpip/gluethread/glthread.o net/samtcpip/graph.o \
+    net/samtcpip/net.o net/samtcpip/utils.o net/samtcpip/comm.o net/samtcpip/Layer2/layer2.o \
+    net/samtcpip/Layer2/l2switch.o net/samtcpip/Layer3/layer3.o net/samtcpip/Layer3/icmp.o \
+    net/samtcpip/Layer3/pmtu.o net/samtcpip/Layer4/udp.o net/samtcpip/Layer4/tcp.o \
+    net/samtcpip/Layer5/ping.o
 
 # Freestanding, warnings are errors, no unused-parameter noise.
 COMMON_FLAGS = -g -ffreestanding -fno-builtin -nostdlib -nostartfiles -nodefaultlibs \
@@ -127,6 +133,7 @@ user_programs:
 	$(MAKE) -C ./programs/blank  all $(USER_MAKE_ARGS)
 	$(MAKE) -C ./programs/shell  all $(USER_MAKE_ARGS)
 	$(MAKE) -C ./programs/hello  all $(USER_MAKE_ARGS)
+	$(MAKE) -C ./programs/net    all $(USER_MAKE_ARGS)
 	$(MAKE) -C ./programs/simple all
 	$(MAKE) -C ./programs/ktest  all $(USER_MAKE_ARGS)
 
@@ -152,6 +159,7 @@ user_programs_clean:
 	$(MAKE) -C ./programs/blank  clean
 	$(MAKE) -C ./programs/shell  clean
 	$(MAKE) -C ./programs/hello  clean
+	$(MAKE) -C ./programs/net    clean
 	$(MAKE) -C ./programs/simple clean
 	$(MAKE) -C ./programs/ktest  clean
 
@@ -262,7 +270,8 @@ USER_CFLAGS = -g -ffreestanding -fno-builtin -nostdlib -nostartfiles -nodefaultl
     -I./programs/stdlib/src $(USER_ARCH_CFLAGS)
 USER_LIBC   = $(addprefix $(USER_DIR)/libc/,start.S.o samos.S.o start.o samos.o stdlib.o stdio.o \
     string.o memory.o file.o)
-USER_ELFS   = $(addprefix $(USER_DIR)/,blank.elf hello.elf shell.elf rvtest.elf ktest.elf)
+USER_ELFS   = $(addprefix $(USER_DIR)/,blank.elf hello.elf shell.elf rvtest.elf ktest.elf \
+    ping.elf udpecho.elf httpd.elf wget.elf)
 USER_LD     = ./programs/stdlib/arch/$(ARCH)/linker.ld
 USER_ALL    = ./bin/$(ARCH)/initrd.img ./bin/$(ARCH)/os.img
 SYSROOT_CRT0 = $(USER_DIR)/libc/start.S.o $(USER_DIR)/libc/start.o
@@ -288,7 +297,8 @@ USER_CFLAGS = -ffreestanding -fno-builtin -nostdlib -nostartfiles -nodefaultlibs
 USER_LD     = ./programs/stdlib/arch/aarch64/user.ld
 STDLIB_OBJS = $(USER_STUBS) $(addprefix $(USER_BUILD)/stdlib/src/,start.o samos.o stdlib.o stdio.o \
     string.o memory.o file.o)
-USER_ELFS   = $(addprefix $(USER_BUILD)/,blank.elf hello.elf ktest.elf shell.elf)
+USER_ELFS   = $(addprefix $(USER_BUILD)/,blank.elf hello.elf ktest.elf shell.elf \
+    ping.elf udpecho.elf httpd.elf wget.elf)
 RAMDISK     = ./bin/aarch64/ramdisk.img
 SYSROOT_CRT0 = $(BUILD)/user/start.o $(USER_BUILD)/stdlib/src/start.o
 SYSROOT_LIBS = $(filter-out $(SYSROOT_CRT0),$(STDLIB_OBJS))
@@ -307,6 +317,10 @@ $(USER_BUILD)/blank.elf: $(USER_BUILD)/blank/blank.o
 $(USER_BUILD)/hello.elf: $(USER_BUILD)/hello/src/hello.o
 $(USER_BUILD)/ktest.elf: $(USER_BUILD)/ktest/ktest.o $(USER_BUILD)/ktest/arch/aarch64/regs.S.o
 $(USER_BUILD)/shell.elf: $(USER_BUILD)/shell/src/shell.o
+$(USER_BUILD)/ping.elf: $(USER_BUILD)/net/ping.o
+$(USER_BUILD)/udpecho.elf: $(USER_BUILD)/net/udpecho.o
+$(USER_BUILD)/httpd.elf: $(USER_BUILD)/net/httpd.o
+$(USER_BUILD)/wget.elf: $(USER_BUILD)/net/wget.o
 $(USER_ELFS): $(STDLIB_OBJS) $(USER_LD)
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,max-page-size=0x1000 -T $(USER_LD) \
 	    -o $@ $(filter %.o,$^) -lgcc
@@ -402,6 +416,10 @@ $(USER_DIR)/libc/%.S.o: ./programs/stdlib/arch/$(ARCH)/%.S
 $(USER_DIR)/blank.elf: ./programs/blank/blank.c
 $(USER_DIR)/hello.elf: ./programs/hello/src/hello.c
 $(USER_DIR)/shell.elf: ./programs/shell/src/shell.c
+$(USER_DIR)/ping.elf: ./programs/net/ping.c
+$(USER_DIR)/udpecho.elf: ./programs/net/udpecho.c
+$(USER_DIR)/httpd.elf: ./programs/net/httpd.c
+$(USER_DIR)/wget.elf: ./programs/net/wget.c
 $(USER_DIR)/rvtest.elf: ./programs/rvtest/rvtest.c ./programs/rvtest/regs.S
 $(USER_DIR)/ktest.elf: ./programs/ktest/ktest.c ./programs/ktest/arch/riscv64/regs.S
 $(USER_ELFS): $(USER_LIBC) $(USER_LD)

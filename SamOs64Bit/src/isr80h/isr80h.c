@@ -111,4 +111,12 @@ void isr80h_register_commands(){
     isr80h_register_command(SYSTEM_COMMAND53_CPU_CURRENT,          isr80h_command53_cpu_current);
     isr80h_register_command(SYSTEM_COMMAND60_NET_INFO,             isr80h_command60_net_info);
     isr80h_register_command(SYSTEM_COMMAND61_NET_PING,             isr80h_command61_net_ping);
+    isr80h_register_command(SYSTEM_COMMAND62_SOCKET,               isr80h_command62_socket);
+    isr80h_register_command(SYSTEM_COMMAND63_BIND,                 isr80h_command63_bind);
+    isr80h_register_command(SYSTEM_COMMAND64_CONNECT,              isr80h_command64_connect);
+    isr80h_register_command(SYSTEM_COMMAND65_LISTEN,               isr80h_command65_listen);
+    isr80h_register_command(SYSTEM_COMMAND66_ACCEPT,               isr80h_command66_accept);
+    isr80h_register_command(SYSTEM_COMMAND67_SENDTO,               isr80h_command67_sendto);
+    isr80h_register_command(SYSTEM_COMMAND68_RECVFROM,             isr80h_command68_recvfrom);
+    isr80h_register_command(SYSTEM_COMMAND69_SCLOSE,               isr80h_command69_sclose);
 }

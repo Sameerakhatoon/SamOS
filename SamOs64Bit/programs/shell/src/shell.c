@@ -71,6 +71,7 @@ static int shell_ifconfig(int argc, char** argv);
 static int shell_arp(int argc, char** argv);
 static int shell_route(int argc, char** argv);
 static int shell_ping(int argc, char** argv);
+static int shell_netstat(int argc, char** argv);
 
 static const struct shell_builtin shell_builtins[] = {
     {"help",  "help              list the builtins",           shell_help},
@@ -90,6 +91,7 @@ static const struct shell_builtin shell_builtins[] = {
     {"arp",      "arp               the ARP cache",                 shell_arp},
     {"route",    "route             the routing table",             shell_route},
     {"ping",     "ping ip [count]   ICMP echo, count times (default 4)", shell_ping},
+    {"netstat",  "netstat           TCP connections and retransmissions", shell_netstat},
 };
 #define SHELL_BUILTIN_COUNT (sizeof(shell_builtins) / sizeof(shell_builtins[0]))
 
@@ -254,6 +256,10 @@ static int shell_arp(int argc, char** argv){
 
 static int shell_route(int argc, char** argv){
     return shell_net_info(2);
+}
+
+static int shell_netstat(int argc, char** argv){
+    return shell_net_info(3);
 }
 
 static int shell_ping(int argc, char** argv){

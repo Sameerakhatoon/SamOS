@@ -31,6 +31,9 @@ int sam_samos_getkey(void){ return *keys ? *keys++ : '\r'; }
 int sam_samos_getkey_block(void){ return sam_samos_getkey(); }
 int sam_samos_waitpid(int pid, int* status){ return -1; }
 void sam_samos_udelay(unsigned long us){ }
+// samos.c's samos_send, samos_send_all and samos_recv call these.
+long sam_samos_sendto(long s, const void* b, long n, unsigned int ip, unsigned int port){ return -1; }
+long sam_samos_recvfrom(long s, void* b, long n, void* from, unsigned int ms){ return -1; }
 
 // Unused trampolines referenced by the objects.
 #define UNUSED_TRAMPOLINE(name) long sam_##name(void){ return 0; }

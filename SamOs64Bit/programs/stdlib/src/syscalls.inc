@@ -44,3 +44,11 @@ SYSCALL samos_shutdown,              49
 SYSCALL samos_reboot,                50
 SYSCALL samos_net_info,              60
 SYSCALL samos_net_ping,              61
+SYSCALL samos_socket,               62
+SYSCALL samos_bind,                 63
+SYSCALL samos_connect,              64
+SYSCALL samos_listen,               65
+SYSCALL samos_accept,               66
+SYSCALL samos_sendto,               67
+SYSCALL samos_recvfrom,             68
+SYSCALL samos_sclose,               69

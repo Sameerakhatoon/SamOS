@@ -80,3 +80,11 @@ gcc -O1 -g -std=gnu99 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sa
     -I"$root/src" -o "$out/board_test" "$here/board_test.c" "$root/src/firmware/fdt_dev.c" \
     "$root/src/firmware/fdt.c" "$root/src/arch/riscv64/uart16550.c"
 "$out/board_test" "$out" "$here/fixtures"
+
+# The network stack's protocol code (src/net/samtcpip, SamTcpIp's
+# L2 to L4) with the host's libc (port.h's SAMTCPIP_HOST_TEST) against
+# a fake NIC: checksums, ARP, ICMP, IP fragments, the TCP state machine
+# and its timer. NET_TEST_VERBOSE=1 prints the stack's own log.
+n="$root/src/net/samtcpip"
+gcc -O1 -g -std=gnu99 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function     -fsanitize=address,undefined -fno-sanitize-recover=all -DSAMTCPIP_HOST_TEST -I"$root/src"     -o "$out/net_test" "$here/net_test.c" "$n/log.c" "$n/gluethread/glthread.c" "$n/graph.c" "$n/net.c"     "$n/utils.c" "$n/comm.c" "$n/Layer2/layer2.c" "$n/Layer2/l2switch.c" "$n/Layer3/layer3.c"     "$n/Layer3/icmp.c" "$n/Layer3/pmtu.c" "$n/Layer4/udp.c" "$n/Layer4/tcp.c" "$n/Layer5/ping.c"
+"$out/net_test"

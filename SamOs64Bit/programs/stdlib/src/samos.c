@@ -212,3 +212,24 @@ void samos_inet_ntop(unsigned int ip, char* out){
     }
     *out = 0;
 }
+
+// Socket helpers over the sendto and recvfrom syscalls.
+long samos_send(long s, const void* buf, long len){
+    return samos_sendto(s, buf, len, 0, 0);
+}
+
+long samos_send_all(long s, const void* buf, long len){
+    long done = 0;
+    while(done < len){
+        long n = samos_sendto(s, (const char*)buf + done, len - done, 0, 0);
+        if(n < 0){
+            return n;
+        }
+        done += n;
+    }
+    return done;
+}
+
+long samos_recv(long s, void* buf, long len){
+    return samos_recvfrom(s, buf, len, 0, 0);
+}

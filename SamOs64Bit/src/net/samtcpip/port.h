@@ -22,6 +22,29 @@
 #include <stddef.h>
 #include <stdbool.h>
 #include <stdarg.h>
+
+#ifdef SAMTCPIP_HOST_TEST
+// tests64/host/net_test.c builds the protocol code with the
+// host's gcc and libc: malloc, the string functions,
+// clock_gettime, the byte swaps, inet_pton and inet_ntop are glibc's;
+// printf and the sink are the test's (port.c is not built there), and
+// net_now_ms is the test's clock.
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <arpa/inet.h>
+#include "net/netdev.h"
+#define printf          samtcpip_printf
+#define fflush(f)       ((void)0)
+#define assert(x)       do { if(!(x)){ fprintf(stderr, "samtcpip: assert " #x "\n"); abort(); } } while(0)
+int samtcpip_printf(const char* fmt, ...) __attribute__((format(__printf__, 1, 2)));
+int samtcpip_logf(const char* fmt, ...) __attribute__((format(__printf__, 1, 2)));
+int samtcpip_snprintf(char* out, size_t size, const char* fmt, ...) __attribute__((format(__printf__, 3, 4)));
+void   samtcpip_sink_begin(char* buf, size_t size);
+size_t samtcpip_sink_end(void);
+#else
+
 #include "memory/memory.h"
 #include "memory/heap/kheap.h"
 #include "string/string.h"
@@ -91,5 +114,7 @@ int samtcpip_vsnprintf(char* out, size_t size, const char* fmt, va_list ap);
 // output is cut at size - 1 and NUL-terminated).
 void   samtcpip_sink_begin(char* buf, size_t size);
 size_t samtcpip_sink_end(void);
+
+#endif // SAMTCPIP_HOST_TEST
 
 #endif

@@ -39,6 +39,31 @@ long samos_net_ping(unsigned int ip, unsigned int timeout_ms);
 int  samos_inet_pton(const char* str, unsigned int* ip);
 void samos_inet_ntop(unsigned int ip, char* out);
 
+// Sockets (the kernel's net/socket.h). A socket is a small
+// number of this process; addresses are a host-order IPv4 address and
+// a port. Every call returns a negative kernel status on failure
+// (-12 timed out, -25 refused, -26 reset, -27 port in use, -28 not
+// connected). Timeouts are milliseconds, 0 waits for ever.
+#define SAMOS_SOCK_STREAM  1      // TCP
+#define SAMOS_SOCK_DGRAM   2      // UDP
+struct samos_sockaddr {
+    unsigned int ip;
+    unsigned int port;
+};
+long samos_socket(int type);
+long samos_bind(long s, unsigned int port);
+long samos_connect(long s, unsigned int ip, unsigned int port);
+long samos_listen(long s, int backlog);
+long samos_accept(long s, struct samos_sockaddr* peer, unsigned int timeout_ms);
+long samos_sendto(long s, const void* buf, long len, unsigned int ip, unsigned int port);
+long samos_recvfrom(long s, void* buf, long len, struct samos_sockaddr* from, unsigned int timeout_ms);
+long samos_sclose(long s);
+// send and recv on a connected socket; samos_send_all loops until
+// all of `len` is queued.
+long samos_send(long s, const void* buf, long len);
+long samos_send_all(long s, const void* buf, long len);
+long samos_recv(long s, void* buf, long len);
+
 struct command_argument {
     char argument[512];
     struct command_argument* next;

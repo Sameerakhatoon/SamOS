@@ -26,5 +26,10 @@
 #define EBADEXEC       22  // Malformed ELF (not EINFORMAT: no flat-binary fallback)
 #define ECHILD         23  // Waitpid: no such child
 #define ESRCH          24  // Kill: no such process
+#define ECONNREFUSED   25  // Connect: RST to the SYN, or no answer
+#define ECONNRESET     26  // The peer reset an open connection
+#define EADDRINUSE     27  // Bind or listen: the port is taken
+#define ENOTCONN       28  // Send or recv on a socket with no connection
+#define EBADF          29  // Not a socket of this process
 
 #endif

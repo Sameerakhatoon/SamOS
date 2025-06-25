@@ -1,9 +1,10 @@
 // The kernel's side of SamTcpIp (net.h, netdev.h): the Node,
-// its configuration, the frames and the tick into the stack, and the
-// network syscalls' work.
+// its configuration, the frames and the tick into the stack, the
+// waits of the network syscalls, ping and the tables as text.
 
 #include "net.h"
 #include "netdev.h"
+#include "socket.h"
 #include "samtcpip/port.h"
 #include "samtcpip/log.h"
 #include "samtcpip/graph.h"
@@ -11,6 +12,8 @@
 #include "samtcpip/comm.h"
 #include "samtcpip/Layer2/layer2.h"
 #include "samtcpip/Layer3/layer3.h"
+#include "samtcpip/Layer4/udp.h"
+#include "samtcpip/Layer4/tcp.h"
 #include "samtcpip/Layer5/ping.h"
 #include "task/task.h"
 #include "boot/cmdline.h"
@@ -18,22 +21,77 @@
 #include "status.h"
 
 #define NET_PINGS           16
+#define NET_WAITERS         64
 
 static Graph* topo;
 static Node*  node;
 
-// One outstanding echo request per task (net_ping).
-enum { PING_FREE, PING_WAITING, PING_REPLIED, PING_TIMED_OUT };
-static struct net_ping {
+Node* net_node(void){
+    return node;
+}
+
+// ---- Waits ---------------------------------------------------------------
+
+static struct net_waiter {
     struct task* task;
-    uint32_t     dst;
-    uint16_t     seq;
-    int          state;
-    uint64_t     sent_us;
+    void*        obj;
     uint64_t     deadline_ms;
-    uint32_t     rtt_us;
-} pings[NET_PINGS];
-static uint16_t ping_seq;
+    bool         timed_out;
+} waiters[NET_WAITERS];
+
+static struct net_waiter* waiter_of(struct task* t){
+    for(int i = 0; i < NET_WAITERS; i++){
+        if(waiters[i].task == t){
+            return &waiters[i];
+        }
+    }
+    return NULL;
+}
+
+static void waiter_wake(struct net_waiter* w){
+    if(w->task->state == TASK_BLOCKED && w->task->block_reason == TASK_BLOCK_NET){
+        task_wake(w->task);
+    }
+}
+
+void net_block(void* obj, uint64_t deadline_ms){
+    struct task* me = task_current();
+    struct net_waiter* w = waiter_of(me);
+    if(!w){
+        w = waiter_of(NULL);
+    }
+    if(w){
+        w->task        = me;
+        w->obj         = obj;
+        w->deadline_ms = deadline_ms;
+        w->timed_out   = false;
+    }
+    // Without a free slot nothing wakes it but the tick: it polls.
+    task_block(me, TASK_BLOCK_NET);
+    net_unlock();
+    task_next();
+    __builtin_unreachable();
+}
+
+bool net_resume(void){
+    struct net_waiter* w = waiter_of(task_current());
+    bool timed_out = w && w->timed_out;
+    if(w){
+        w->task = NULL;
+        w->obj  = NULL;
+    }
+    return timed_out;
+}
+
+void net_wake(void* obj){
+    for(int i = 0; i < NET_WAITERS; i++){
+        if(waiters[i].task && waiters[i].obj == obj){
+            waiter_wake(&waiters[i]);
+        }
+    }
+}
+
+// ---- Configuration and the stack ------------------------------------------
 
 // "A.B.C.D" (up to a space or `stop`) into out16; false if too long.
 static bool net_word(const char* s, char stop, char* out16){
@@ -97,6 +155,8 @@ void net_stack_init(void){
         }
     }
     ping_register();
+    udp_register();
+    tcp_register();
     if(eth){
         net_configure(eth);
         send_gratuitous_arp(node, eth);
@@ -109,21 +169,34 @@ void net_stack_input(struct netdev* d, uint8_t* frame, uint32_t len){
     }
 }
 
-static void ping_wake(struct net_ping* p, int state){
-    p->state = state;
-    if(p->task->state == TASK_BLOCKED && p->task->block_reason == TASK_BLOCK_NET){
-        task_wake(p->task);
+void net_stack_timer(void){
+    uint64_t now = net_now_ms();
+    for(int i = 0; i < NET_WAITERS; i++){
+        struct net_waiter* w = &waiters[i];
+        if(w->task && w->deadline_ms && !w->timed_out && now >= w->deadline_ms){
+            w->timed_out = true;
+            waiter_wake(w);
+        }
+    }
+    if(node){
+        tcp_timer();
     }
 }
 
-void net_stack_timer(void){
-    uint64_t now = net_now_ms();
-    for(int i = 0; i < NET_PINGS; i++){
-        if(pings[i].state == PING_WAITING && now >= pings[i].deadline_ms){
-            ping_wake(&pings[i], PING_TIMED_OUT);
-        }
-    }
-}
+// ---- Ping ------------------------------------------------------------------
+
+// One outstanding echo request per task.
+enum { PING_FREE, PING_WAITING, PING_REPLIED };
+static struct net_ping {
+    struct task* task;
+    uint32_t     dst;
+    uint16_t     seq;
+    int          state;
+    uint64_t     sent_us;
+    uint64_t     deadline_ms;
+    uint32_t     rtt_us;
+} pings[NET_PINGS];
+static uint16_t ping_seq;
 
 // ping.c's echo-reply branch reports here as well as
 // printing "Ping reply".
@@ -132,7 +205,8 @@ void net_ping_reply(uint32_t src, uint16_t seq){
         struct net_ping* p = &pings[i];
         if(p->state == PING_WAITING && p->seq == seq && p->dst == src){
             p->rtt_us = (uint32_t)(arch_uptime_us() - p->sent_us);
-            ping_wake(p, PING_REPLIED);
+            p->state  = PING_REPLIED;
+            net_wake(p);
         }
     }
 }
@@ -140,6 +214,7 @@ void net_ping_reply(uint32_t src, uint16_t seq){
 long net_ping(uint32_t dst, uint32_t timeout_ms){
     struct task* me = task_current();
     net_lock();
+    bool timed_out = net_resume();
     struct net_ping* p = NULL;
     for(int i = 0; i < NET_PINGS && !p; i++){
         if(pings[i].state != PING_FREE && pings[i].task == me){
@@ -168,10 +243,8 @@ long net_ping(uint32_t dst, uint32_t timeout_ms){
         ping_send_request(node, ip, (short)p->seq);
         net_poll();
     }
-    if(p->state == PING_WAITING){
-        task_block(me, TASK_BLOCK_NET);
-        net_unlock();
-        task_next();
+    if(p->state == PING_WAITING && !timed_out){
+        net_block(p, p->deadline_ms);
     }
     long res = p->state == PING_REPLIED ? (long)p->rtt_us : -ETIMEOUT;
     p->state = PING_FREE;
@@ -179,6 +252,8 @@ long net_ping(uint32_t dst, uint32_t timeout_ms){
     net_unlock();
     return res;
 }
+
+// ---- Tables as text ----------------------------------------------------------
 
 long net_info(int what, char* buf, size_t size){
     if(!node){
@@ -202,6 +277,10 @@ long net_info(int what, char* buf, size_t size){
     case NET_INFO_ROUTE:
         dump_rt_table(NODE_RT_TABLE(node));
         break;
+    case NET_INFO_TCP:
+        tcp_dump(node);
+        printf("TCP retransmission timeouts: %lu\n", tcp_rto_count);
+        break;
     }
     long n = (long)samtcpip_sink_end();
     net_unlock();
@@ -216,5 +295,11 @@ void net_task_gone(struct task* t){
             pings[i].task  = NULL;
         }
     }
+    struct net_waiter* w = waiter_of(t);
+    if(w){
+        w->task = NULL;
+        w->obj  = NULL;
+    }
+    socket_process_gone(t->process);
     net_unlock();
 }

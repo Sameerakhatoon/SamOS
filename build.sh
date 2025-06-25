@@ -126,6 +126,10 @@ mcopy -i "$P2" "$K/programs/blank/blank.elf"   ::/BLANK.ELF
 mcopy -i "$P2" "$K/programs/shell/shell.elf"   ::/SHELL.ELF
 mcopy -i "$P2" "$K/programs/hello/hello.elf"   ::/HELLO.ELF
 mcopy -i "$P2" "$K/programs/ktest/ktest.elf"   ::/KTEST.ELF   # The interrupt work e2e probes
+mcopy -i "$P2" "$K/programs/net/ping.elf"        ::/PING.ELF
+mcopy -i "$P2" "$K/programs/net/udpecho.elf"     ::/UDPECHO.ELF
+mcopy -i "$P2" "$K/programs/net/httpd.elf"       ::/HTTPD.ELF
+mcopy -i "$P2" "$K/programs/net/wget.elf"        ::/WGET.ELF
 mcopy -i "$P2" "$K/assets/sysfont.bmp"         ::/SYSFONT.BMP
 mcopy -i "$P2" "$K/hello.txt"                  ::/HELLO.TXT
 

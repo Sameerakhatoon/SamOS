@@ -54,6 +54,14 @@ global samos_shutdown:function
 global samos_reboot:function
 global samos_net_info:function
 global samos_net_ping:function
+global samos_socket:function
+global samos_bind:function
+global samos_connect:function
+global samos_listen:function
+global samos_accept:function
+global samos_sendto:function
+global samos_recvfrom:function
+global samos_sclose:function
 
 ; One wrapper per syscall: rax = number, int 0x80, return rax.
 %macro SYSCALL_WRAPPER 2
@@ -118,3 +126,11 @@ SYSCALL_WRAPPER  samos_shutdown,              49  ; void samos_shutdown(void)
 SYSCALL_WRAPPER  samos_reboot,                50  ; void samos_reboot(void)
 SYSCALL_WRAPPER  samos_net_info,              60  ; long (int what, char* buf, long size)
 SYSCALL_WRAPPER  samos_net_ping,              61  ; long (unsigned int ip, unsigned int ms)
+SYSCALL_WRAPPER  samos_socket,               62  ; net/socket.h
+SYSCALL_WRAPPER  samos_bind,                 63  ; net/socket.h
+SYSCALL_WRAPPER  samos_connect,              64  ; net/socket.h
+SYSCALL_WRAPPER  samos_listen,               65  ; net/socket.h
+SYSCALL_WRAPPER  samos_accept,               66  ; net/socket.h
+SYSCALL_WRAPPER4 samos_sendto,               67  ; net/socket.h
+SYSCALL_WRAPPER4 samos_recvfrom,             68  ; net/socket.h
+SYSCALL_WRAPPER  samos_sclose,               69  ; net/socket.h

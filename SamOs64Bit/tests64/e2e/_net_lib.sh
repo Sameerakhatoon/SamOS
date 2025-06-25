@@ -63,7 +63,7 @@ net_gateway_test() {
     expect_serial 'IP Addr = 127\.0\.0\.1/8' "$tag: ifconfig shows lo"
     expect_serial '^L3 Routing Table:$' "$tag: route ran"
     expect_serial '0\.0\.0\.0 +0 +10\.0\.2\.2 +eth0' "$tag: default route via 10.0.2.2"
-    net_ping_check "$tag" 3
+    net_ping_check "$tag" 4
     expect_serial '^IP : 10\.0\.2\.2, MAC : 52:55:0a:00:02:02, OIF = eth0$' "$tag: ARP learned the gateway"
 }
 
@@ -101,5 +101,28 @@ net_peer_test() {
         || e2e_fail "$tag: the peer's pings: $(grep '^peer: \(PASS\|FAIL\)' "$plog")"
     grep -E '^peer: echo request seq=[0-9]+ from 10\.0\.2\.15, answered$' "$plog" > /dev/null \
         || e2e_fail "$tag: no echo request from SamOS reached the peer"
-    net_ping_check "$tag" 2
+    net_ping_check "$tag" 3
+}
+
+# ---- (217-220) ---------------------------------------------------------
+#   net_host <args>          tests64/e2e/net_host.py
+#   net_programs <run>       boot with samos.run=<run> (programs ahead of
+#                            BLANK.ELF, net_cmdline)
+#   net_wait <ERE> [s]       (monitor script) wait for a serial line
+NET_HOST="$(dirname "${BASH_SOURCE[0]}")/net_host.py"
+
+net_host() {
+    python3 -I "$NET_HOST" "$@"
+}
+
+net_programs() {
+    net_cmdline "samos.run=$1"
+}
+
+net_wait() {
+    e2e_wait_serial "$1" "${2:-200}"
+}
+
+net_expect_no_fault() {
+    expect_no_serial 'KERNEL PANIC|KERNEL FAULT|USER FAULT|spinlock:|samtcpip: assert' "$1: no fault"
 }

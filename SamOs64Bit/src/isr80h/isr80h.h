@@ -69,6 +69,15 @@ enum SystemCommands {
     // The network (net/net.h). 54-59 are left for other branches.
     SYSTEM_COMMAND60_NET_INFO = 60, // long net_info(int what, char* buf, long size)
     SYSTEM_COMMAND61_NET_PING,     // long net_ping(unsigned int ip, unsigned int timeout_ms)
+    // Sockets (net/socket.h).
+    SYSTEM_COMMAND62_SOCKET,       // long socket(int type)
+    SYSTEM_COMMAND63_BIND,         // long bind(long s, unsigned port)
+    SYSTEM_COMMAND64_CONNECT,      // long connect(long s, unsigned ip, unsigned port)
+    SYSTEM_COMMAND65_LISTEN,       // long listen(long s, int backlog)
+    SYSTEM_COMMAND66_ACCEPT,       // long accept(long s, struct sock_addr* peer, unsigned timeout_ms)
+    SYSTEM_COMMAND67_SENDTO,       // long sendto(long s, const void* buf, long len, unsigned ip, unsigned port)
+    SYSTEM_COMMAND68_RECVFROM,     // long recvfrom(long s, void* buf, long len, struct sock_addr* from, unsigned timeout_ms)
+    SYSTEM_COMMAND69_SCLOSE,       // long sclose(long s)
 };
 
 void isr80h_register_commands();

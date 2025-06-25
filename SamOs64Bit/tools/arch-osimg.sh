@@ -41,7 +41,7 @@ p2="$tmp@@$((P2_START * 512))"
 
 mcopy -i "$p1" "$kernel" ::/KERNEL.IMG
 for p in "$p1" "$p2"; do
-    for e in blank shell hello ktest; do
+    for e in blank shell hello ktest ping udpecho httpd wget; do
         mcopy -i "$p" "$elfs/$e.elf" "::/$(echo "$e" | tr a-z A-Z).ELF"
     done
     mcopy -i "$p" ./assets/sysfont.bmp ::/SYSFONT.BMP
