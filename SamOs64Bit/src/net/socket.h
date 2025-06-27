@@ -2,8 +2,9 @@
 #define NET_SOCKET_H
 // Sockets over SamTcpIp's UDP and TCP. Not in the book.
 //
-// A socket is a small number (0 to NET_SOCKETS - 1) of the process
-// that made it; another process's number is -EBADF. Addresses are one
+// A socket is an index (0 to NET_SOCKETS - 1) into one system-wide
+// table; each entry has an owner process, and another process's
+// number is -EBADF. Addresses are one
 // IPv4 address in host order and a port: there is no struct sockaddr.
 //
 //   stream (TCP): connect (blocks until the handshake ends), or bind +

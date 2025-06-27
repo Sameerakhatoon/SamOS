@@ -152,9 +152,12 @@ e2e_run_qemu() {
 # picks virtio-net-pci or virtio-net-device (the hook passes the one its
 # machine has); its backend is E2E_NETDEV, a whole -netdev with id net0
 # (default QEMU's user network, 10.0.2.0/24 with the gateway 10.0.2.2,
-# plus E2E_NET_OPTS, e.g. ",hostfwd=tcp::8080-:80").
+# plus E2E_NET_OPTS, e.g. ",hostfwd=tcp::8080-:80"). E2E_NET_MAC
+# sets the NIC's MAC (QEMU's default is 52:54:00:12:34:56), for two
+# guests on one link (e2e/229).
 e2e_net_args() {
-    E2E_QEMU_ARGS+=(-netdev "${E2E_NETDEV:-user,id=net0${E2E_NET_OPTS:-}}" -device "$1,netdev=net0")
+    E2E_QEMU_ARGS+=(-netdev "${E2E_NETDEV:-user,id=net0${E2E_NET_OPTS:-}}"
+                    -device "$1,netdev=net0${E2E_NET_MAC:+,mac=$E2E_NET_MAC}")
 }
 
 # e2e_arch_has <feature>: the arch hook lists it in E2E_ARCH_PROVIDES,

@@ -3,7 +3,8 @@
 # network. SamOS comes up as 10.0.2.15/24 with the default route via
 # 10.0.2.2; the shell's ifconfig, route and arp print SamTcpIp's
 # tables, and ping 10.0.2.2 gets echo replies from slirp (the first
-# request goes to ARP resolution, SamTcpIp drops it on the ARP miss).
+# request waits for ARP resolution: now it is queued,
+# arp_pending_add, and sent once the reply comes in).
 # x86: pc and q35. aarch64 and riscv64: virt, MSI-X through the ITS or
 # the PCI INTx line.
 # e2e-requires: net virtio-pci (a virtio-net-pci NIC)

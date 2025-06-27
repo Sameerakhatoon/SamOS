@@ -49,7 +49,7 @@ struct netdev {
     uint8_t     mac[6];
     uint16_t    mtu;
     bool        loopback;
-    const char* irq;                    // "MSI-X", "INTx", "polled" ... for ifconfig
+    const char* irq;                    // "MSI-X", "line", "polled", "none" for ifconfig
     // A whole Ethernet frame. 0, or < 0 when it was dropped.
     int  (*xmit)(struct netdev* d, const void* frame, uint32_t len);
     void (*poll)(struct netdev* d);

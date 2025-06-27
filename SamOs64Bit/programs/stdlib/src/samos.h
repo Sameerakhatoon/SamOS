@@ -29,7 +29,8 @@ long          samos_time(void);     // Seconds since 1970 UTC, -1 on error
 void          samos_shutdown(void); // Power off, does not return
 void          samos_reboot(void);   // Reset, does not return
 
-// The network. net_info: 0 ifconfig, 1 arp, 2 route, as text
+// The network. net_info: 0 ifconfig, 1 arp, 2 route, 3 TCP
+// connections and retransmission timeouts (netstat), as text
 // into buf; its length or a negative status. net_ping: one ICMP echo
 // to `ip` (host order, a.b.c.d is a << 24 | ...), blocking: the round
 // trip in microseconds, or a negative status (-12: no reply in time).
@@ -39,11 +40,13 @@ long samos_net_ping(unsigned int ip, unsigned int timeout_ms);
 int  samos_inet_pton(const char* str, unsigned int* ip);
 void samos_inet_ntop(unsigned int ip, char* out);
 
-// Sockets (the kernel's net/socket.h). A socket is a small
-// number of this process; addresses are a host-order IPv4 address and
-// a port. Every call returns a negative kernel status on failure
-// (-12 timed out, -25 refused, -26 reset, -27 port in use, -28 not
-// connected). Timeouts are milliseconds, 0 waits for ever.
+// Sockets (the kernel's net/socket.h). A socket is an index
+// into one system-wide table of 64; it belongs to the process that
+// made it, and another process's number gets -EBADF. Addresses are a
+// host-order IPv4 address and a port. Every call returns a negative
+// kernel status on failure (-12 timed out, -25 refused, -26 reset,
+// -27 port in use, -28 not connected). Timeouts are milliseconds, 0
+// waits for ever.
 #define SAMOS_SOCK_STREAM  1      // TCP
 #define SAMOS_SOCK_DGRAM   2      // UDP
 struct samos_sockaddr {

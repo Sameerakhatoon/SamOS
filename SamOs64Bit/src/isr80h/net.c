@@ -56,7 +56,9 @@ void* isr80h_command61_net_ping(struct trap_frame* frame){
 }
 
 // ---- sockets (net/socket.h) ------------------------------------------
-// Socket numbers are the process's own; buffers go through a kernel
+// A socket number is an index into one system-wide table of
+// NET_SOCKETS (64) sockets, each with an owner: another process's
+// number gets -EBADF. Buffers go through a kernel
 // copy of at most SOCK_IO_MAX bytes per call (a larger send or recv
 // moves that much and returns the count).
 
