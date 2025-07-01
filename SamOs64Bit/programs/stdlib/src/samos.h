@@ -36,6 +36,22 @@ void          samos_reboot(void);   // Reset, does not return
 // trip in microseconds, or a negative status (-12: no reply in time).
 long samos_net_info(int what, char* buf, long size);
 long samos_net_ping(unsigned int ip, unsigned int timeout_ms);
+// net_ping with the request's IP TTL (0: the default, 64) and
+// what answered in *out (may be NULL): the round trip for an echo
+// reply (type 0) or for a router's Time Exceeded (type 11, `from` is
+// the router), or a negative status. `ttl` is the answer's as it
+// arrived: 64 less one per router on the way back.
+#define SAMOS_PING_ECHO_REPLY     0
+#define SAMOS_PING_TIME_EXCEEDED  11
+struct samos_ping_result {
+    unsigned int  from;           // host order
+    unsigned int  rtt_us;
+    unsigned char ttl;
+    unsigned char type;
+    unsigned char pad[2];
+};
+long samos_net_ping_ex(unsigned int ip, unsigned int timeout_ms, unsigned int ttl,
+                       struct samos_ping_result* out);
 // "a.b.c.d" to a host-order address: 0 or -1; and back (16 bytes).
 int  samos_inet_pton(const char* str, unsigned int* ip);
 void samos_inet_ntop(unsigned int ip, char* out);

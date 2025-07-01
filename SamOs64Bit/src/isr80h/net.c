@@ -55,6 +55,26 @@ void* isr80h_command61_net_ping(struct trap_frame* frame){
     return ERROR(net_ping(ip, timeout));
 }
 
+// Long net_ping_ex(unsigned int ip, unsigned int timeout_ms,
+// unsigned int ttl, struct net_ping_result* out): net_ping with the
+// request's IP TTL (0: the default) and what answered in *out (may be
+// NULL): an echo reply or a router's Time Exceeded.
+void* isr80h_command70_net_ping_ex(struct trap_frame* frame){
+    uint32_t ip      = (uint32_t)(uintptr_t)isr80h_arg(frame, 0);
+    uint32_t timeout = (uint32_t)(uintptr_t)isr80h_arg(frame, 1);
+    uint32_t ttl     = (uint32_t)(uintptr_t)isr80h_arg(frame, 2);
+    void*    uout    = isr80h_arg(frame, 3);
+    if(!ip || !timeout || timeout > 60000 || ttl > 255){
+        return ERROR(-EINVARG);
+    }
+    struct net_ping_result r = {0};
+    long res = net_ping_ex(ip, timeout, (uint8_t)ttl, &r);
+    if(res >= 0 && uout && copy_to_user(task_current()->process, uout, &r, sizeof(r)) < 0){
+        res = -EFAULT;
+    }
+    return ERROR(res);
+}
+
 // ---- sockets (net/socket.h) ------------------------------------------
 // A socket number is an index into one system-wide table of
 // NET_SOCKETS (64) sockets, each with an owner: another process's

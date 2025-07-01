@@ -67,7 +67,16 @@ int samtcpip_logf(const char* fmt, ...){
 }
 
 static int ping_replies;
-void net_ping_reply(unsigned int src_ip, unsigned short seq){ ping_replies++; }
+static struct { unsigned int dst, from; unsigned short seq; unsigned char ttl, type; } ping_last;
+void net_ping_reply(unsigned int dst_ip, unsigned short seq, unsigned int from_ip, unsigned char ttl,
+                    unsigned char type){
+    ping_replies++;
+    ping_last.dst  = dst_ip;
+    ping_last.seq  = seq;
+    ping_last.from = from_ip;
+    ping_last.ttl  = ttl;
+    ping_last.type = type;
+}
 
 #define QMAX 256
 static struct { uint8_t b[1514]; uint32_t len; } q[QMAX];
@@ -164,9 +173,10 @@ static size_t eth_hdr(uint8_t* f, const uint8_t* dst, uint16_t type){
     return 14;
 }
 
-// An IPv4 packet from the peer to us: `frag` is the flags and offset
-// field, `n` the payload bytes.
-static size_t ip_pkt(uint8_t* f, uint8_t proto, uint16_t id, uint16_t frag, const uint8_t* payload, size_t n){
+// An IPv4 packet from the peer to `dst` (through our MAC) with this
+// TTL: `frag` is the flags and offset field, `n` the payload bytes.
+static size_t ip_pkt_to(uint8_t* f, uint8_t proto, uint16_t id, uint16_t frag, uint32_t dst, uint8_t ttl,
+                        const uint8_t* payload, size_t n){
     size_t o = eth_hdr(f, OUR_MAC, 0x0800);
     uint8_t* ip = f + o;
     memset(ip, 0, 20);
@@ -174,13 +184,17 @@ static size_t ip_pkt(uint8_t* f, uint8_t proto, uint16_t id, uint16_t frag, cons
     put16(ip + 2, (uint16_t)(20 + n));
     put16(ip + 4, id);
     put16(ip + 6, frag);
-    ip[8] = 64;
+    ip[8] = ttl;
     ip[9] = proto;
     put32(ip + 12, PEER_IP);
-    put32(ip + 16, OUR_IP);
+    put32(ip + 16, dst);
     put16(ip + 10, fold(sum16(0, ip, 20)));
     memcpy(ip + 20, payload, n);
     return o + 20 + n;
+}
+// An IPv4 packet from the peer to us.
+static size_t ip_pkt(uint8_t* f, uint8_t proto, uint16_t id, uint16_t frag, const uint8_t* payload, size_t n){
+    return ip_pkt_to(f, proto, id, frag, OUR_IP, 64, payload, n);
 }
 
 // A frame the stack sent: Ethernet, then (for IPv4) the header checked.
@@ -405,8 +419,131 @@ static void test_icmp(void){
         int before = ping_replies;
         deliver(f, ip_pkt(f, 1, 44, 0x4000, rep, p.l4len));
         CHECK(ping_replies == before + 1, "echo reply reported (net_ping_reply)");
+        CHECK(ping_last.type == 0 && ping_last.ttl == 64 && ping_last.from == PEER_IP,
+              "echo reply: type 0, its TTL as it arrived (%u), from the peer", ping_last.ttl);
     }
     qclear();
+}
+
+// Forwarding. A second NIC, eth1 on 10.9.0.1/24 with a host
+// 10.9.0.5 behind it; datagrams from the peer on eth0 to that host.
+#define FAR_IP   0x0a090005u          // 10.9.0.5
+static const uint8_t FAR_MAC[6] = { 0x52, 0x54, 0x00, 0x09, 0x00, 0x05 };
+static struct netdev nic1 = { .name = "eth1", .mac = { 0x52, 0x54, 0x00, 0x12, 0x34, 0x57 }, .mtu = 1500,
+                              .irq = "test" };
+
+static void test_forward(void){
+    uint8_t data[32], f[200], wire[60];
+    struct pkt p;
+    NodeNwProp* np = &node->node_nw_prop;
+    Interface* eth1 = node_attach_netdev(node, &nic1);
+    node_set_intf_ip_address(node, "eth1", "10.9.0.1", 24);
+    ArpEntry* e = calloc(1, sizeof(ArpEntry));
+    strcpy((char*)e->ip_addr.ip_addr, "10.9.0.5");
+    memcpy(e->mac_addr.mac, FAR_MAC, 6);
+    strcpy(e->oif_name, "eth1");
+    arp_table_entry_add(NODE_ARP_TABLE(node), e);
+    for(int i = 0; i < 32; i++){
+        data[i] = (uint8_t)(0xa0 + i);
+    }
+    qclear();
+
+    // Forwarding off (the kernel's default): dropped, counted.
+    np->ip_forward = false;
+    unsigned long refused = np->fwd_refused;
+    deliver(f, ip_pkt_to(f, 17, 70, 0x4000, FAR_IP, 64, data, 32));
+    CHECK(qlen == 0, "forwarding off: nothing sent (%d frames)", qlen);
+    CHECK(np->fwd_refused == refused + 1, "forwarding off: counted as refused");
+
+    // On: out of eth1 to the host's MAC, TTL 63, a good checksum, the
+    // rest of the datagram as it came.
+    np->ip_forward = true;
+    unsigned long fwd = np->fwd_packets;
+    size_t n = ip_pkt_to(f, 17, 71, 0x4000, FAR_IP, 64, data, 32);
+    memcpy(wire, f + 14, 52);
+    deliver(f, n);
+    CHECK(next_ip(&p, 17), "forwarded datagram sent");
+    if(p.ip){
+        CHECK(memcmp(p.f, FAR_MAC, 6) == 0 && memcmp(p.f + 6, nic1.mac, 6) == 0,
+              "forwarded: to the host's MAC from eth1's");
+        CHECK(p.ip[8] == 63, "forwarded: TTL 64 -> %u", p.ip[8]);
+        CHECK(p.ip_ok, "forwarded: IP header checksum recomputed");
+        CHECK(memcmp(p.ip + 12, wire + 12, 8) == 0 && memcmp(p.l4, wire + 20, 32) == 0 && p.l4len == 32,
+              "forwarded: addresses and payload unchanged");
+    }
+    CHECK(np->fwd_packets == fwd + 1, "forwarded: counted");
+    qclear();
+
+    // TTL 1: dropped, Time Exceeded to the peer quoting the header as
+    // it arrived and 8 bytes of the payload.
+    unsigned long expired = np->fwd_ttl_expired;
+    n = ip_pkt_to(f, 17, 72, 0x4000, FAR_IP, 1, data, 32);
+    memcpy(wire, f + 14, 52);
+    deliver(f, n);
+    CHECK(next_ip(&p, 1), "TTL 1: an ICMP message back");
+    if(p.ip){
+        CHECK(memcmp(p.f + 6, OUR_MAC, 6) == 0 && get32(p.ip + 16) == PEER_IP, "Time Exceeded: to the peer on eth0");
+        CHECK(get32(p.ip + 12) == OUR_IP, "Time Exceeded: from eth0's address");
+        CHECK(p.ip_ok, "Time Exceeded: IP header checksum");
+        CHECK(p.l4len == 8 + 20 + 8 && p.l4[0] == 11 && p.l4[1] == 0, "Time Exceeded: type 11 code 0, 36 bytes (%zu)",
+              p.l4len);
+        CHECK(fold(sum16(0, p.l4, p.l4len)) == 0, "Time Exceeded: ICMP checksum");
+        CHECK(p.l4len >= 36 && memcmp(p.l4 + 8, wire, 28) == 0, "Time Exceeded: the header and 8 bytes quoted");
+    }
+    CHECK(qlen == 0 || !next_ip(&p, 17), "TTL 1: the datagram itself not sent");
+    CHECK(np->fwd_ttl_expired == expired + 1, "TTL 1: counted");
+    qclear();
+
+    // No Time Exceeded about an ICMP error (RFC 1812 4.3.2.7).
+    uint8_t err[36];
+    memset(err, 0, sizeof(err));
+    err[0] = 3;
+    put16(err + 2, fold(sum16(0, err, 36)));
+    deliver(f, ip_pkt_to(f, 1, 73, 0x4000, FAR_IP, 1, err, 36));
+    CHECK(qlen == 0, "TTL 1 on an ICMP error: no answer (%d frames)", qlen);
+
+    // Our echo request with TTL 1, and a router's Time Exceeded about
+    // it: reported to net_ping_reply with the router and type 11.
+    ping_send_request_ttl(node, "10.9.0.5", 12, 1);
+    CHECK(next_ip(&p, 1) && p.ip[8] == 1 && p.l4[0] == 8, "ping -t 1: echo request with TTL 1");
+    if(p.ip){
+        uint8_t te[8 + 28];
+        memset(te, 0, 8);
+        te[0] = 11;
+        memcpy(te + 8, p.ip, 28);
+        put16(te + 2, fold(sum16(0, te, sizeof(te))));
+        int before = ping_replies;
+        size_t m = ip_pkt_to(f, 1, 74, 0x4000, OUR_IP, 64, te, sizeof(te));
+        memcpy(f, nic1.mac, 6);
+        memcpy(f + 6, FAR_MAC, 6);
+        put32(f + 14 + 12, 0x0a090001u + 1);   // 10.9.0.2, a router on eth1
+        put16(f + 14 + 10, 0);
+        put16(f + 14 + 10, fold(sum16(0, f + 14, 20)));
+        pkt_receive(node, eth1, (char*)f, m);
+        CHECK(ping_replies == before + 1 && ping_last.type == 11 && ping_last.seq == 12
+              && ping_last.dst == FAR_IP && ping_last.from == 0x0a090002u,
+              "Time Exceeded reported: type %u seq %u from %08x", ping_last.type, ping_last.seq, ping_last.from);
+    }
+    qclear();
+    np->ip_forward = false;
+}
+
+// Longest prefix match on the whole prefix.
+static void test_lpm(void){
+    RtTable* rt;
+    init_rt_table(&rt);
+    rt_table_add_route(rt, "0.0.0.0", 0, "10.0.2.2", "eth0");
+    rt_table_add_route(rt, "10.1.0.10", 32, "10.0.2.3", "eth0");
+    rt_table_add_route(rt, "10.1.0.0", 24, "10.0.2.4", "eth0");
+    L3Route* r = l3rib_lookup_lpm(rt, 0x0a01000au);
+    CHECK(r && strcmp(r->gw_ip, "10.0.2.3") == 0, "LPM: 10.1.0.10 takes its /32");
+    r = l3rib_lookup_lpm(rt, 0x0a010001u);
+    CHECK(r && strcmp(r->gw_ip, "10.0.2.4") == 0, "LPM: 10.1.0.1 takes the /24, not 10.1.0.10/32 (%s)",
+          r ? r->gw_ip : "none");
+    r = l3rib_lookup_lpm(rt, 0x0a020001u);
+    CHECK(r && r->mask == 0, "LPM: 10.2.0.1 takes the default route");
+    clear_rt_table(rt);
+    free(rt);
 }
 
 static uint8_t udp_got[2048];
@@ -749,6 +886,8 @@ int main(int argc, char** argv){
     test_arp();
     test_icmp();
     test_ip_fragments();
+    test_forward();
+    test_lpm();
     test_tcp_passive();
     test_tcp_active();
     printf("net host test: %d checks, %d failures\n", checks, failures);

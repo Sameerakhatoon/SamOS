@@ -93,45 +93,154 @@ void net_wake(void* obj){
 
 // ---- Configuration and the stack ------------------------------------------
 
-// "A.B.C.D" (up to a space or `stop`) into out16; false if too long.
-static bool net_word(const char* s, char stop, char* out16){
+// "A.B.C.D[/N]" at `v` (ending at a space, ',' or '@') into ip16
+// and *mask (left alone without "/N"); the length taken, or -1.
+static int net_addr(const char* v, char* ip, int* mask){
     int n = 0;
-    while(s[n] && s[n] != ' ' && s[n] != stop){
+    while(v[n] && v[n] != ' ' && v[n] != '/' && v[n] != ',' && v[n] != '@'){
         if(n == 15){
-            return false;
+            return -1;
         }
-        out16[n] = s[n];
+        ip[n] = v[n];
         n++;
     }
-    out16[n] = 0;
-    return true;
+    ip[n] = 0;
+    uint32_t a;
+    if(inet_pton(AF_INET, ip, &a) != 1){
+        return -1;
+    }
+    if(v[n] == '/'){
+        int m = 0, digits = 0;
+        for(n++; v[n] >= '0' && v[n] <= '9' && digits < 3; n++, digits++){
+            m = m * 10 + (v[n] - '0');
+        }
+        if(!digits || m > 32 || !mask){
+            return -1;
+        }
+        *mask = m;
+    }
+    return n;
 }
 
-static void net_configure(Interface* eth){
-    char ip[16] = "10.0.2.15", gw[16] = "10.0.2.2";
-    int mask = 24;
-    const char* v = boot_cmdline_value("samos.ip");
-    if(v && net_word(v, '/', ip) && v[strlen(ip)] == '/'){
-        mask = 0;
-        for(const char* m = v + strlen(ip) + 1; *m >= '0' && *m <= '9'; m++){
-            mask = mask * 10 + (*m - '0');
+static void net_log_bad(const char* what, const char* v){
+    char word[40];
+    int n = 0;
+    while(v[n] && v[n] != ' ' && n < 39){
+        word[n] = v[n];
+        n++;
+    }
+    word[n] = 0;
+    serial_write("net: bad ");
+    serial_write(what);
+    serial_write(" '");
+    serial_write(word);
+    serial_write("'\n");
+}
+
+// samos.route=DEST/N@GW[,DEST/N@GW...]: each out of the interface
+// whose subnet holds its gateway.
+static void net_static_routes(void){
+    const char* v = boot_cmdline_value("samos.route");
+    while(v && *v && *v != ' '){
+        char dst[16], gw[16];
+        int mask = 32;
+        int n = net_addr(v, dst, &mask);
+        int g = n > 0 && v[n] == '@' ? net_addr(v + n + 1, gw, NULL) : -1;
+        if(g < 0){
+            net_log_bad("samos.route", v);
+            return;
+        }
+        Interface* oif = node_get_matching_subnet_interface(node, gw);
+        serial_write("net: route ");
+        serial_write(dst);
+        serial_write("/");
+        serial_write(itoa(mask));
+        serial_write(" via ");
+        serial_write(gw);
+        if(oif){
+            rt_table_add_route(NODE_RT_TABLE(node), dst, (char)mask, gw, oif->if_name);
+            serial_write(" on ");
+            serial_write(oif->if_name);
+            serial_write("\n");
+        } else {
+            serial_write(": no interface on the gateway's subnet\n");
+        }
+        v += n + 1 + g;
+        if(*v == ','){
+            v++;
         }
     }
-    v = boot_cmdline_value("samos.gw");
-    if(v){
-        net_word(v, ' ', gw);
+}
+
+// eth0's address and the default route. Every NIC's
+// address (samos.ip.ethN), the default route out of the interface on
+// the gateway's subnet, samos.gw=none, the static routes and
+// samos.ip_forward (net.h).
+static void net_configure(Interface* eth0){
+    Interface* ifs[MAX_INTF_PER_NODE];
+    int nifs = 0;
+    for(int i = 0; i < MAX_INTF_PER_NODE && node->intf[i]; i++){
+        Interface* intf = node->intf[i];
+        if(intf->dev->loopback){
+            continue;
+        }
+        char key[32] = "samos.ip.";
+        strcpy(key + 9, intf->if_name);
+        const char* v = boot_cmdline_value(key);
+        if(!v && intf == eth0){
+            v = boot_cmdline_value("samos.ip");
+        }
+        if(!v && intf != eth0){
+            continue;               // only eth0 has a default address
+        }
+        char ip[16] = "10.0.2.15";
+        int mask = 24;
+        if(v && net_addr(v, ip, &mask) < 0){
+            net_log_bad(key, v);
+            continue;
+        }
+        node_set_intf_ip_address(node, intf->if_name, ip, (char)mask);
+        ifs[nifs++] = intf;
     }
-    node_set_intf_ip_address(node, eth->if_name, ip, (char)mask);
-    rt_table_add_route(NODE_RT_TABLE(node), "0.0.0.0", 0, gw, eth->if_name);
-    serial_write("net: ");
-    serial_write(eth->if_name);
-    serial_write(" ");
-    serial_write(ip);
-    serial_write("/");
-    serial_write(itoa(mask));
-    serial_write(", gateway ");
-    serial_write(gw);
-    serial_write("\n");
+
+    char gw[16] = "10.0.2.2";
+    Interface* gw_if = NULL;
+    const char* v = boot_cmdline_value("samos.gw");
+    if(v && strncmp(v, "none", 4) == 0 && (v[4] == ' ' || !v[4])){
+        gw[0] = 0;
+    } else if(v && net_addr(v, gw, NULL) < 0){
+        net_log_bad("samos.gw", v);
+        gw[0] = 0;
+    }
+    if(gw[0] && nifs){
+        gw_if = node_get_matching_subnet_interface(node, gw);
+        if(!gw_if){
+            gw_if = ifs[0];
+        }
+        rt_table_add_route(NODE_RT_TABLE(node), "0.0.0.0", 0, gw, gw_if->if_name);
+    }
+
+    for(int i = 0; i < nifs; i++){
+        serial_write("net: ");
+        serial_write(ifs[i]->if_name);
+        serial_write(" ");
+        serial_write(IF_IP(ifs[i]));
+        serial_write("/");
+        serial_write(itoa(ifs[i]->intf_nw_props.mask));
+        if(ifs[i] == gw_if){
+            serial_write(", gateway ");
+            serial_write(gw);
+        }
+        serial_write("\n");
+    }
+    net_static_routes();
+    node->node_nw_prop.ip_forward = boot_cmdline_has("samos.ip_forward");
+    if(node->node_nw_prop.ip_forward){
+        serial_write("net: IP forwarding on\n");
+    }
+    for(int i = 0; i < nifs; i++){
+        send_gratuitous_arp(node, ifs[i]);
+    }
 }
 
 void net_stack_init(void){
@@ -144,6 +253,7 @@ void net_stack_init(void){
         return;
     }
     node_set_device_type(node, L3_ROUTER);
+    node->node_nw_prop.ip_forward = false;  // A host unless net_configure says
     Interface* eth = NULL;
     for(int i = 0; i < netdev_count(); i++){
         struct netdev* d = netdev_get(i);
@@ -159,7 +269,6 @@ void net_stack_init(void){
     tcp_register();
     if(eth){
         net_configure(eth);
-        send_gratuitous_arp(node, eth);
     }
 }
 
@@ -195,16 +304,23 @@ static struct net_ping {
     uint64_t     sent_us;
     uint64_t     deadline_ms;
     uint32_t     rtt_us;
+    uint32_t     from;              // Who answered, its TTL, the ICMP type
+    uint8_t      ttl;
+    uint8_t      type;
 } pings[NET_PINGS];
 static uint16_t ping_seq;
 
 // ping.c's echo-reply branch reports here as well as
-// printing "Ping reply".
-void net_ping_reply(uint32_t src, uint16_t seq){
+// printing "Ping reply". And its Time Exceeded branch, with the
+// request's destination in `dst` and the router in `from`.
+void net_ping_reply(uint32_t dst, uint16_t seq, uint32_t from, uint8_t ttl, uint8_t type){
     for(int i = 0; i < NET_PINGS; i++){
         struct net_ping* p = &pings[i];
-        if(p->state == PING_WAITING && p->seq == seq && p->dst == src){
+        if(p->state == PING_WAITING && p->seq == seq && p->dst == dst){
             p->rtt_us = (uint32_t)(arch_uptime_us() - p->sent_us);
+            p->from   = from;
+            p->ttl    = ttl;
+            p->type   = type;
             p->state  = PING_REPLIED;
             net_wake(p);
         }
@@ -212,6 +328,12 @@ void net_ping_reply(uint32_t src, uint16_t seq){
 }
 
 long net_ping(uint32_t dst, uint32_t timeout_ms){
+    struct net_ping_result r;
+    long res = net_ping_ex(dst, timeout_ms, 0, &r);
+    return res >= 0 && r.type != NET_PING_ECHO_REPLY ? -ETIMEOUT : res;
+}
+
+long net_ping_ex(uint32_t dst, uint32_t timeout_ms, uint8_t ttl, struct net_ping_result* out){
     struct task* me = task_current();
     net_lock();
     bool timed_out = net_resume();
@@ -240,13 +362,20 @@ long net_ping(uint32_t dst, uint32_t timeout_ms){
         p->state       = PING_WAITING;
         p->sent_us     = arch_uptime_us();
         p->deadline_ms = net_now_ms() + timeout_ms;
-        ping_send_request(node, ip, (short)p->seq);
+        ping_send_request_ttl(node, ip, (short)p->seq, ttl);
         net_poll();
     }
     if(p->state == PING_WAITING && !timed_out){
         net_block(p, p->deadline_ms);
     }
     long res = p->state == PING_REPLIED ? (long)p->rtt_us : -ETIMEOUT;
+    if(res >= 0 && out){
+        out->from   = p->from;
+        out->rtt_us = p->rtt_us;
+        out->ttl    = p->ttl;
+        out->type   = p->type;
+        out->pad[0] = out->pad[1] = 0;
+    }
     p->state = PING_FREE;
     p->task  = NULL;
     net_unlock();
@@ -276,6 +405,11 @@ long net_info(int what, char* buf, size_t size){
         break;
     case NET_INFO_ROUTE:
         dump_rt_table(NODE_RT_TABLE(node));
+        // The forwarding counters (samtcpip/net.h).
+        printf("IP forwarding %s: %lu forwarded, %lu TTL expired, %lu refused, %lu no route\n",
+               node->node_nw_prop.ip_forward ? "on" : "off", node->node_nw_prop.fwd_packets,
+               node->node_nw_prop.fwd_ttl_expired, node->node_nw_prop.fwd_refused,
+               node->node_nw_prop.fwd_no_route);
         break;
     case NET_INFO_TCP:
         tcp_dump(node);

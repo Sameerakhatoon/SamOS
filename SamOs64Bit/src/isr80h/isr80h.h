@@ -78,6 +78,8 @@ enum SystemCommands {
     SYSTEM_COMMAND67_SENDTO,       // long sendto(long s, const void* buf, long len, unsigned ip, unsigned port)
     SYSTEM_COMMAND68_RECVFROM,     // long recvfrom(long s, void* buf, long len, struct sock_addr* from, unsigned timeout_ms)
     SYSTEM_COMMAND69_SCLOSE,       // long sclose(long s)
+    // Ping with a TTL and what answered (net/net.h).
+    SYSTEM_COMMAND70_NET_PING_EX,  // long net_ping_ex(unsigned ip, unsigned timeout_ms, unsigned ttl, struct net_ping_result* out)
 };
 
 void isr80h_register_commands();

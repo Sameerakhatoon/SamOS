@@ -154,10 +154,15 @@ e2e_run_qemu() {
 # (default QEMU's user network, 10.0.2.0/24 with the gateway 10.0.2.2,
 # plus E2E_NET_OPTS, e.g. ",hostfwd=tcp::8080-:80"). E2E_NET_MAC
 # sets the NIC's MAC (QEMU's default is 52:54:00:12:34:56), for two
-# guests on one link (e2e/229).
+# guests on one link (e2e/229). E2E_NETDEV2, a whole -netdev
+# with id net1, adds a second NIC of the same kind on it (the kernel's
+# eth1), with the MAC E2E_NET_MAC2 if set (e2e/232, a router).
 e2e_net_args() {
     E2E_QEMU_ARGS+=(-netdev "${E2E_NETDEV:-user,id=net0${E2E_NET_OPTS:-}}"
                     -device "$1,netdev=net0${E2E_NET_MAC:+,mac=$E2E_NET_MAC}")
+    if [ -n "${E2E_NETDEV2:-}" ]; then
+        E2E_QEMU_ARGS+=(-netdev "$E2E_NETDEV2" -device "$1,netdev=net1${E2E_NET_MAC2:+,mac=$E2E_NET_MAC2}")
+    fi
 }
 
 # e2e_arch_has <feature>: the arch hook lists it in E2E_ARCH_PROVIDES,

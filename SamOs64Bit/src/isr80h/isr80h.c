@@ -119,4 +119,5 @@ void isr80h_register_commands(){
     isr80h_register_command(SYSTEM_COMMAND67_SENDTO,               isr80h_command67_sendto);
     isr80h_register_command(SYSTEM_COMMAND68_RECVFROM,             isr80h_command68_recvfrom);
     isr80h_register_command(SYSTEM_COMMAND69_SCLOSE,               isr80h_command69_sclose);
+    isr80h_register_command(SYSTEM_COMMAND70_NET_PING_EX,          isr80h_command70_net_ping_ex);
 }

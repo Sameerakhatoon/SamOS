@@ -9,6 +9,15 @@
 // default route's gateway (default 10.0.2.2), samos.net_debug for
 // SamTcpIp's own log lines; lo is 127.0.0.1/8.
 //
+// More than one NIC and routing: samos.ip.ethN=A.B.C.D/N for
+// eth1, eth2, ... (no address without it; samos.ip.eth0 is the same
+// as samos.ip); samos.gw=none for no default route (else it goes out
+// of the interface whose subnet holds the gateway, eth0 if none);
+// samos.route=DEST/N@GW[,DEST/N@GW...] static routes, each out of the
+// interface whose subnet holds its gateway; samos.ip_forward routes
+// datagrams for other hosts on (TTL-1, Time Exceeded at TTL 1).
+// Without it SamOS is a host and drops them.
+//
 // Waiting: a syscall that has to wait for the network
 // records what it waits for and until when, blocks its task and lets
 // the CPU go (net_block, under the net lock, does not return); the
@@ -39,6 +48,23 @@ long net_info(int what, char* buf, size_t size);
 // One ICMP echo request to `dst` (host order), from the current task.
 // It blocks: the round trip in microseconds, or -ETIMEOUT.
 long net_ping(uint32_t dst, uint32_t timeout_ms);
+
+// What answered an echo request. Shared with user space
+// (samos.h, struct samos_ping_result).
+#define NET_PING_ECHO_REPLY     0           // ICMP types
+#define NET_PING_TIME_EXCEEDED  11
+struct net_ping_result {
+    uint32_t from;                          // host order
+    uint32_t rtt_us;
+    uint8_t  ttl;                           // of the answer, as it arrived
+    uint8_t  type;                          // NET_PING_*
+    uint8_t  pad[2];
+};
+
+// net_ping with the request's IP TTL (0: the default, 64) and the
+// answer in *out: the round trip in microseconds for an echo reply or
+// a router's Time Exceeded (out->type says which), or -ETIMEOUT.
+long net_ping_ex(uint32_t dst, uint32_t timeout_ms, uint8_t ttl, struct net_ping_result* out);
 
 // The Node, for net/socket.c. NULL before net_init.
 struct Node* net_node(void);

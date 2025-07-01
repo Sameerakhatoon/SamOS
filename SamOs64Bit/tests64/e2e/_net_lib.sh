@@ -291,3 +291,190 @@ net_two_guests_test() {
     expect_serial "ping: reply from $ra seq=[0-9]+ time=[0-9]+\\.[0-9]{3} ms" "$tag/b: PING.ELF, an echo reply from a"
     expect_serial "ping: $ra 3 sent, [2-3] received" "$tag/b: PING.ELF summary"
 }
+
+# ---- (232) a SamOS guest as a router ------------------------------------
+# Three guests on two links, each link a pair of -netdev socket UDP
+# endpoints pointing at each other (as 229's):
+#
+#   a 10.1.0.2 --- 10.1.0.1 eth0 [b] eth1 10.2.0.1 --- 10.2.0.2 c
+#
+# b has two NICs (E2E_NETDEV2, E2E_NET_MAC2: _lib.sh, e2e_net_args), an
+# address on each (samos.ip, samos.ip.eth1), no default route and
+# samos.ip_forward. a's default route is b (samos.gw); c has only a
+# static route to a's subnet (samos.gw=none samos.route=...).
+#
+#   net_router_test <transport> [tag]
+#                         b boots first, then c (HTTPD.ELF, UDPECHO.ELF -s),
+#                         then a once c listens (WGET.ELF / and /big,
+#                         UDPECHO.ELF to c, PING.ELF c, PING.ELF -t 1 c,
+#                         UDPECHO.ELF -s); then c's shell pings a and sends
+#                         a datagram to it, and b's shell shows its tables
+#   net_ifconfig_count <name> <if> <rx|tx>
+#                         packets on <if> in guest <name>'s last ifconfig
+net_ifconfig_count() {
+    tr -d '\r' 2> /dev/null < "$E2E_TMP/$1.serial" | awk -v intf="$2" -v dir="$3" '
+        /Interface Name : / { cur = ($0 ~ ("Interface Name : " intf ",")) }
+        cur && /^[[:space:]]*rx [0-9]+ packets/ {
+            for(i = 1; i <= NF; i++){ if($i == dir){ n = $(i + 1) } }
+            cur = 0
+        }
+        END { print n + 0 }'
+}
+
+# _net_wait_file <file> <file>: until either exists in $E2E_TMP, at
+# most limit*5 s (a monitor script's wait for another guest).
+_net_wait_file() {
+    local t=0
+    while [ $t -lt $((${E2E_SHELL_BOOT_TIMEOUT:-120} * 10)) ] && [ ! -e "$E2E_TMP/$1" ] && [ ! -e "$E2E_TMP/$2" ]; do
+        sleep 0.5
+        t=$((t + 1))
+    done
+}
+
+net_router_test() {
+    local transport=$1 tag=${2:-$1} pa pb0 pb1 pc
+    pa=$(net_host udpport) || e2e_skip "python3 for net_host.py"
+    pb0=$(net_host udpport)
+    while [ "$pb0" = "$pa" ]; do pb0=$(net_host udpport); done
+    pb1=$(net_host udpport)
+    while [ "$pb1" = "$pa" ] || [ "$pb1" = "$pb0" ]; do pb1=$(net_host udpport); done
+    pc=$(net_host udpport)
+    while [ "$pc" = "$pa" ] || [ "$pc" = "$pb0" ] || [ "$pc" = "$pb1" ]; do pc=$(net_host udpport); done
+    local ip_a=10.1.0.2 ip_b0=10.1.0.1 ip_b1=10.2.0.1 ip_c=10.2.0.2
+    local mac_a=52:54:00:12:34:5a mac_b0=52:54:00:12:34:5b mac_b1=52:54:00:12:34:5c mac_c=52:54:00:12:34:5d
+    local text_ac=a-to-c text_ca=c-to-a limit=${E2E_SHELL_BOOT_TIMEOUT:-120}
+    net_host big "$E2E_TMP/big.expect"
+    printf 'hello\n' > "$E2E_TMP/hello.expect"
+    # samos.run comes last on the line (kernel.c reads it to the end).
+    net_guest_image b "samos.ip=$ip_b0/24 samos.ip.eth1=$ip_b1/24 samos.gw=none samos.ip_forward"
+    net_guest_image c "samos.ip=$ip_c/24 samos.gw=none samos.route=10.1.0.0/24@$ip_b1 samos.run=HTTPD.ELF 80 2;UDPECHO.ELF -s 7 1"
+    net_guest_image a "samos.ip=$ip_a/24 samos.gw=$ip_b0 samos.run=UDPECHO.ELF -s 7 1;WGET.ELF $ip_c 80 /;WGET.ELF $ip_c 80 /big;UDPECHO.ELF $ip_c 7 $text_ac;PING.ELF $ip_c 3;PING.ELF -t 1 $ip_c 1"
+    E2E_NET=$transport
+    local rc
+    rc=$(net_re "$ip_c")
+    # a's programs are done when each client has printed its last line.
+    _net_a_done() {
+        [ "$(net_count a '^(> )?wget: body ')" -ge 2 ] \
+            && [ "$(net_count a '^(> )?udpecho: (reply|no matching)')" -ge 1 ] \
+            && [ "$(net_count a "ping: $rc [0-9]+ sent")" -ge 2 ]
+    }
+    # b: up to the shell; once c is done, its tables.
+    _net_b_mon() {
+        shell_boot || { printf 'quit\n'; return 0; }
+        _net_wait_file c.done c.gone
+        shell_cmd 'route'
+        shell_cmd 'ifconfig'
+        shell_cmd 'arp'
+        printf 'quit\n'
+    }
+    # c: up to the shell; once a's programs are done, ping a, a datagram
+    # to a's UDPECHO.ELF -s, its tables.
+    _net_c_mon() {
+        shell_boot || { printf 'quit\n'; return 0; }
+        _net_wait_file a.progs a.gone
+        shell_cmd "ping $ip_a 3" 60
+        shell_cmd "UDPECHO.ELF $ip_a 7 $text_ca" 60
+        shell_cmd 'route'
+        shell_cmd 'arp'
+        touch "$E2E_TMP/c.done"
+        printf 'quit\n'
+    }
+    # a: its programs, its tables, then up until c is done with it.
+    _net_a_mon() {
+        shell_boot || { printf 'quit\n'; return 0; }
+        local t=0
+        while [ $t -lt $((limit * 10)) ] && ! _net_a_done; do
+            sleep 0.5
+            t=$((t + 1))
+        done
+        shell_cmd 'route'
+        shell_cmd 'arp'
+        touch "$E2E_TMP/a.progs"
+        _net_wait_file c.done c.gone
+        printf 'quit\n'
+    }
+    e2e_log "$tag: a $ip_a $mac_a :$pa <-> b eth0 $ip_b0 $mac_b0 :$pb0; b eth1 $ip_b1 $mac_b1 :$pb1 <-> c $ip_c $mac_c :$pc"
+    E2E_NETDEV2="socket,id=net1,udp=127.0.0.1:$pc,localaddr=127.0.0.1:$pb1" E2E_NET_MAC2=$mac_b1 \
+        net_guest b "$mac_b0" "socket,id=net0,udp=127.0.0.1:$pa,localaddr=127.0.0.1:$pb0" $((limit * 14)) _net_b_mon &
+    local bpid=$! cpid=
+    if E2E_SERIAL="$E2E_TMP/b.serial" e2e_wait_serial '^net: IP forwarding on$' $((limit * 3)); then
+        net_guest c "$mac_c" "socket,id=net0,udp=127.0.0.1:$pb1,localaddr=127.0.0.1:$pc" $((limit * 12)) _net_c_mon &
+        cpid=$!
+        # a boots once c's servers listen: WGET.ELF and UDPECHO.ELF try
+        # once (a refused connect is not retried).
+        if E2E_SERIAL="$E2E_TMP/c.serial" e2e_wait_serial '^httpd: listening on port 80$' $((limit * 3)) \
+            && E2E_SERIAL="$E2E_TMP/c.serial" e2e_wait_serial '^udpecho: listening on port 7$' 60; then
+            net_guest a "$mac_a" "socket,id=net0,udp=127.0.0.1:$pb0,localaddr=127.0.0.1:$pa" $((limit * 10)) _net_a_mon
+        else
+            e2e_log "$tag: c's servers never listened, a not started"
+        fi
+    else
+        e2e_log "$tag: b never turned forwarding on, a and c not started"
+    fi
+    touch "$E2E_TMP/a.gone"
+    [ -n "$cpid" ] && wait "$cpid"
+    touch "$E2E_TMP/c.gone"
+    wait "$bpid"
+
+    local ra rb0 rb1 hello big n intf dir
+    ra=$(net_re "$ip_a")
+    rb0=$(net_re "$ip_b0")
+    rb1=$(net_re "$ip_b1")
+    hello=$(net_host fnv "$E2E_TMP/hello.expect")
+    big=$(net_host fnv "$E2E_TMP/big.expect")
+
+    net_on b
+    net_expect_no_fault "$tag/b"
+    expect_serial "^virtio-net: eth0 $mac_b0, $transport, " "$tag/b: eth0 is the first NIC ($mac_b0)"
+    expect_serial "^virtio-net: eth1 $mac_b1, $transport, " "$tag/b: eth1 is the second NIC ($mac_b1)"
+    expect_serial "^net: eth0 $rb0/24\$" "$tag/b: eth0 $ip_b0/24, no gateway"
+    expect_serial "^net: eth1 $rb1/24\$" "$tag/b: eth1 $ip_b1/24"
+    expect_serial "$SHELL_BANNER" "$tag/b: shell up"
+    expect_serial '^IP forwarding on: [0-9]+ forwarded' "$tag/b: route shows forwarding on"
+    n=$(tr -d '\r' < "$E2E_TMP/b.serial" | sed -n 's/^IP forwarding on: \([0-9]*\) forwarded.*/\1/p' | tail -n 1)
+    [ "${n:-0}" -ge 50 ] || e2e_fail "$tag/b: ${n:-no} datagrams forwarded, expected at least 50"
+    e2e_log "$tag/b: $n datagrams forwarded"
+    expect_serial '^IP forwarding on: [0-9]+ forwarded, [1-9][0-9]* TTL expired' "$tag/b: a TTL 1 datagram expired at b"
+    for intf in eth0 eth1; do
+        for dir in rx tx; do
+            n=$(net_ifconfig_count b $intf $dir)
+            [ "$n" -ge 50 ] || e2e_fail "$tag/b: $intf $dir $n packets, expected at least 50"
+        done
+        e2e_log "$tag/b: $intf rx $(net_ifconfig_count b $intf rx) tx $(net_ifconfig_count b $intf tx) packets"
+    done
+    expect_serial "^IP : $ra, MAC : $mac_a, OIF = eth0\$" "$tag/b: ARP learned a on eth0"
+    expect_serial "^IP : $rc, MAC : $mac_c, OIF = eth1\$" "$tag/b: ARP learned c on eth1"
+
+    net_on c
+    net_expect_no_fault "$tag/c"
+    expect_serial "^virtio-net: eth0 $mac_c," "$tag/c: MAC $mac_c"
+    expect_serial "^net: eth0 $rc/24\$" "$tag/c: eth0 $ip_c/24, no gateway"
+    expect_serial "^net: route 10\\.1\\.0\\.0/24 via $rb1 on eth0\$" "$tag/c: static route to a's subnet"
+    expect_serial "^(> )?httpd: request from $ra:[0-9]+, 200, 89 bytes\$" "$tag/c: httpd answered a's /"
+    expect_serial "^(> )?httpd: GET /big from $ra:[0-9]+, 200, 65536 bytes\$" "$tag/c: httpd answered a's /big"
+    expect_serial "^(> )?udpecho: ${#text_ac} bytes from $ra:[0-9]+, echoed\$" "$tag/c: echoed a's datagram"
+    net_shell_ping_check "$tag/c" "$ip_a" 2
+    expect_serial "^(> )?udpecho: reply '$text_ca' from $ra ok\$" "$tag/c: UDP echo from a"
+    expect_serial "10\\.1\\.0\\.0 +24 +$rb1 +eth0" "$tag/c: route shows 10.1.0.0/24 via b"
+    expect_serial '^IP forwarding off: 0 forwarded' "$tag/c: c is a host"
+    expect_serial "^IP : $rb1, MAC : $mac_b1, OIF = eth0\$" "$tag/c: ARP learned b's eth1"
+    [ "$(net_count c "^IP : $ra,")" -eq 0 ] || e2e_fail "$tag/c: a in c's ARP table, but a is not on c's link"
+
+    net_on a
+    net_expect_no_fault "$tag/a"
+    expect_serial "^virtio-net: eth0 $mac_a," "$tag/a: MAC $mac_a"
+    expect_serial "^net: eth0 $ra/24, gateway $rb0\$" "$tag/a: eth0 $ip_a/24, gateway b"
+    expect_serial "0\\.0\\.0\\.0 +0 +$rb0 +eth0" "$tag/a: default route via b"
+    [ "$(net_count a '^(> )?wget: HTTP/1\.0 200 OK$')" -eq 2 ] || e2e_fail "$tag/a: not two 200 responses from c"
+    expect_serial "^(> )?wget: body 6 bytes, fnv1a $hello\$" "$tag/a: / arrived whole (6 bytes, FNV-1a $hello)"
+    expect_serial "^(> )?wget: body 65536 bytes, fnv1a $big\$" "$tag/a: /big arrived whole (65536 bytes, FNV-1a $big)"
+    expect_serial "^(> )?udpecho: reply '$text_ac' from $rc ok\$" "$tag/a: UDP echo from c"
+    expect_serial "^(> )?udpecho: ${#text_ca} bytes from $rc:[0-9]+, echoed\$" "$tag/a: echoed c's datagram"
+    expect_serial "ping: reply from $rc seq=[0-9]+ time=[0-9]+\\.[0-9]{3} ms ttl=63\$" \
+        "$tag/a: PING.ELF, an echo reply from c with TTL 63 (64 less b's hop)"
+    expect_serial "ping: $rc 3 sent, [2-3] received" "$tag/a: PING.ELF summary"
+    expect_serial "ping: time exceeded from $rb0 seq=1 " "$tag/a: PING.ELF -t 1: Time Exceeded from b"
+    expect_serial "ping: $rc 1 sent, 0 received" "$tag/a: PING.ELF -t 1 got no echo reply"
+    expect_serial "^IP : $rb0, MAC : $mac_b0, OIF = eth0\$" "$tag/a: ARP learned b"
+    [ "$(net_count a "^IP : $rc,")" -eq 0 ] || e2e_fail "$tag/a: c in a's ARP table, but c is not on a's link"
+}

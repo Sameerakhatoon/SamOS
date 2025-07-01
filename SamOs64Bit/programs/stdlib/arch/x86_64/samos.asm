@@ -62,6 +62,7 @@ global samos_accept:function
 global samos_sendto:function
 global samos_recvfrom:function
 global samos_sclose:function
+global samos_net_ping_ex:function
 
 ; One wrapper per syscall: rax = number, int 0x80, return rax.
 %macro SYSCALL_WRAPPER 2
@@ -134,3 +135,4 @@ SYSCALL_WRAPPER  samos_accept,               66  ; net/socket.h
 SYSCALL_WRAPPER4 samos_sendto,               67  ; net/socket.h
 SYSCALL_WRAPPER4 samos_recvfrom,             68  ; net/socket.h
 SYSCALL_WRAPPER  samos_sclose,               69  ; net/socket.h
+SYSCALL_WRAPPER4 samos_net_ping_ex,          70  ; Long (unsigned ip, unsigned ms, unsigned ttl, struct samos_ping_result* out)
