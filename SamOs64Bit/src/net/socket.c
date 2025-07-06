@@ -94,6 +94,11 @@ unsigned int tcp_app_window(Tcb* t){
     return s ? SOCK_RXBUF - s->rx_len : SOCK_RXBUF;
 }
 
+bool tcp_app_accept_room(Tcb* listener){
+    struct sock* l = listener->app;
+    return !l || l->accq_len < l->backlog;
+}
+
 void tcp_event(Tcb* t, int ev){
     struct sock* s = t->app;
     if(ev == TCP_EV_ESTABLISHED && !s && t->listener){
@@ -116,6 +121,12 @@ void tcp_event(Tcb* t, int ev){
         return;
     }
     if(!s){
+        // A passive TCB that closed before its handshake
+        // ended (a RST, or its SYN-ACKs ran out) has no socket and never
+        // will: let it go, or it stays in the TCB list for ever.
+        if(ev == TCP_EV_CLOSED && !t->orphan){
+            tcp_release(t);
+        }
         return;
     }
     if(ev == TCP_EV_FIN){
@@ -404,6 +415,14 @@ long socket_close(struct process* p, int sd){
     }
     net_unlock();
     return s ? 0 : -EBADF;
+}
+
+int socket_count(void){
+    int n = 0;
+    for(int i = 0; i < NET_SOCKETS; i++){
+        n += socks[i].type != 0;
+    }
+    return n;
 }
 
 void socket_process_gone(struct process* p){

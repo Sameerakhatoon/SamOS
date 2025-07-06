@@ -109,6 +109,8 @@ static Tcb* ev_last;
 static uint8_t app_rx[65536];
 static size_t app_rx_len;
 unsigned int tcp_app_window(Tcb* t){ return app_window; }
+static bool accept_room = true;
+bool tcp_app_accept_room(Tcb* l){ return accept_room; }
 void tcp_event(Tcb* t, int ev){
     ev_count[ev]++;
     ev_last = t;
@@ -790,6 +792,74 @@ static void test_tcp_passive(void){
     qclear();
 }
 
+// A listener closed while a handshake to it is half
+// done. The passive child must not outlive it in SYN_RECEIVED with a
+// pointer to the freed listener: it is reset and released, and the
+// peer's late third leg finds no connection.
+static void test_tcp_listener_close(void){
+    struct tseg s;
+    reset_events();
+    Tcb* l = tcp_listen_tcb(node, 82, app_data);
+    CHECK(l != NULL, "listen on 82");
+    if(!l){
+        return;
+    }
+    tcp_in(40100, 82, 3000, 0, F_SYN, 65535, NULL, 0, 1460);
+    CHECK(tcp_out(&s) && s.flags == (F_SYN | F_ACK), "SYN-ACK from the listener's child");
+    uint32_t iss = s.seq;
+    tcp_close_tcb(l);
+    CHECK(tcp_out(&s) && (s.flags & F_RST) && s.dport == 40100 && s.seq == iss + 1,
+          "closing the listener resets its half-open child (flags %02x seq %u)", s.flags, s.seq);
+    tcp_release(l);
+    tick(1);
+    qclear();
+    tcp_in(40100, 82, 3001, iss + 1, F_ACK, 65535, NULL, 0, 0);
+    CHECK(ev_count[TCP_EV_ESTABLISHED] == 0, "the late third leg establishes nothing");
+    CHECK(tcp_out(&s) && (s.flags & F_RST), "and gets a RST");
+    qclear();
+}
+
+// The accept queue is full when the third leg comes.
+// The child stays in SYN_RECEIVED (no FIN to a peer that sent a
+// request); once there is room, the SYN-ACK is sent again and the
+// peer's ACK of it completes the handshake.
+static void test_tcp_accept_full(void){
+    struct tseg s;
+    reset_events();
+    Tcb* l = tcp_listen_tcb(node, 83, app_data);
+    CHECK(l != NULL, "listen on 83");
+    if(!l){
+        return;
+    }
+    tcp_in(40200, 83, 6000, 0, F_SYN, 65535, NULL, 0, 1460);
+    CHECK(tcp_out(&s) && s.flags == (F_SYN | F_ACK), "SYN-ACK");
+    uint32_t iss = s.seq;
+    accept_room = false;
+    tcp_in(40200, 83, 6001, iss + 1, F_ACK | F_PSH, 65535, "GET / ", 6, 0);
+    CHECK(ev_count[TCP_EV_ESTABLISHED] == 0 && !tcp_out(&s), "queue full: the third leg is ignored, nothing sent");
+    accept_room = true;
+    tick(1001);
+    CHECK(tcp_out(&s) && s.flags == (F_SYN | F_ACK) && s.seq == iss, "the SYN-ACK again on the timer");
+    tcp_in(40200, 83, 6001, iss + 1, F_ACK | F_PSH, 65535, "GET / ", 6, 0);
+    CHECK(ev_count[TCP_EV_ESTABLISHED] == 1 && ev_last && ev_last->state == TCP_ESTABLISHED,
+          "room again: the retransmitted third leg establishes");
+    Tcb* t = ev_last;
+    // A SYN-ACK again in ESTABLISHED (as the client sees it): ACKed.
+    qclear();
+    tcp_in(40200, 83, 6000, iss + 1, F_SYN | F_ACK, 65535, NULL, 0, 1460);
+    CHECK(tcp_out(&s) && s.flags == F_ACK && s.ack == 6007, "a SYN in ESTABLISHED gets an ACK (ack %u)", s.ack);
+    // The peer resets it, so nothing of it is left for the next test.
+    tcp_in(40200, 83, 6007, 0, F_RST, 0, NULL, 0, 0);
+    CHECK(t && t->state == TCP_CLOSED, "RST: CLOSED");
+    if(t){
+        tcp_release(t);
+    }
+    tcp_close_tcb(l);
+    tcp_release(l);
+    tick(1);
+    qclear();
+}
+
 static void test_tcp_active(void){
     struct tseg s;
     reset_events();
@@ -889,6 +959,8 @@ int main(int argc, char** argv){
     test_forward();
     test_lpm();
     test_tcp_passive();
+    test_tcp_listener_close();
+    test_tcp_accept_full();
     test_tcp_active();
     printf("net host test: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

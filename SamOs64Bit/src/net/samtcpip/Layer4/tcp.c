@@ -475,7 +475,31 @@ Tcb* tcp_listen_tcb(Node* node, unsigned short port, TcpOnData on_data){
     return tcp_listen_with_handler(node, port, on_data) ? tcb_find_listener(node, port) : 0;
 }
 
+// A listener going away. Its passive children point at
+// it (Tcb.listener) and it is freed on the next tick: forget it in every
+// child, and reset the ones no socket has taken yet (still in
+// SYN_RECEIVED), which nobody would ever accept or free.
+static void tcp_drop_children(Tcb* l){
+    GlThread* cur = 0;
+    ITERATE_GLTHREAD_BEGIN(&g_tcbs, cur){
+        Tcb* c = glue_to_tcb(cur);
+        if(c->listener != l) continue;
+        c->listener = 0;
+        if(c->app || c->orphan) continue;
+        if(c->state != TCP_CLOSED){
+            send_rst_segment(c->node, c->local_ip, c->local_port, c->remote_ip, c->remote_port,
+                             c->snd_nxt, c->rcv_nxt, true);
+            c->state  = TCP_CLOSED;
+            c->rto_at = 0;
+        }
+        tcp_release(c);
+    } ITERATE_GLTHREAD_END(&g_tcbs, cur);
+}
+
 void tcp_close_tcb(Tcb* t){
+    if(t->state == TCP_LISTEN){
+        tcp_drop_children(t);
+    }
     if(t->state == TCP_ESTABLISHED){
         t->state = TCP_FIN_WAIT_1;
         printf("TCP close : %s : ESTABLISHED -> FIN_WAIT_1\n", t->node->node_name);
@@ -649,7 +673,14 @@ static void tcp_recv(Node* node, Interface* iif, IpHdr* ip_hdr,
     // The third leg may carry data (and a FIN); it goes
     // on to the synchronized-state handling below instead of being
     // dropped by a return.
-    if(tcb->state == TCP_SYN_RECEIVED && (flags & TCP_ACK) && ack == tcb->iss + 1){
+    // Not while the listener's accept queue is full; the
+    // child stays in SYN_RECEIVED, its timer sends the SYN-ACK again and
+    // the peer's ACK of that (or its data) completes the handshake then.
+    if(tcb->state == TCP_SYN_RECEIVED && (flags & TCP_ACK) && ack == tcb->iss + 1
+       && tcb->listener && !tcp_app_accept_room(tcb->listener)){
+        printf("TCP recv : %s : accept queue full, third leg from port %u ignored\n",
+               node->node_name, tcb->remote_port);
+    } else if(tcb->state == TCP_SYN_RECEIVED && (flags & TCP_ACK) && ack == tcb->iss + 1){
         tcb->state = TCP_ESTABLISHED;
         // ch40: handshake-consumed byte is now acked.
         tcb->snd_una     = ack;
@@ -690,6 +721,16 @@ static void tcp_recv(Node* node, Interface* iif, IpHdr* ip_hdr,
     if(tcb->state == TCP_SYN_SENT || tcb->state == TCP_SYN_RECEIVED || tcb->state == TCP_CLOSED){
         printf("TCP recv : %s : state=%s seq=%u ack=%u flags=0x%02x (no-op)\n",
                node->node_name, state_name(tcb->state), seq, ack, flags);
+        return;
+    }
+    // A SYN in a synchronized state is the peer's
+    // handshake again (its SYN-ACK resent because our third leg was not
+    // taken): drop it and ACK what we expect (RFC 793, an unacceptable
+    // segment), which lets the peer finish.
+    if(flags & TCP_SYN){
+        printf("TCP recv : %s : SYN seq=%u in state=%s -> ACK\n",
+               node->node_name, seq, state_name(tcb->state));
+        send_bare_ack(tcb);
         return;
     }
 

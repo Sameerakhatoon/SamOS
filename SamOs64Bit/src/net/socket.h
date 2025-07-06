@@ -53,4 +53,7 @@ long socket_close(struct process* p, int s);
 // Under the net lock: close every socket of `p` (it is exiting).
 void socket_process_gone(struct process* p);
 
+// Under the net lock: the sockets in use, system-wide (netstat).
+int socket_count(void);
+
 #endif

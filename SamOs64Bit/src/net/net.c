@@ -414,6 +414,7 @@ long net_info(int what, char* buf, size_t size){
     case NET_INFO_TCP:
         tcp_dump(node);
         printf("TCP retransmission timeouts: %lu\n", tcp_rto_count);
+        printf("sockets in use: %d of %d\n", socket_count(), NET_SOCKETS);
         break;
     }
     long n = (long)samtcpip_sink_end();

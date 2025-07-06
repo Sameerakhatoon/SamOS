@@ -216,7 +216,7 @@ net_two_guests_test() {
     E2E_NET=$transport
     # b is done when its four programs have printed their last lines.
     _net_b_done() {
-        [ "$(net_count b '^(> )?wget: body ')" -ge 2 ] && [ "$(net_count b '^(> )?udpecho: (reply|no matching)')" -ge 1 ] \
+        [ "$(net_count b 'wget: body ')" -ge 2 ] && [ "$(net_count b 'udpecho: (reply|no matching)')" -ge 1 ] \
             && [ "$(net_count b "ping: $(net_re "$ip_a") [0-9]+ sent")" -ge 1 ]
     }
     # a: up to the shell; once b's programs are done (or b is gone),
@@ -273,9 +273,9 @@ net_two_guests_test() {
     net_nic_check "$transport" "$tag/a" "$ip_a"
     net_expect_no_fault "$tag/a"
     expect_serial "^virtio-net: eth0 $mac_a," "$tag/a: MAC $mac_a"
-    expect_serial "^(> )?httpd: request from $rb:[0-9]+, 200, 89 bytes\$" "$tag/a: httpd answered b's /"
-    expect_serial "^(> )?httpd: GET /big from $rb:[0-9]+, 200, 65536 bytes\$" "$tag/a: httpd answered b's /big"
-    expect_serial "^(> )?udpecho: ${#text} bytes from $rb:[0-9]+, echoed\$" "$tag/a: echoed b's datagram"
+    expect_serial "httpd: request from $rb:[0-9]+, 200, 89 bytes\$" "$tag/a: httpd answered b's /"
+    expect_serial "httpd: GET /big from $rb:[0-9]+, 200, 65536 bytes\$" "$tag/a: httpd answered b's /big"
+    expect_serial "udpecho: ${#text} bytes from $rb:[0-9]+, echoed\$" "$tag/a: echoed b's datagram"
     net_shell_ping_check "$tag/a" "$ip_b" 2
     expect_serial "^IP : $rb, MAC : $mac_b, OIF = eth0\$" "$tag/a: ARP learned b"
 
@@ -283,13 +283,99 @@ net_two_guests_test() {
     net_nic_check "$transport" "$tag/b" "$ip_b"
     net_expect_no_fault "$tag/b"
     expect_serial "^virtio-net: eth0 $mac_b," "$tag/b: MAC $mac_b"
-    [ "$(net_count b '^(> )?wget: HTTP/1\.0 200 OK$')" -eq 2 ] || e2e_fail "$tag/b: not two 200 responses from a"
-    expect_serial "^(> )?wget: body 6 bytes, fnv1a $hello\$" "$tag/b: / arrived whole (6 bytes, FNV-1a $hello)"
+    [ "$(net_count b 'wget: HTTP/1\.0 200 OK$')" -eq 2 ] || e2e_fail "$tag/b: not two 200 responses from a"
+    expect_serial "wget: body 6 bytes, fnv1a $hello\$" "$tag/b: / arrived whole (6 bytes, FNV-1a $hello)"
     expect_serial '^(> )?hello$' "$tag/b: / printed"
-    expect_serial "^(> )?wget: body 65536 bytes, fnv1a $big\$" "$tag/b: /big arrived whole (65536 bytes, FNV-1a $big)"
-    expect_serial "^(> )?udpecho: reply '$text' from $ra ok\$" "$tag/b: UDP echo from a"
+    expect_serial "wget: body 65536 bytes, fnv1a $big\$" "$tag/b: /big arrived whole (65536 bytes, FNV-1a $big)"
+    expect_serial "udpecho: reply '$text' from $ra ok\$" "$tag/b: UDP echo from a"
     expect_serial "ping: reply from $ra seq=[0-9]+ time=[0-9]+\\.[0-9]{3} ms" "$tag/b: PING.ELF, an echo reply from a"
     expect_serial "ping: $ra 3 sent, [2-3] received" "$tag/b: PING.ELF summary"
+}
+
+# ---- (231, 233-236) several SamOS guests on one segment ----------------
+# A pair of socket endpoints is point to point, so three or more guests
+# meet at net_host.py's hub instead: guest k's -netdev socket sends to
+# the hub's port k and listens on its own; the hub is a learning switch
+# and, for the loss tests, drops every DROP-th and holds back every
+# REORDER-th TCP frame from one guest to another (net_host.py, hub).
+# Guest k (0, 1, 2 ...) is 10.0.2.(15 + k) with MAC 52:54:00:12:34:(56 + k).
+#
+#   net_hub <guests> [drop] [reorder] [synack]
+#                                start the hub in the background; guest
+#                                k's netdev is NET_HUB_NETDEV[k], the log
+#                                $E2E_TMP/hub.log; synack: drop every
+#                                SYN-ACK for that many seconds from the
+#                                first
+#   net_hub_stop                 stop it: it logs every TCP flow that
+#                                carried data, then "hub: done"
+#   net_ip <k>, net_mac <k>      guest k's address and MAC
+#   net_flag <flag>              (monitor script) raise a flag file
+#   net_flags_wait <s> <flag>... (monitor script) wait until all are up
+#   net_netstat_sockets <name>   the last "sockets in use" count netstat
+#                                printed in guest <name>'s log
+#   net_hub_overlap <ERE>        how many connections were carrying data
+#                                at the same time, at most: the hub's
+#                                flows matching ERE, both directions of
+#                                a connection as one span from its first
+#                                data frame to its last
+net_ip() { printf '10.0.2.%d' $((15 + $1)); }
+net_mac() { printf '52:54:00:12:34:%02x' $((0x56 + $1)); }
+
+net_hub() {
+    local n=$1 drop=${2:-0} reorder=${3:-0} synack=${4:-0} ports k pairs=
+    ports=$(net_host udpports $((2 * n))) || e2e_skip "python3 for net_host.py"
+    # shellcheck disable=SC2206
+    ports=($ports)
+    NET_HUB_NETDEV=()
+    for ((k = 0; k < n; k++)); do
+        pairs="$pairs,${ports[2 * k]}:${ports[2 * k + 1]}"
+        NET_HUB_NETDEV[k]="socket,id=net0,udp=127.0.0.1:${ports[2 * k]},localaddr=127.0.0.1:${ports[2 * k + 1]}"
+    done
+    NET_HUB_LOG="$E2E_TMP/hub.log"
+    python3 -I "$NET_HOST" hub "${pairs#,}" 3600 "$NET_HUB_LOG" "$drop" "$reorder" "$synack" > "$E2E_TMP/hub.err" 2>&1 &
+    NET_HUB_PID=$!
+    E2E_SERIAL="$NET_HUB_LOG" e2e_wait_serial '^hub: ' 20 || e2e_fail "the hub did not start: $(cat "$E2E_TMP/hub.err")"
+    e2e_log "hub: $n guests on ${pairs#,}, drop ${drop}, reorder ${reorder}, SYN-ACK blackout ${synack}"
+}
+
+net_hub_stop() {
+    touch "$NET_HUB_LOG.stop"
+    wait "$NET_HUB_PID" 2> /dev/null
+    grep '^hub: done$' "$NET_HUB_LOG" > /dev/null || e2e_fail "the hub did not finish: $(cat "$E2E_TMP/hub.err")"
+}
+
+net_flag() {
+    touch "$E2E_TMP/flag.$1"
+}
+
+net_flags_wait() {
+    local limit=$1 t=0 f ok
+    shift
+    while [ $t -lt $((limit * 2)) ]; do
+        ok=1
+        for f in "$@"; do
+            [ -e "$E2E_TMP/flag.$f" ] || ok=0
+        done
+        [ $ok = 1 ] && return 0
+        sleep 0.5
+        t=$((t + 1))
+    done
+    e2e_log "flags $* not all up after ${limit} s"
+    return 1
+}
+
+net_netstat_sockets() {
+    tr -d '\r' < "$E2E_TMP/$1.serial" | sed -n 's/^\(> \)\{0,1\}sockets in use: \([0-9]*\) of 64$/\2/p' | tail -n 1
+}
+
+net_hub_overlap() {
+    grep -E '^hub: flow ' "$NET_HUB_LOG" | grep -E -- "$1" \
+        | awk '{ for (i = 1; i < NF; i++) { if ($i == "first") s = $(i + 1); if ($i == "last") e = $(i + 1) }
+                 k = $3 < $5 ? $3 " " $5 : $5 " " $3
+                 if (!(k in b) || s < b[k]) b[k] = s
+                 if (!(k in f) || e > f[k]) f[k] = e }
+               END { for (k in b) { print b[k], 1; print f[k], -1 } }' \
+        | sort -k1,1g -k2,2n | awk '{ c += $2; if (c > m) m = c } END { print m + 0 }'
 }
 
 # ---- (232) a SamOS guest as a router ------------------------------------
@@ -354,8 +440,8 @@ net_router_test() {
     rc=$(net_re "$ip_c")
     # a's programs are done when each client has printed its last line.
     _net_a_done() {
-        [ "$(net_count a '^(> )?wget: body ')" -ge 2 ] \
-            && [ "$(net_count a '^(> )?udpecho: (reply|no matching)')" -ge 1 ] \
+        [ "$(net_count a 'wget: body ')" -ge 2 ] \
+            && [ "$(net_count a 'udpecho: (reply|no matching)')" -ge 1 ] \
             && [ "$(net_count a "ping: $rc [0-9]+ sent")" -ge 2 ]
     }
     # b: up to the shell; once c is done, its tables.
@@ -450,11 +536,11 @@ net_router_test() {
     expect_serial "^virtio-net: eth0 $mac_c," "$tag/c: MAC $mac_c"
     expect_serial "^net: eth0 $rc/24\$" "$tag/c: eth0 $ip_c/24, no gateway"
     expect_serial "^net: route 10\\.1\\.0\\.0/24 via $rb1 on eth0\$" "$tag/c: static route to a's subnet"
-    expect_serial "^(> )?httpd: request from $ra:[0-9]+, 200, 89 bytes\$" "$tag/c: httpd answered a's /"
-    expect_serial "^(> )?httpd: GET /big from $ra:[0-9]+, 200, 65536 bytes\$" "$tag/c: httpd answered a's /big"
-    expect_serial "^(> )?udpecho: ${#text_ac} bytes from $ra:[0-9]+, echoed\$" "$tag/c: echoed a's datagram"
+    expect_serial "httpd: request from $ra:[0-9]+, 200, 89 bytes\$" "$tag/c: httpd answered a's /"
+    expect_serial "httpd: GET /big from $ra:[0-9]+, 200, 65536 bytes\$" "$tag/c: httpd answered a's /big"
+    expect_serial "udpecho: ${#text_ac} bytes from $ra:[0-9]+, echoed\$" "$tag/c: echoed a's datagram"
     net_shell_ping_check "$tag/c" "$ip_a" 2
-    expect_serial "^(> )?udpecho: reply '$text_ca' from $ra ok\$" "$tag/c: UDP echo from a"
+    expect_serial "udpecho: reply '$text_ca' from $ra ok\$" "$tag/c: UDP echo from a"
     expect_serial "10\\.1\\.0\\.0 +24 +$rb1 +eth0" "$tag/c: route shows 10.1.0.0/24 via b"
     expect_serial '^IP forwarding off: 0 forwarded' "$tag/c: c is a host"
     expect_serial "^IP : $rb1, MAC : $mac_b1, OIF = eth0\$" "$tag/c: ARP learned b's eth1"
@@ -465,11 +551,11 @@ net_router_test() {
     expect_serial "^virtio-net: eth0 $mac_a," "$tag/a: MAC $mac_a"
     expect_serial "^net: eth0 $ra/24, gateway $rb0\$" "$tag/a: eth0 $ip_a/24, gateway b"
     expect_serial "0\\.0\\.0\\.0 +0 +$rb0 +eth0" "$tag/a: default route via b"
-    [ "$(net_count a '^(> )?wget: HTTP/1\.0 200 OK$')" -eq 2 ] || e2e_fail "$tag/a: not two 200 responses from c"
-    expect_serial "^(> )?wget: body 6 bytes, fnv1a $hello\$" "$tag/a: / arrived whole (6 bytes, FNV-1a $hello)"
-    expect_serial "^(> )?wget: body 65536 bytes, fnv1a $big\$" "$tag/a: /big arrived whole (65536 bytes, FNV-1a $big)"
-    expect_serial "^(> )?udpecho: reply '$text_ac' from $rc ok\$" "$tag/a: UDP echo from c"
-    expect_serial "^(> )?udpecho: ${#text_ca} bytes from $rc:[0-9]+, echoed\$" "$tag/a: echoed c's datagram"
+    [ "$(net_count a 'wget: HTTP/1\.0 200 OK$')" -eq 2 ] || e2e_fail "$tag/a: not two 200 responses from c"
+    expect_serial "wget: body 6 bytes, fnv1a $hello\$" "$tag/a: / arrived whole (6 bytes, FNV-1a $hello)"
+    expect_serial "wget: body 65536 bytes, fnv1a $big\$" "$tag/a: /big arrived whole (65536 bytes, FNV-1a $big)"
+    expect_serial "udpecho: reply '$text_ac' from $rc ok\$" "$tag/a: UDP echo from c"
+    expect_serial "udpecho: ${#text_ca} bytes from $rc:[0-9]+, echoed\$" "$tag/a: echoed c's datagram"
     expect_serial "ping: reply from $rc seq=[0-9]+ time=[0-9]+\\.[0-9]{3} ms ttl=63\$" \
         "$tag/a: PING.ELF, an echo reply from c with TTL 63 (64 less b's hop)"
     expect_serial "ping: $rc 3 sent, [2-3] received" "$tag/a: PING.ELF summary"

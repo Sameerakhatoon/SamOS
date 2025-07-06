@@ -191,6 +191,10 @@ enum {
 void         tcp_event(Tcb* tcb, int ev);
 // Room the application has for received data (the window advertised).
 unsigned int tcp_app_window(Tcb* tcb);
+// Whether a listener can take one more connection (its
+// accept queue has room); if not, the third leg is ignored and the
+// handshake is finished later, when the SYN-ACK is sent again.
+bool         tcp_app_accept_room(Tcb* listener);
 
 Tcb*   tcp_open(Node* node, unsigned int dst_ip_host, unsigned short dst_port);
 Tcb*   tcp_listen_tcb(Node* node, unsigned short port, TcpOnData on_data);
