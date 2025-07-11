@@ -63,6 +63,9 @@ e2e_log "curl /big through loss: 65536 bytes, identical"
 big=$(net_host fnv "$E2E_TMP/big.expect")
 expect_serial "^wget: body 65536 bytes, fnv1a $big\$" "wget through loss: whole"
 rto=$(tr -d '\r' < "$E2E_SERIAL" | sed -n 's/^TCP retransmission timeouts: \([0-9]*\)$/\1/p' | tail -n 1)
-[ "${rto:-0}" -gt 0 ] || e2e_fail "SamOS retransmitted nothing (timeouts: ${rto:-none})"
-e2e_log "SamOS retransmission timeouts: $rto"
+# Most losses are repaired by fast retransmit now, not the timer.
+fast=$(tr -d '\r' < "$E2E_SERIAL" | sed -n 's/^TCP fast retransmits: \([0-9]*\)$/\1/p' | tail -n 1)
+ooo=$(tr -d '\r' < "$E2E_SERIAL" | sed -n 's/^TCP out-of-order segments kept: \([0-9]*\)$/\1/p' | tail -n 1)
+[ $((${rto:-0} + ${fast:-0})) -gt 0 ] || e2e_fail "SamOS retransmitted nothing (timeouts: ${rto:-none}, fast: ${fast:-none})"
+e2e_log "SamOS retransmission timeouts: $rto, fast retransmits: ${fast:-none}, out-of-order segments kept: ${ooo:-none}"
 echo "PASS: e2e/220 TCP both ways through a link dropping every 7th TCP frame"

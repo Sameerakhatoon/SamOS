@@ -721,11 +721,15 @@ static void test_tcp_passive(void){
     }
     CHECK(n >= 2 && t->snd_nxt - t->snd_una <= (t->cwnd < 8000 ? t->cwnd : 8000), "window open: %d more segments", n);
 
-    // Loss: no ACK, the timer fires after the 1 s RTO.
+    // The ACKs came at once (the clock did not move): RTT samples
+    // of 0 ms put the RTO at its floor.
+    unsigned int rto = t->rto_ms;
+    CHECK(t->rtt_seen && rto == TCP_RTO_MIN_MS, "RTT samples of 0 ms: RTO %u (floor %u)", rto, TCP_RTO_MIN_MS);
+    // Loss: no ACK, the timer fires after the RTO.
     uint32_t flight = t->snd_max - t->snd_una;
     uint32_t una0 = t->snd_una;
     unsigned long rtos = tcp_rto_count;
-    tick(999);
+    tick(rto - 1);
     CHECK(!tcp_out(&s), "nothing before the RTO");
     tick(2);
     CHECK(tcp_rto_count == rtos + 1, "a retransmission timeout");
@@ -734,17 +738,17 @@ static void test_tcp_passive(void){
     CHECK(tcp_out(&s) && s.seq == una0 && s.len == 1000 && memcmp(s.data, out + (una0 - una), 1000) == 0,
           "go back to snd_una: the first unacknowledged segment again");
     CHECK(!tcp_out(&s), "one segment with cwnd 1 MSS");
-    // The next timeout doubles the RTO: nothing at +1 s, again at +2 s.
-    tick(1001);
-    CHECK(!tcp_out(&s), "RTO doubled: no resend after 1 s");
-    tick(1000);
-    CHECK(tcp_out(&s) && s.seq == una0, "resend after 2 s");
+    // The next timeout doubles the RTO.
+    tick(2 * rto - 1);
+    CHECK(!tcp_out(&s), "RTO doubled: no resend after one RTO");
+    tick(2);
+    CHECK(tcp_out(&s) && s.seq == una0, "resend after two");
     // The peer kept the rest, so its ACK covers everything sent
     // before the timeout, past the rewound snd_nxt.
     uint32_t max = t->snd_max;
     tcp_in(40001, 80, piss + 20, max, F_ACK, 8000, NULL, 0, 0);
-    CHECK(t->snd_una == max && t->snd_nxt >= max && t->rto_ms == TCP_RTO_INIT_MS,
-          "an ACK past snd_nxt is taken (una %u max %u), RTO reset", t->snd_una, max);
+    CHECK(t->snd_una == max && t->snd_nxt >= max && t->rto_ms == rto,
+          "an ACK past snd_nxt is taken (una %u max %u), the backoff undone", t->snd_una, max);
     // Drain the rest with ACKs.
     for(int guard = 0; guard < 50 && t->sndbuf_len; guard++){
         while(tcp_out(&s)){
@@ -890,7 +894,11 @@ static void test_tcp_active(void){
     tcp_in(8080, lport, 70018, iss + 2, F_ACK, 30000, NULL, 0, 0);
     CHECK(t->state == TCP_FIN_WAIT_2, "FIN ACKed: FIN_WAIT_2");
     tcp_in(8080, lport, 70018, iss + 2, F_FIN | F_ACK, 30000, NULL, 0, 0);
-    CHECK(t->state == TCP_CLOSED && tcp_out(&s) && s.flags == F_ACK && s.ack == 70019, "peer FIN: ACKed, CLOSED");
+    // TIME_WAIT, not CLOSED at once.
+    CHECK(t->state == TCP_TIME_WAIT && tcp_out(&s) && s.flags == F_ACK && s.ack == 70019,
+          "peer FIN: ACKed, TIME_WAIT (%u)", t->state);
+    tick(tcp_time_wait_ms);
+    CHECK(t->state == TCP_CLOSED, "CLOSED after tcp_time_wait_ms");
     tcp_release(t);
     qclear();
 
@@ -939,6 +947,327 @@ static void test_tcp_active(void){
     qclear();
 }
 
+// ---- the TCP repair ----------------------------------------------------
+
+// RFC 6298's estimator on its own, then Karn's rule
+// and a measured sample on a connection.
+static void test_tcp_rto_estimator(void){
+    Tcb x;
+    memset(&x, 0, sizeof(x));
+    x.node = node;
+    CHECK(tcp_rto_value(&x) == TCP_RTO_INIT_MS, "no sample: the initial RTO (%u)", tcp_rto_value(&x));
+    tcp_rtt_sample(&x, 100);
+    CHECK(x.srtt8 / 8 == 100 && x.rttvar4 / 4 == 50 && x.rto_ms == 300,
+          "first sample 100: SRTT 100, RTTVAR 50, RTO 300 (%u %u %u)", x.srtt8 / 8, x.rttvar4 / 4, x.rto_ms);
+    tcp_rtt_sample(&x, 100);
+    CHECK(x.srtt8 / 8 == 100 && x.rttvar4 == 150 && x.rto_ms == 250,
+          "same again: RTTVAR 3/4 of it, RTO 250 (%u %u)", x.rttvar4, x.rto_ms);
+    for(int i = 0; i < 40; i++){
+        tcp_rtt_sample(&x, 100);
+    }
+    CHECK(x.srtt8 / 8 == 100 && x.rto_ms == TCP_RTO_MIN_MS,
+          "steady 100 ms: RTTVAR decays, RTO at the floor %u (%u, rttvar4 %u)", TCP_RTO_MIN_MS, x.rto_ms, x.rttvar4);
+    tcp_rtt_sample(&x, 400);
+    CHECK(x.srtt8 / 8 == 137 && x.rto_ms > 400,
+          "a 400 ms spike: SRTT 7/8 100 + 1/8 400 = 137, RTO above the spike (%u %u)", x.srtt8 / 8, x.rto_ms);
+    memset(&x, 0, sizeof(x));
+    x.node = node;
+    tcp_rtt_sample(&x, 5000);
+    CHECK(x.rto_ms == TCP_RTO_MAX_MS, "a 5 s first sample: RTO capped at %u (%u)", TCP_RTO_MAX_MS, x.rto_ms);
+    memset(&x, 0, sizeof(x));
+    x.node = node;
+    tcp_rtt_sample(&x, 0);
+    CHECK(x.rtt_seen && x.rto_ms == TCP_RTO_MIN_MS, "a 0 ms sample: the floor (%u)", x.rto_ms);
+
+    // On a connection: the handshake is timed, then a segment.
+    struct tseg s;
+    reset_events();
+    Tcb* t = tcp_open(node, PEER_IP, 8085);
+    CHECK(t && tcp_out(&s) && s.flags == F_SYN, "connect for the RTT test");
+    if(!t){
+        return;
+    }
+    uint32_t iss = s.seq;
+    uint16_t lport = s.sport;
+    now_ms += 40;
+    tcp_in(8085, lport, 100, iss + 1, F_SYN | F_ACK, 30000, NULL, 0, 1000);
+    CHECK(t->rtt_seen && t->srtt8 / 8 == 40 && t->rttvar4 == 80 && t->rto_ms == TCP_RTO_MIN_MS,
+          "SYN-ACK after 40 ms: SRTT 40, RTO 40 + 4 * 20 raised to the floor (%u %u)", t->srtt8 / 8, t->rto_ms);
+    qclear();
+    tcp_queue_data(t, "0123456789", 10);
+    CHECK(tcp_out(&s) && s.len == 10 && t->rtt_timing, "a segment, timed");
+    now_ms += 60;
+    tcp_in(8085, lport, 101, iss + 11, F_ACK, 30000, NULL, 0, 0);
+    CHECK(t->srtt8 / 8 == 42 && !t->rtt_timing, "its ACK after 60 ms: SRTT 7/8 40 + 1/8 60 = 42 (%u)", t->srtt8 / 8);
+    // Karn: a segment that was retransmitted gives no sample.
+    unsigned int srtt8 = t->srtt8;
+    tcp_queue_data(t, "abc", 3);
+    CHECK(tcp_out(&s) && t->rtt_timing, "another, timed");
+    tick(t->rto_ms + 1);
+    CHECK(tcp_out(&s) && s.len == 3 && !t->rtt_timing, "timeout: resent, no longer timed");
+    unsigned int backed = t->rto_ms;
+    now_ms += 500;
+    tcp_in(8085, lport, 101, iss + 14, F_ACK, 30000, NULL, 0, 0);
+    CHECK(t->srtt8 == srtt8, "its late ACK is no sample (Karn)");
+    CHECK(backed == 2 * tcp_rto_value(t) || backed == TCP_RTO_MAX_MS, "the timeout doubled the RTO (%u)", backed);
+    CHECK(t->rto_ms == tcp_rto_value(t), "the ACK of new data undoes the backoff (%u)", t->rto_ms);
+    // Done with it: the peer resets it.
+    tcp_in(8085, lport, 101, 0, F_RST, 0, NULL, 0, 0);
+    tcp_release(t);
+    tick(1);
+    qclear();
+}
+
+// A passive connection from the test's port `pport` to `port`, peer MSS
+// 1000, window 30000; the peer's next sequence number in *pseq. The
+// listener stays (closing it would reset a child no socket holds):
+// tcp_unlisten after the test.
+static Tcb* accept_l;
+static Tcb* tcp_accept_one(uint16_t port, uint16_t pport, uint32_t* pseq){
+    struct tseg s;
+    reset_events();
+    Tcb* l = tcp_listen_tcb(node, port, app_data);
+    accept_l = l;
+    tcp_in(pport, port, 20000, 0, F_SYN, 30000, NULL, 0, 1000);
+    if(!l || !tcp_out(&s) || s.flags != (F_SYN | F_ACK)){
+        return NULL;
+    }
+    tcp_in(pport, port, 20001, s.seq + 1, F_ACK, 30000, NULL, 0, 0);
+    *pseq = 20001;
+    qclear();
+    return ev_last && ev_last->state == TCP_ESTABLISHED ? ev_last : NULL;
+}
+
+// Release `t` (if any) and close tcp_accept_one's listener.
+static void tcp_done(Tcb* t){
+    if(t){
+        tcp_release(t);
+    }
+    if(accept_l){
+        tcp_close_tcb(accept_l);
+        tcp_release(accept_l);
+        accept_l = NULL;
+    }
+    tick(1);
+    qclear();
+}
+
+// The third duplicate ACK, limited transmit, NewReno.
+static void test_tcp_fast_retransmit(void){
+    struct tseg s;
+    uint32_t pseq;
+    Tcb* t = tcp_accept_one(86, 40300, &pseq);
+    CHECK(t != NULL, "a connection for the fast retransmit test");
+    if(!t){
+        return;
+    }
+    static uint8_t out[8000];
+    for(int i = 0; i < 8000; i++){
+        out[i] = (uint8_t)(i * 13 + 1);
+    }
+    t->cwnd = 6000;                         // as if slow start had got there
+    uint32_t una = t->snd_una;
+    tcp_queue_data(t, (const char*)out, 8000);
+    int n = 0;
+    while(tcp_out(&s)){
+        n++;
+    }
+    CHECK(n == 6, "cwnd 6000: six segments out (%d)", n);
+    unsigned long rtos = tcp_rto_count, fast = tcp_fast_rtx_count;
+    // The first is lost: the peer ACKs una for each of the other five.
+    tcp_in(40300, 86, pseq, una, F_ACK, 30000, NULL, 0, 0);
+    CHECK(t->dupacks == 1 && tcp_out(&s) && s.seq == una + 6000 && s.len == 1000,
+          "first duplicate: limited transmit sends new data (seq %u)", s.seq - una);
+    tcp_in(40300, 86, pseq, una, F_ACK, 30000, NULL, 0, 0);
+    CHECK(t->dupacks == 2 && tcp_out(&s) && s.seq == una + 7000, "second duplicate: one more");
+    CHECK(!tcp_out(&s) && tcp_fast_rtx_count == fast, "no retransmission yet");
+    tcp_in(40300, 86, pseq, una, F_ACK, 30000, NULL, 0, 0);
+    CHECK(tcp_fast_rtx_count == fast + 1 && tcp_out(&s) && s.seq == una && s.len == 1000
+          && memcmp(s.data, out, 1000) == 0, "third duplicate: the lost segment again at once");
+    CHECK(t->in_recovery && t->ssthresh == 4000 && t->cwnd == 7000,
+          "fast recovery: ssthresh flight/2 = 4000, cwnd ssthresh + 3 MSS (%u %u)", t->ssthresh, t->cwnd);
+    tcp_in(40300, 86, pseq, una, F_ACK, 30000, NULL, 0, 0);
+    CHECK(t->cwnd == 8000 && !tcp_out(&s), "a fourth: cwnd inflated by one MSS, nothing new to send");
+    // A data segment from the peer acking una is not a duplicate ACK.
+    tcp_in(40300, 86, pseq, una, F_ACK | F_PSH, 30000, "x", 1, 0);
+    pseq++;
+    CHECK(t->cwnd == 8000, "a segment with data is no duplicate");
+    qclear();
+    // A partial ACK (a second hole at 3000): resent at once, cwnd deflated.
+    tcp_in(40300, 86, pseq, una + 3000, F_ACK, 30000, NULL, 0, 0);
+    CHECK(tcp_fast_rtx_count == fast + 2 && tcp_out(&s) && s.seq == una + 3000 && t->in_recovery,
+          "partial ACK: the next hole resent, still recovering (seq %u)", s.seq - una);
+    CHECK(t->cwnd == 8000 - 3000 + 1000, "partial ACK: cwnd deflated by 3000, plus one MSS (%u)", t->cwnd);
+    // The full ACK ends recovery.
+    tcp_in(40300, 86, pseq, una + 8000, F_ACK, 30000, NULL, 0, 0);
+    CHECK(!t->in_recovery && t->dupacks == 0 && t->cwnd == 2000,
+          "full ACK: recovery over, cwnd min(ssthresh, flight + MSS) = 2000 (%u)", t->cwnd);
+    CHECK(tcp_rto_count == rtos, "no retransmission timeout on the way");
+    // After a timeout, duplicates below `recover` start no fast retransmit.
+    qclear();
+    t->cwnd = 4000;
+    una = t->snd_una;
+    tcp_queue_data(t, (const char*)out, 4000);
+    while(tcp_out(&s)){
+    }
+    tick(t->rto_ms + 1);
+    CHECK(tcp_rto_count == rtos + 1 && t->after_rto, "a timeout");
+    qclear();
+    fast = tcp_fast_rtx_count;
+    for(int i = 0; i < 4; i++){
+        tcp_in(40300, 86, pseq, una, F_ACK, 30000, NULL, 0, 0);
+    }
+    CHECK(tcp_fast_rtx_count == fast && !t->in_recovery, "after the timeout: duplicates are no fast retransmit");
+    tcp_in(40300, 86, pseq, una + 4000, F_ACK, 30000, NULL, 0, 0);
+    CHECK(!t->after_rto, "everything sent before the timeout ACKed: fast retransmit allowed again");
+    tcp_in(40300, 86, pseq, 0, F_RST, 0, NULL, 0, 0);
+    tcp_done(t);
+}
+
+// Segments after a hole are kept and delivered when
+// it fills, a FIN among them; ACKs go at once; the queue is bounded.
+static void test_tcp_out_of_order(void){
+    struct tseg s;
+    uint32_t p;
+    Tcb* t = tcp_accept_one(87, 40400, &p);
+    CHECK(t != NULL, "a connection for the out-of-order test");
+    if(!t){
+        return;
+    }
+    uint32_t a = t->snd_una;
+    app_rx_len = 0;
+    unsigned long kept = tcp_ooo_count;
+    tcp_in(40400, 87, p, a, F_ACK | F_PSH, 30000, "aaaa", 4, 0);
+    CHECK(app_rx_len == 4 && tcp_out(&s) && s.ack == p + 4, "in order: delivered, ACK");
+    tcp_in(40400, 87, p + 8, a, F_ACK | F_PSH, 30000, "cccc", 4, 0);
+    CHECK(app_rx_len == 4 && tcp_ooo_count == kept + 1 && t->ooo_n == 1, "after a hole: kept, not delivered");
+    CHECK(tcp_out(&s) && s.flags == F_ACK && s.ack == p + 4, "and a duplicate ACK at once (ack %u)", s.ack - p);
+    tcp_in(40400, 87, p + 8, a, F_ACK | F_PSH, 30000, "cccc", 4, 0);
+    CHECK(tcp_ooo_count == kept + 1 && t->ooo_n == 1 && tcp_out(&s) && s.ack == p + 4, "the same again: kept once, ACKed");
+    tcp_in(40400, 87, p + 12, a, F_ACK | F_PSH | F_FIN, 30000, "dddd", 4, 0);
+    CHECK(t->ooo_n == 2 && t->state == TCP_ESTABLISHED && tcp_out(&s) && s.ack == p + 4,
+          "a FIN after the hole: kept, not acted on");
+    // The hole fills, partly overlapping what came before it.
+    tcp_in(40400, 87, p + 2, a, F_ACK | F_PSH, 30000, "aabbbb", 6, 0);
+    CHECK(app_rx_len == 16 && memcmp(app_rx, "aaaabbbbccccdddd", 16) == 0,
+          "the hole filled (its old front trimmed): all 16 bytes in order (%zu)", app_rx_len);
+    CHECK(t->state == TCP_CLOSE_WAIT && t->ooo_n == 0 && ev_count[TCP_EV_FIN] == 1, "the kept FIN taken: CLOSE_WAIT");
+    bool acked = false;
+    while(tcp_out(&s)){
+        acked = acked || (s.flags == F_ACK && s.ack == p + 17);
+    }
+    CHECK(acked, "ACK of everything and the FIN");
+    // The FIN again (our ACK lost): old, ACKed again.
+    tcp_in(40400, 87, p + 12, a, F_ACK | F_FIN, 30000, "dddd", 4, 0);
+    CHECK(tcp_out(&s) && s.ack == p + 17 && app_rx_len == 16, "a resent FIN: ACKed, nothing delivered twice");
+    tcp_in(40400, 87, p + 17, 0, F_RST, 0, NULL, 0, 0);
+    tcp_done(t);
+
+    // The bound: TCP_OOO_MAX kept; a nearer one displaces the farthest.
+    t = tcp_accept_one(88, 40401, &p);
+    CHECK(t != NULL, "a second connection");
+    if(!t){
+        return;
+    }
+    app_rx_len = 0;
+    for(int i = 0; i < TCP_OOO_MAX + 4; i++){
+        uint8_t b[10];
+        memset(b, 'A' + i, 10);
+        tcp_in(40401, 88, p + 10 * (uint32_t)(i + 2), t->snd_una, F_ACK | F_PSH, 30000, b, 10, 0);
+    }
+    CHECK(t->ooo_n == TCP_OOO_MAX && t->ooo[TCP_OOO_MAX - 1].seq == p + 10 * (TCP_OOO_MAX + 1),
+          "at most %d kept, the nearest ones (%d)", TCP_OOO_MAX, t->ooo_n);
+    uint8_t b[20];
+    memset(b, '0', 20);
+    tcp_in(40401, 88, p, t->snd_una, F_ACK | F_PSH, 30000, b, 10, 0);
+    CHECK(app_rx_len == 10 && t->ooo_n == TCP_OOO_MAX, "one segment still missing: nothing more delivered");
+    tcp_in(40401, 88, p + 10, t->snd_una, F_ACK | F_PSH, 30000, b, 10, 0);
+    CHECK(app_rx_len == 20 + 10 * TCP_OOO_MAX && t->ooo_n == 0 && t->rcv_nxt == p + 20 + 10 * TCP_OOO_MAX,
+          "the hole filled: all %d kept segments delivered (%zu bytes)", TCP_OOO_MAX, app_rx_len);
+    CHECK(app_rx[20] == 'A' && app_rx[19 + 10 * TCP_OOO_MAX] == 'A' + TCP_OOO_MAX - 1, "in order");
+    // Past the window: not kept.
+    app_window = 100;
+    unsigned long before = tcp_ooo_count;
+    tcp_in(40401, 88, t->rcv_nxt + 200, t->snd_una, F_ACK | F_PSH, 30000, b, 10, 0);
+    CHECK(tcp_ooo_count == before && t->ooo_n == 0, "a segment past the window is not kept");
+    app_window = 16384;
+    tcp_in(40401, 88, t->rcv_nxt, 0, F_RST, 0, NULL, 0, 0);
+    tcp_done(t);
+}
+
+// TIME_WAIT, CLOSING, a new SYN in TIME_WAIT, and
+// the orphan timeout.
+static void test_tcp_time_wait(void){
+    struct tseg s;
+    uint32_t p;
+    // We close first; the peer's FIN after our FIN is ACKed.
+    Tcb* t = tcp_accept_one(89, 40500, &p);
+    CHECK(t != NULL, "a connection for the TIME_WAIT test");
+    if(!t){
+        return;
+    }
+    uint32_t a = t->snd_una;
+    tcp_close_tcb(t);
+    CHECK(t->state == TCP_FIN_WAIT_1 && tcp_out(&s) && (s.flags & F_FIN), "close: FIN_WAIT_1");
+    tcp_in(40500, 89, p, a + 1, F_ACK, 30000, NULL, 0, 0);
+    tcp_in(40500, 89, p, a + 1, F_ACK | F_FIN, 30000, NULL, 0, 0);
+    CHECK(t->state == TCP_TIME_WAIT && tcp_out(&s) && s.ack == p + 1, "peer FIN: ACKed, TIME_WAIT");
+    tick(tcp_time_wait_ms / 2);
+    // Our ACK was lost: the FIN again is ACKed again and the wait restarts.
+    tcp_in(40500, 89, p, a + 1, F_ACK | F_FIN, 30000, NULL, 0, 0);
+    CHECK(t->state == TCP_TIME_WAIT && tcp_out(&s) && s.flags == F_ACK && s.ack == p + 1, "the FIN again: ACKed again");
+    tick(tcp_time_wait_ms / 2 + 10);
+    CHECK(t->state == TCP_TIME_WAIT, "the wait started over at the resent FIN");
+    tick(tcp_time_wait_ms / 2);
+    CHECK(t->state == TCP_CLOSED, "CLOSED after tcp_time_wait_ms");
+    tcp_done(t);
+
+    // Simultaneous close: their FIN before the ACK of ours: CLOSING.
+    t = tcp_accept_one(90, 40501, &p);
+    CHECK(t != NULL, "a second connection");
+    if(!t){
+        return;
+    }
+    a = t->snd_una;
+    tcp_close_tcb(t);
+    tcp_out(&s);
+    tcp_in(40501, 90, p, a, F_ACK | F_FIN, 30000, NULL, 0, 0);
+    CHECK(t->state == TCP_CLOSING && tcp_out(&s) && s.ack == p + 1, "their FIN first: CLOSING, ACKed");
+    tcp_in(40501, 90, p + 1, a + 1, F_ACK, 30000, NULL, 0, 0);
+    CHECK(t->state == TCP_TIME_WAIT, "our FIN ACKed: TIME_WAIT");
+    // A new SYN on the same 4-tuple, higher sequence: TIME_WAIT ends,
+    // a new connection begins.
+    qclear();
+    tcp_in(40501, 90, p + 100000, 0, F_SYN, 30000, NULL, 0, 1000);
+    CHECK(t->state == TCP_CLOSED && tcp_out(&s) && s.flags == (F_SYN | F_ACK) && s.ack == p + 100001,
+          "a new SYN ends TIME_WAIT and gets a SYN-ACK");
+    tcp_in(40501, 90, p + 100001, 0, F_RST, 0, NULL, 0, 0);
+    tcp_done(t);
+
+    // The orphan timeout: FIN_WAIT_2 and a peer that never closes.
+    t = tcp_accept_one(91, 40502, &p);
+    CHECK(t != NULL, "a third connection");
+    if(!t){
+        return;
+    }
+    a = t->snd_una;
+    unsigned long saved = tcp_orphan_ms, orphans = tcp_orphan_count;
+    tcp_orphan_ms = 3000;
+    tcp_close_tcb(t);
+    tcp_release(t);
+    tcp_in(40502, 91, p, a + 1, F_ACK, 30000, NULL, 0, 0);
+    CHECK(t->state == TCP_FIN_WAIT_2, "FIN ACKed: FIN_WAIT_2, the socket gone");
+    tick(2000);
+    CHECK(tcp_orphan_count == orphans, "still there before tcp_orphan_ms");
+    tick(1001);
+    CHECK(tcp_orphan_count == orphans + 1, "freed after tcp_orphan_ms, counted");
+    qclear();
+    tcp_in(40502, 91, p, a + 1, F_ACK | F_FIN, 30000, NULL, 0, 0);
+    CHECK(tcp_out(&s) && (s.flags & F_RST), "the peer's late FIN: no connection, RST");
+    tcp_orphan_ms = saved;
+    tcp_done(NULL);
+}
+
 int main(int argc, char** argv){
     verbose = getenv("NET_TEST_VERBOSE") != NULL;
     // net/net.c's net_stack_init, with the fake NIC.
@@ -962,6 +1291,10 @@ int main(int argc, char** argv){
     test_tcp_listener_close();
     test_tcp_accept_full();
     test_tcp_active();
+    test_tcp_rto_estimator();
+    test_tcp_fast_retransmit();
+    test_tcp_out_of_order();
+    test_tcp_time_wait();
     printf("net host test: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

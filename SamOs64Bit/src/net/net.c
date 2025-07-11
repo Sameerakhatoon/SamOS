@@ -243,10 +243,30 @@ static void net_configure(Interface* eth0){
     }
 }
 
+// samos.tcp_time_wait_ms=N and samos.tcp_orphan_ms=N (decimal).
+static void net_tcp_option(const char* key, unsigned long* out){
+    const char* v = boot_cmdline_value(key);
+    if(!v || *v < '0' || *v > '9'){
+        return;
+    }
+    unsigned long n = 0;
+    while(*v >= '0' && *v <= '9'){
+        n = n * 10 + (unsigned long)(*v++ - '0');
+    }
+    *out = n;
+    serial_write("net: ");
+    serial_write(key);
+    serial_write(" ");
+    serial_write(itoa((int)n));
+    serial_write("\n");
+}
+
 void net_stack_init(void){
     if(boot_cmdline_has("samos.net_debug")){
         g_log_level = LOG_LEVEL_DEBUG;
     }
+    net_tcp_option("samos.tcp_time_wait_ms", &tcp_time_wait_ms);
+    net_tcp_option("samos.tcp_orphan_ms", &tcp_orphan_ms);
     topo = create_new_graph("samos");
     node = topo ? create_graph_node(topo, "samos") : NULL;
     if(!node){
@@ -414,6 +434,10 @@ long net_info(int what, char* buf, size_t size){
     case NET_INFO_TCP:
         tcp_dump(node);
         printf("TCP retransmission timeouts: %lu\n", tcp_rto_count);
+        // The TCP repair's counters.
+        printf("TCP fast retransmits: %lu\n", tcp_fast_rtx_count);
+        printf("TCP out-of-order segments kept: %lu\n", tcp_ooo_count);
+        printf("TCP orphans timed out: %lu\n", tcp_orphan_count);
         printf("sockets in use: %d of %d\n", socket_count(), NET_SOCKETS);
         break;
     }

@@ -62,7 +62,10 @@ for n in a b; do
     expect_serial "httpd: GET /big from $(net_re "$other"):[0-9]+, 200, 65536 bytes\$" "loss/$n: served the peer's /big"
     expect_serial "wget: body 65536 bytes, fnv1a $big\$" "loss/$n: the peer's /big arrived whole (FNV-1a $big)"
     rto=$(tr -d '\r' < "$E2E_SERIAL" | sed -n 's/^\(> \)\{0,1\}TCP retransmission timeouts: \([0-9]*\)$/\2/p' | tail -n 1)
-    [ "${rto:-0}" -gt 0 ] || e2e_fail "loss/$n: SamOS retransmitted nothing (timeouts: ${rto:-none})"
-    e2e_log "loss/$n: retransmission timeouts $rto"
+    # Most losses are repaired by fast retransmit now, not the timer.
+    fast=$(tr -d '\r' < "$E2E_SERIAL" | sed -n 's/^\(> \)\{0,1\}TCP fast retransmits: \([0-9]*\)$/\2/p' | tail -n 1)
+    ooo=$(tr -d '\r' < "$E2E_SERIAL" | sed -n 's/^\(> \)\{0,1\}TCP out-of-order segments kept: \([0-9]*\)$/\2/p' | tail -n 1)
+    [ $((${rto:-0} + ${fast:-0})) -gt 0 ] || e2e_fail "loss/$n: SamOS retransmitted nothing (timeouts: ${rto:-none}, fast: ${fast:-none})"
+    e2e_log "loss/$n: retransmission timeouts $rto, fast retransmits ${fast:-none}, out-of-order segments kept ${ooo:-none}"
 done
 echo "PASS: e2e/233 two SamOS guests, 64 KiB each way at once through a link dropping and reordering TCP frames"

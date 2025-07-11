@@ -300,12 +300,14 @@ net_two_guests_test() {
 # REORDER-th TCP frame from one guest to another (net_host.py, hub).
 # Guest k (0, 1, 2 ...) is 10.0.2.(15 + k) with MAC 52:54:00:12:34:(56 + k).
 #
-#   net_hub <guests> [drop] [reorder] [synack]
+#   net_hub <guests> [drop] [reorder] [synack] [fin] [finfrom]
 #                                start the hub in the background; guest
 #                                k's netdev is NET_HUB_NETDEV[k], the log
 #                                $E2E_TMP/hub.log; synack: drop every
 #                                SYN-ACK for that many seconds from the
-#                                first
+#                                first; fin: drop every FIN guest
+#                                finfrom (default 1) sends for that many
+#                                seconds from the first
 #   net_hub_stop                 stop it: it logs every TCP flow that
 #                                carried data, then "hub: done"
 #   net_ip <k>, net_mac <k>      guest k's address and MAC
@@ -322,7 +324,7 @@ net_ip() { printf '10.0.2.%d' $((15 + $1)); }
 net_mac() { printf '52:54:00:12:34:%02x' $((0x56 + $1)); }
 
 net_hub() {
-    local n=$1 drop=${2:-0} reorder=${3:-0} synack=${4:-0} ports k pairs=
+    local n=$1 drop=${2:-0} reorder=${3:-0} synack=${4:-0} fin=${5:-0} finfrom=${6:-1} ports k pairs=
     ports=$(net_host udpports $((2 * n))) || e2e_skip "python3 for net_host.py"
     # shellcheck disable=SC2206
     ports=($ports)
@@ -332,7 +334,7 @@ net_hub() {
         NET_HUB_NETDEV[k]="socket,id=net0,udp=127.0.0.1:${ports[2 * k]},localaddr=127.0.0.1:${ports[2 * k + 1]}"
     done
     NET_HUB_LOG="$E2E_TMP/hub.log"
-    python3 -I "$NET_HOST" hub "${pairs#,}" 3600 "$NET_HUB_LOG" "$drop" "$reorder" "$synack" > "$E2E_TMP/hub.err" 2>&1 &
+    python3 -I "$NET_HOST" hub "${pairs#,}" 3600 "$NET_HUB_LOG" "$drop" "$reorder" "$synack" "$fin" "$finfrom" > "$E2E_TMP/hub.err" 2>&1 &
     NET_HUB_PID=$!
     E2E_SERIAL="$NET_HUB_LOG" e2e_wait_serial '^hub: ' 20 || e2e_fail "the hub did not start: $(cat "$E2E_TMP/hub.err")"
     e2e_log "hub: $n guests on ${pairs#,}, drop ${drop}, reorder ${reorder}, SYN-ACK blackout ${synack}"

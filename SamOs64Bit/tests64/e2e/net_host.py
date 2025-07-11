@@ -21,7 +21,7 @@
 #   net_host.py udpports N                N distinct free UDP ports
 #   net_host.py big FILE [BYTES]          as big, BYTES long (httpd's
 #                                         /big<KiB> bodies)
-#   net_host.py hub PAIRS SECONDS LOG [DROP [REORDER [SYNACK]]]
+#   net_host.py hub PAIRS SECONDS LOG [DROP [REORDER [SYNACK [FIN [FINFROM]]]]]
 #                                         One Ethernet segment for
 #                                         several SamOS guests. PAIRS is
 #                                         hubport:guestport,... ; guest k's
@@ -40,7 +40,13 @@
 #                                         seconds from the first one (a
 #                                         client that gives up on connect
 #                                         and later meets the server's
-#                                         retransmitted SYN-ACK). Runs until SECONDS
+#                                         retransmitted SYN-ACK). With
+#                                         FIN, every TCP frame with FIN set
+#                                         that guest FINFROM (default 1)
+#                                         sends is dropped for FIN seconds
+#                                         from the first one (the peer of a
+#                                         FIN_WAIT_2 that never closes, for
+#                                         the orphan timeout). Runs until SECONDS
 #                                         or LOG.stop exists, then logs
 #                                         every TCP flow that carried data
 #                                         (frames, bytes, first and last
@@ -96,7 +102,7 @@ def tcp_info(frame):
     return src, sport, dst, dport, max(0, total - ihl - doff), frame[t + 13]
 
 
-def hub(pairs, seconds, logname, drop=0, reorder=0, synack=0):
+def hub(pairs, seconds, logname, drop=0, reorder=0, synack=0, fin=0, finfrom=1):
     import select
     start = time.time()
     until = start + seconds
@@ -116,13 +122,24 @@ def hub(pairs, seconds, logname, drop=0, reorder=0, synack=0):
     stats = {'frames': 0, 'tcp': 0, 'dropped': 0, 'reordered': 0}
     log.write('hub: %d guests, drop every %s, reorder every %s TCP frame each way, SYN-ACKs dropped for %s s\n'
               % (len(socks), drop or 'no', reorder or 'no', synack or 'no'))
+    if fin:
+        log.write('hub: FINs from guest %d dropped for %s s\n' % (finfrom, fin))
 
     def send(k, frame):
         socks[k].sendto(frame, guests[k])
 
     synack_from = []
+    fin_from = []
 
     def forward(i, j, frame, info):
+        if fin and i == finfrom and info is not None and info[5] & 0x01:
+            if not fin_from:
+                fin_from.append(time.time())
+            if time.time() - fin_from[0] < fin:
+                stats['dropped'] += 1
+                log.write('hub: dropped FIN %d>%d %s:%d > %s:%d\n'
+                          % (i, j, info[0], info[1], info[2], info[3]))
+                return
         if synack and info is not None and info[5] & 0x12 == 0x12:
             if not synack_from:
                 synack_from.append(time.time())
@@ -256,7 +273,9 @@ def main():
         hub(sys.argv[2], float(sys.argv[3]), sys.argv[4],
             int(sys.argv[5]) if len(sys.argv) > 5 else 0,
             int(sys.argv[6]) if len(sys.argv) > 6 else 0,
-            float(sys.argv[7]) if len(sys.argv) > 7 else 0)
+            float(sys.argv[7]) if len(sys.argv) > 7 else 0,
+            float(sys.argv[8]) if len(sys.argv) > 8 else 0,
+            int(sys.argv[9]) if len(sys.argv) > 9 else 1)
     elif cmd == 'big':
         open(sys.argv[2], 'wb').write(big_body(int(sys.argv[3]) if len(sys.argv) > 3 else HTTPD_BIG))
     elif cmd == 'fnv':
