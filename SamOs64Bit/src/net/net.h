@@ -77,6 +77,22 @@ void net_block(void* obj, uint64_t deadline_ms) __attribute__((noreturn));
 bool net_resume(void);
 void net_wake(void* obj);
 
+// Waiting on several objects (poll): wait until net_wake_set(b)
+// for any bit b of `set` (socket.c: a socket's index), or the deadline.
+// Does not return, as net_block.
+void net_block_set(uint64_t set, uint64_t deadline_ms) __attribute__((noreturn));
+void net_wake_set(int bit);
+// net_resume, and when this task's last wait ends here, that wait's
+// deadline in *deadline_ms (left alone otherwise): a restarted call
+// keeps the deadline it set the first time.
+bool net_resume_ex(uint64_t* deadline_ms);
+// `p` (kmalloc'd) is a syscall's kernel copy, freed
+// by net_block if the call blocks (it runs again from the start and
+// allocates anew), else by the caller after net_scratch_done(p). Takes
+// the net lock.
+void net_scratch(void* p);
+void net_scratch_done(void* p);
+
 // `t` is being freed: forget its waits and close its process's sockets.
 void net_task_gone(struct task* t);
 

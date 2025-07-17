@@ -31,5 +31,7 @@
 #define EADDRINUSE     27  // Bind or listen: the port is taken
 #define ENOTCONN       28  // Send or recv on a socket with no connection
 #define EBADF          29  // Not a socket of this process
+#define EAGAIN         30  // A non-blocking socket would have waited
+#define EINPROGRESS    31  // A non-blocking connect goes on (poll for POLLOUT)
 
 #endif

@@ -271,7 +271,7 @@ USER_CFLAGS = -g -ffreestanding -fno-builtin -nostdlib -nostartfiles -nodefaultl
 USER_LIBC   = $(addprefix $(USER_DIR)/libc/,start.S.o samos.S.o start.o samos.o stdlib.o stdio.o \
     string.o memory.o file.o)
 USER_ELFS   = $(addprefix $(USER_DIR)/,blank.elf hello.elf shell.elf rvtest.elf ktest.elf \
-    ping.elf udpecho.elf httpd.elf wget.elf)
+    ping.elf udpecho.elf httpd.elf wget.elf polltest.elf)
 USER_LD     = ./programs/stdlib/arch/$(ARCH)/linker.ld
 USER_ALL    = ./bin/$(ARCH)/initrd.img ./bin/$(ARCH)/os.img
 SYSROOT_CRT0 = $(USER_DIR)/libc/start.S.o $(USER_DIR)/libc/start.o
@@ -298,7 +298,7 @@ USER_LD     = ./programs/stdlib/arch/aarch64/user.ld
 STDLIB_OBJS = $(USER_STUBS) $(addprefix $(USER_BUILD)/stdlib/src/,start.o samos.o stdlib.o stdio.o \
     string.o memory.o file.o)
 USER_ELFS   = $(addprefix $(USER_BUILD)/,blank.elf hello.elf ktest.elf shell.elf \
-    ping.elf udpecho.elf httpd.elf wget.elf)
+    ping.elf udpecho.elf httpd.elf wget.elf polltest.elf)
 RAMDISK     = ./bin/aarch64/ramdisk.img
 SYSROOT_CRT0 = $(BUILD)/user/start.o $(USER_BUILD)/stdlib/src/start.o
 SYSROOT_LIBS = $(filter-out $(SYSROOT_CRT0),$(STDLIB_OBJS))
@@ -321,6 +321,7 @@ $(USER_BUILD)/ping.elf: $(USER_BUILD)/net/ping.o
 $(USER_BUILD)/udpecho.elf: $(USER_BUILD)/net/udpecho.o
 $(USER_BUILD)/httpd.elf: $(USER_BUILD)/net/httpd.o
 $(USER_BUILD)/wget.elf: $(USER_BUILD)/net/wget.o
+$(USER_BUILD)/polltest.elf: $(USER_BUILD)/net/polltest.o
 $(USER_ELFS): $(STDLIB_OBJS) $(USER_LD)
 	$(CC) -nostdlib -static -no-pie -Wl,--build-id=none -Wl,-z,max-page-size=0x1000 -T $(USER_LD) \
 	    -o $@ $(filter %.o,$^) -lgcc
@@ -420,6 +421,7 @@ $(USER_DIR)/ping.elf: ./programs/net/ping.c
 $(USER_DIR)/udpecho.elf: ./programs/net/udpecho.c
 $(USER_DIR)/httpd.elf: ./programs/net/httpd.c
 $(USER_DIR)/wget.elf: ./programs/net/wget.c
+$(USER_DIR)/polltest.elf: ./programs/net/polltest.c
 $(USER_DIR)/rvtest.elf: ./programs/rvtest/rvtest.c ./programs/rvtest/regs.S
 $(USER_DIR)/ktest.elf: ./programs/ktest/ktest.c ./programs/ktest/arch/riscv64/regs.S
 $(USER_ELFS): $(USER_LIBC) $(USER_LD)

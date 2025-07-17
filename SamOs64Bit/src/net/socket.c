@@ -30,6 +30,7 @@ struct sock {
     bool            eof;                // TCP: the peer's FIN
     bool            listening;
     bool            queued;             // on a listener's accept queue
+    bool            nonblock;           // socket_nonblock
     uint64_t        deadline;           // connect's
     uint8_t*        rx;                 // TCP receive ring
     uint32_t        rx_head, rx_len;
@@ -41,6 +42,13 @@ struct sock {
 
 static struct sock socks[NET_SOCKETS];
 static uint16_t next_ephemeral = SOCK_EPHEMERAL_FIRST;
+
+// Whoever waits on the socket itself, and every poll that has
+// it in its set (its index is the bit).
+static void sock_wake(struct sock* s){
+    net_wake(s);
+    net_wake_set((int)(s - socks));
+}
 
 static struct sock* sock_get(struct process* p, int s, int type){
     if(s < 0 || s >= NET_SOCKETS || !socks[s].type || socks[s].owner != p){
@@ -86,7 +94,7 @@ static void sock_tcp_data(Tcb* t, const char* data, size_t len){
     for(size_t i = 0; i < len && s->rx_len < SOCK_RXBUF; i++){
         s->rx[(s->rx_head + s->rx_len++) % SOCK_RXBUF] = (uint8_t)data[i];
     }
-    net_wake(s);
+    sock_wake(s);
 }
 
 unsigned int tcp_app_window(Tcb* t){
@@ -117,7 +125,7 @@ void tcp_event(Tcb* t, int ev){
         t->app   = c;
         c->queued = true;
         l->accq[l->accq_len++] = c;
-        net_wake(l);
+        sock_wake(l);
         return;
     }
     if(!s){
@@ -129,12 +137,14 @@ void tcp_event(Tcb* t, int ev){
         }
         return;
     }
-    if(ev == TCP_EV_FIN){
+    if(ev == TCP_EV_ESTABLISHED){
+        s->deadline = 0;                    // A non-blocking connect is done
+    } else if(ev == TCP_EV_FIN){
         s->eof = true;
     } else if(ev == TCP_EV_CLOSED && !s->eof && !s->err){
         s->err = t->state == TCP_CLOSED && s->deadline ? -ECONNREFUSED : -ECONNRESET;
     }
-    net_wake(s);
+    sock_wake(s);
 }
 
 // ---- UDP -------------------------------------------------------------------
@@ -154,7 +164,7 @@ static void sock_udp_rx(Node* node, Interface* iif, struct IpHdr* ip, UdpHdr* ud
             d->len  = (uint16_t)len;
             memcpy(d->data, payload, len);
             s->dq[s->dq_len++] = d;
-            net_wake(s);
+            sock_wake(s);
         }
         return;
     }
@@ -267,6 +277,8 @@ long socket_connect(struct process* p, int sd, uint32_t ip, uint32_t port){
             res = s->err;
         } else if(timed_out){
             res = -ECONNREFUSED;
+        } else if(s->nonblock){
+            res = -EINPROGRESS;
         } else {
             net_block(s, s->deadline);
         }
@@ -292,6 +304,8 @@ long socket_accept(struct process* p, int sd, struct sock_addr* peer, uint32_t t
         res = c - socks;
     } else if(timed_out){
         res = -ETIMEOUT;
+    } else if(s->nonblock){
+        res = -EAGAIN;
     } else {
         net_block(s, timeout_ms ? net_now_ms() + timeout_ms : 0);
     }
@@ -327,7 +341,9 @@ long socket_sendto(struct process* p, int sd, const void* buf, size_t len, uint3
         res = -ENOTCONN;
     } else if(len){
         res = (long)tcp_queue_data(s->tcb, buf, len);
-        if(!res){
+        if(!res && s->nonblock){
+            res = -EAGAIN;
+        } else if(!res){
             net_block(s, 0);                // the send buffer is full
         }
     }
@@ -355,6 +371,8 @@ long socket_recvfrom(struct process* p, int sd, void* buf, size_t len, struct so
             res = -ENOTCONN;
         } else if(timed_out){
             res = -ETIMEOUT;
+        } else if(s->nonblock){
+            res = -EAGAIN;
         } else {
             net_block(s, timeout_ms ? net_now_ms() + timeout_ms : 0);
         }
@@ -378,6 +396,8 @@ long socket_recvfrom(struct process* p, int sd, void* buf, size_t len, struct so
         res = s->err;
     } else if(timed_out){
         res = -ETIMEOUT;
+    } else if(s->nonblock){
+        res = -EAGAIN;
     } else {
         net_block(s, timeout_ms ? net_now_ms() + timeout_ms : 0);
     }
@@ -403,7 +423,7 @@ static void sock_free(struct sock* s){
         }
         kfree(s->rx);
     }
-    net_wake(s);
+    sock_wake(s);
     memset(s, 0, sizeof(*s));
 }
 
@@ -415,6 +435,112 @@ long socket_close(struct process* p, int sd){
     }
     net_unlock();
     return s ? 0 : -EBADF;
+}
+
+// ---- poll, non-blocking, names ----------------------------------------
+
+static bool sock_connected(struct sock* s){
+    return s->tcb && (s->tcb->state == TCP_ESTABLISHED || s->tcb->state == TCP_CLOSE_WAIT);
+}
+
+// What holds for `s` now (socket.h, the SOCK_POLL* list).
+static unsigned int sock_ready(struct sock* s){
+    if(s->type == SOCK_DGRAM){
+        return SOCK_POLLOUT | (s->dq_len ? SOCK_POLLIN : 0);
+    }
+    if(s->listening){
+        return s->accq_len ? SOCK_POLLIN : 0;
+    }
+    unsigned int r = 0;
+    if(s->rx_len || s->eof || s->err){
+        r |= SOCK_POLLIN;
+    }
+    if(s->err){
+        r |= SOCK_POLLERR | SOCK_POLLHUP;
+    } else if(!s->tcb || s->tcb->state == TCP_CLOSED){
+        // Gone both ways (the peer's FIN alone is POLLIN: recv says 0).
+        r |= SOCK_POLLHUP;
+    }
+    if(!s->err && sock_connected(s) && tcp_send_room(s->tcb) > 0){
+        r |= SOCK_POLLOUT;
+    }
+    return r;
+}
+
+long socket_poll(struct process* p, struct sock_pollfd* fds, int n, int32_t timeout_ms){
+    if(n < 0 || n > SOCK_POLL_MAX){
+        return -EINVARG;
+    }
+    net_lock();
+    uint64_t deadline = timeout_ms > 0 ? net_now_ms() + (uint32_t)timeout_ms : 0;
+    bool timed_out = net_resume_ex(&deadline);
+    // Frames a NIC without an interrupt holds, and the loopback's.
+    net_poll();
+    uint64_t set = 0;
+    long ready = 0;
+    for(int i = 0; i < n; i++){
+        fds[i].revents = 0;
+        if(fds[i].sock < 0){
+            continue;
+        }
+        struct sock* s = sock_get(p, fds[i].sock, 0);
+        if(!s){
+            fds[i].revents = SOCK_POLLNVAL;
+        } else {
+            unsigned int want = fds[i].events | SOCK_POLLERR | SOCK_POLLHUP;
+            fds[i].revents = (uint16_t)(sock_ready(s) & want);
+            set |= 1ull << fds[i].sock;
+        }
+        ready += fds[i].revents != 0;
+    }
+    if(deadline && net_now_ms() >= deadline){
+        timed_out = true;                   // before the tick says so
+    }
+    if(!ready && timeout_ms && !timed_out){
+        net_block_set(set, deadline);
+    }
+    net_unlock();
+    return ready;
+}
+
+long socket_nonblock(struct process* p, int sd, int mode){
+    net_lock();
+    struct sock* s = sock_get(p, sd, 0);
+    long res;
+    if(!s){
+        res = -EBADF;
+    } else if(mode < -1 || mode > 1){
+        res = -EINVARG;
+    } else {
+        if(mode >= 0){
+            s->nonblock = mode == 1;
+        }
+        res = s->nonblock;
+    }
+    net_unlock();
+    return res;
+}
+
+long socket_name(struct process* p, int sd, int peer, struct sock_addr* out){
+    net_lock();
+    struct sock* s = sock_get(p, sd, 0);
+    long res = 0;
+    if(!s){
+        res = -EBADF;
+    } else if(peer){
+        if(s->listening || !s->rip || (s->type == SOCK_STREAM && !s->tcb)){
+            res = -ENOTCONN;
+        } else {
+            out->ip   = s->rip;
+            out->port = s->rport;
+        }
+    } else {
+        out->port = s->lport;
+        out->ip   = s->tcb && !s->listening ? s->tcb->local_ip
+                  : s->type == SOCK_DGRAM && s->rip && net_node() ? node_pick_src_ip(net_node(), s->rip) : 0;
+    }
+    net_unlock();
+    return res;
 }
 
 int socket_count(void){

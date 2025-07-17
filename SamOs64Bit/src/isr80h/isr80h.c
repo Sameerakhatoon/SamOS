@@ -120,4 +120,8 @@ void isr80h_register_commands(){
     isr80h_register_command(SYSTEM_COMMAND68_RECVFROM,             isr80h_command68_recvfrom);
     isr80h_register_command(SYSTEM_COMMAND69_SCLOSE,               isr80h_command69_sclose);
     isr80h_register_command(SYSTEM_COMMAND70_NET_PING_EX,          isr80h_command70_net_ping_ex);
+    isr80h_register_command(SYSTEM_COMMAND71_POLL,                 isr80h_command71_poll);
+    isr80h_register_command(SYSTEM_COMMAND72_NONBLOCK,             isr80h_command72_nonblock);
+    isr80h_register_command(SYSTEM_COMMAND73_GETSOCKNAME,          isr80h_command73_getsockname);
+    isr80h_register_command(SYSTEM_COMMAND74_GETPEERNAME,          isr80h_command74_getpeername);
 }

@@ -35,9 +35,50 @@ Node* net_node(void){
 static struct net_waiter {
     struct task* task;
     void*        obj;
+    uint64_t     set;               // net_block_set's bits
     uint64_t     deadline_ms;
     bool         timed_out;
 } waiters[NET_WAITERS];
+
+// A syscall's kernel copy, freed when it blocks.
+static struct net_scratch {
+    struct task* task;
+    void*        ptr;
+} scratches[NET_WAITERS];
+
+void net_scratch(void* p){
+    net_lock();
+    for(int i = 0; i < NET_WAITERS; i++){
+        if(!scratches[i].task){
+            scratches[i].task = task_current();
+            scratches[i].ptr  = p;
+            break;
+        }
+    }
+    net_unlock();
+}
+
+void net_scratch_done(void* p){
+    net_lock();
+    for(int i = 0; i < NET_WAITERS; i++){
+        if(scratches[i].task == task_current() && scratches[i].ptr == p){
+            scratches[i].task = NULL;
+            scratches[i].ptr  = NULL;
+        }
+    }
+    net_unlock();
+}
+
+// Under the net lock: free what `t` registered (it blocks or is gone).
+static void scratch_free(struct task* t){
+    for(int i = 0; i < NET_WAITERS; i++){
+        if(scratches[i].task == t){
+            kfree(scratches[i].ptr);
+            scratches[i].task = NULL;
+            scratches[i].ptr  = NULL;
+        }
+    }
+}
 
 static struct net_waiter* waiter_of(struct task* t){
     for(int i = 0; i < NET_WAITERS; i++){
@@ -54,7 +95,8 @@ static void waiter_wake(struct net_waiter* w){
     }
 }
 
-void net_block(void* obj, uint64_t deadline_ms){
+__attribute__((noreturn))
+static void net_block_on(void* obj, uint64_t set, uint64_t deadline_ms){
     struct task* me = task_current();
     struct net_waiter* w = waiter_of(me);
     if(!w){
@@ -63,9 +105,12 @@ void net_block(void* obj, uint64_t deadline_ms){
     if(w){
         w->task        = me;
         w->obj         = obj;
+        w->set         = set;
         w->deadline_ms = deadline_ms;
         w->timed_out   = false;
     }
+    // The syscall runs again from the start: its kernel copy goes.
+    scratch_free(me);
     // Without a free slot nothing wakes it but the tick: it polls.
     task_block(me, TASK_BLOCK_NET);
     net_unlock();
@@ -73,19 +118,48 @@ void net_block(void* obj, uint64_t deadline_ms){
     __builtin_unreachable();
 }
 
-bool net_resume(void){
+void net_block(void* obj, uint64_t deadline_ms){
+    net_block_on(obj, 0, deadline_ms);
+}
+
+// The waiter itself is the object, which nobody else wakes.
+void net_block_set(uint64_t set, uint64_t deadline_ms){
+    struct net_waiter* w = waiter_of(task_current());
+    if(!w){
+        w = waiter_of(NULL);
+    }
+    net_block_on(w, set, deadline_ms);
+}
+
+bool net_resume_ex(uint64_t* deadline_ms){
     struct net_waiter* w = waiter_of(task_current());
     bool timed_out = w && w->timed_out;
     if(w){
+        if(deadline_ms){
+            *deadline_ms = w->deadline_ms;
+        }
         w->task = NULL;
         w->obj  = NULL;
+        w->set  = 0;
     }
     return timed_out;
+}
+
+bool net_resume(void){
+    return net_resume_ex(NULL);
 }
 
 void net_wake(void* obj){
     for(int i = 0; i < NET_WAITERS; i++){
         if(waiters[i].task && waiters[i].obj == obj){
+            waiter_wake(&waiters[i]);
+        }
+    }
+}
+
+void net_wake_set(int bit){
+    for(int i = 0; i < NET_WAITERS; i++){
+        if(waiters[i].task && bit >= 0 && bit < 64 && ((waiters[i].set >> bit) & 1)){
             waiter_wake(&waiters[i]);
         }
     }
@@ -458,7 +532,9 @@ void net_task_gone(struct task* t){
     if(w){
         w->task = NULL;
         w->obj  = NULL;
+        w->set  = 0;
     }
+    scratch_free(t);
     socket_process_gone(t->process);
     net_unlock();
 }

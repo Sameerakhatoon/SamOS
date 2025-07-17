@@ -146,9 +146,11 @@ void* isr80h_command67_sendto(struct trap_frame* frame){
     if(!buf){
         return ERROR(-ENOMEM);
     }
+    net_scratch(buf);                       // Freed if it blocks
     long res = copy_from_user(sys_process(), buf, isr80h_arg(frame, 1), (size_t)len) < 0 ? -EFAULT :
                socket_sendto(sys_process(), (int)(intptr_t)isr80h_arg(frame, 0), buf, (size_t)len,
                              (uint32_t)(uintptr_t)isr80h_arg(frame, 3), (uint32_t)(uintptr_t)isr80h_arg(frame, 4));
+    net_scratch_done(buf);
     kfree(buf);
     return ERROR(res);
 }
@@ -168,6 +170,7 @@ void* isr80h_command68_recvfrom(struct trap_frame* frame){
         return ERROR(-ENOMEM);
     }
     struct sock_addr from = {0};
+    net_scratch(buf);                       // Freed if it blocks
     long res = socket_recvfrom(sys_process(), (int)(intptr_t)isr80h_arg(frame, 0), buf, (size_t)len, &from,
                                (uint32_t)(uintptr_t)isr80h_arg(frame, 4));
     if(res > 0 && copy_to_user(sys_process(), isr80h_arg(frame, 1), buf, (size_t)res) < 0){
@@ -176,6 +179,7 @@ void* isr80h_command68_recvfrom(struct trap_frame* frame){
     if(res >= 0 && sys_put_addr(isr80h_arg(frame, 3), &from) < 0){
         res = -EFAULT;
     }
+    net_scratch_done(buf);
     kfree(buf);
     return ERROR(res);
 }
@@ -183,4 +187,57 @@ void* isr80h_command68_recvfrom(struct trap_frame* frame){
 // long sclose(long s)
 void* isr80h_command69_sclose(struct trap_frame* frame){
     return ERROR(socket_close(sys_process(), (int)(intptr_t)isr80h_arg(frame, 0)));
+}
+
+// ---- poll, non-blocking sockets, addresses (net/socket.h) -----------
+
+// long poll(struct sock_pollfd* fds, long n, long timeout_ms): how many
+// entries have revents (written back), 0 when timeout_ms ran out; 0
+// returns at once, -1 waits for ever. The table is copied onto the
+// kernel stack (at most SOCK_POLL_MAX entries), so a wait leaves
+// nothing behind.
+void* isr80h_command71_poll(struct trap_frame* frame){
+    void* ufds    = isr80h_arg(frame, 0);
+    long  n       = (long)(intptr_t)isr80h_arg(frame, 1);
+    long  timeout = (long)(intptr_t)isr80h_arg(frame, 2);
+    struct sock_pollfd fds[SOCK_POLL_MAX];
+    if(n < 0 || n > SOCK_POLL_MAX || timeout < -1 || timeout > 0x7fffffff){
+        return ERROR(-EINVARG);
+    }
+    size_t size = sizeof(fds[0]) * (size_t)n;
+    if(n && copy_from_user(sys_process(), fds, ufds, size) < 0){
+        return ERROR(-EFAULT);
+    }
+    long res = socket_poll(sys_process(), fds, (int)n, (int32_t)timeout);
+    if(res >= 0 && n && copy_to_user(sys_process(), ufds, fds, size) < 0){
+        res = -EFAULT;
+    }
+    return ERROR(res);
+}
+
+// long nonblock(long s, long mode): 1 non-blocking, 0 blocking, -1 only
+// asks; the mode now.
+void* isr80h_command72_nonblock(struct trap_frame* frame){
+    return ERROR(socket_nonblock(sys_process(), (int)(intptr_t)isr80h_arg(frame, 0),
+                                 (int)(intptr_t)isr80h_arg(frame, 1)));
+}
+
+static void* sys_name(struct trap_frame* frame, int peer){
+    struct sock_addr a = {0};
+    long res = socket_name(sys_process(), (int)(intptr_t)isr80h_arg(frame, 0), peer, &a);
+    if(res >= 0){
+        res = isr80h_arg(frame, 1) ? sys_put_addr(isr80h_arg(frame, 1), &a) : -EFAULT;
+    }
+    return ERROR(res);
+}
+
+// long getsockname(long s, struct sock_addr* out): the local address
+// (ip 0 while not fixed) and port.
+void* isr80h_command73_getsockname(struct trap_frame* frame){
+    return sys_name(frame, 0);
+}
+
+// long getpeername(long s, struct sock_addr* out)
+void* isr80h_command74_getpeername(struct trap_frame* frame){
+    return sys_name(frame, 1);
 }

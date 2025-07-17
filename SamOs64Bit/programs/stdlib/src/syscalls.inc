@@ -53,3 +53,7 @@ SYSCALL samos_sendto,               67
 SYSCALL samos_recvfrom,             68
 SYSCALL samos_sclose,               69
 SYSCALL samos_net_ping_ex,          70
+SYSCALL samos_poll,                 71
+SYSCALL samos_nonblock,             72
+SYSCALL samos_getsockname,          73
+SYSCALL samos_getpeername,          74

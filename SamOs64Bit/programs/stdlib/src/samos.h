@@ -83,6 +83,42 @@ long samos_send(long s, const void* buf, long len);
 long samos_send_all(long s, const void* buf, long len);
 long samos_recv(long s, void* buf, long len);
 
+// Poll, non-blocking sockets, the socket's addresses (the
+// kernel's net/socket.h). samos_poll: for each entry the events asked
+// for that hold now, plus ERR, HUP and NVAL always, in revents (a
+// negative s is skipped); returns how many entries have revents, 0
+// when timeout_ms ran out (0: at once, -1: for ever). Any of the
+// sockets wakes it. At most 64 entries.
+//   POLLIN   bytes to recv, the peer's FIN or an error; a connection
+//            to accept on a listener; a datagram queued
+//   POLLOUT  connected with room in the send buffer (datagram: always)
+//   POLLERR  the connection failed or was reset
+//   POLLHUP  the connection is gone (reset, refused, closed both
+//            ways); the peer's FIN alone is POLLIN (recv returns 0)
+//   POLLNVAL not a socket of this process
+#define SAMOS_POLLIN     0x01
+#define SAMOS_POLLOUT    0x04
+#define SAMOS_POLLERR    0x08
+#define SAMOS_POLLHUP    0x10
+#define SAMOS_POLLNVAL   0x20
+struct samos_pollfd {
+    int            s;
+    unsigned short events;
+    unsigned short revents;
+};
+long samos_poll(struct samos_pollfd* fds, long n, long timeout_ms);
+// mode 1: non-blocking (accept, recv, send return -30 instead of
+// waiting, connect -31 and goes on; poll for POLLOUT or POLLERR, then
+// connect again says how it went); 0: blocking; -1: only ask. Returns
+// the mode now. An accepted socket starts blocking.
+#define SAMOS_EAGAIN       30
+#define SAMOS_EINPROGRESS  31
+long samos_nonblock(long s, long mode);
+// The local address (ip 0 while not fixed: unbound, or listening) and
+// the peer's (-28 when not connected).
+long samos_getsockname(long s, struct samos_sockaddr* out);
+long samos_getpeername(long s, struct samos_sockaddr* out);
+
 struct command_argument {
     char argument[512];
     struct command_argument* next;

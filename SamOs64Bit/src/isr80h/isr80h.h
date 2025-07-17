@@ -80,6 +80,11 @@ enum SystemCommands {
     SYSTEM_COMMAND69_SCLOSE,       // long sclose(long s)
     // Ping with a TTL and what answered (net/net.h).
     SYSTEM_COMMAND70_NET_PING_EX,  // long net_ping_ex(unsigned ip, unsigned timeout_ms, unsigned ttl, struct net_ping_result* out)
+    // Poll, non-blocking sockets, addresses (net/socket.h).
+    SYSTEM_COMMAND71_POLL,         // long poll(struct sock_pollfd* fds, long n, long timeout_ms)
+    SYSTEM_COMMAND72_NONBLOCK,     // long nonblock(long s, long mode)
+    SYSTEM_COMMAND73_GETSOCKNAME,  // long getsockname(long s, struct sock_addr* out)
+    SYSTEM_COMMAND74_GETPEERNAME,  // long getpeername(long s, struct sock_addr* out)
 };
 
 void isr80h_register_commands();
