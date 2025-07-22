@@ -14,7 +14,8 @@
 //
 // Interrupts: MSI-X where the function and the platform have it (x86,
 // the aarch64 GICv3 ITS, the riscv64 IMSIC), on completion slot
-// VNET_MSI_SLOT; else the virtio line (PCI INTx, or the MMIO slot's
+// VNET_MSI_SLOT (the first two NICs: the network follow-ups, a third or fourth takes
+// its line); else the virtio line (PCI INTx, or the MMIO slot's
 // interrupt). Either handler only calls net_irq, which hands the work
 // to the BSP (netdev.h). Without either, or with samos.net_poll, the
 // BSP's tick polls (net_tick); samos.net_intx skips MSI-X.
@@ -47,8 +48,9 @@
 #define VNET_BUFS               32          // per queue
 #define VNET_BUF_SIZE           2048
 #define VNET_HDR_SIZE           12
-#define VNET_MAX_DEVICES        2
+#define VNET_MAX_DEVICES        4           // eth0 to eth3 (NETDEV_MAX holds them and lo)
 #define VNET_MSI_SLOT           14          // disk/irqwait.h: 0 AHCI, 2-3 PATA, 4-11 virtio INTx, 12-13 xHCI
+#define VNET_MSI_SLOTS          2           // 14 and 15; slots end at 15 (arch_irq_attach_gsi)
 #define VIRTQ_AVAIL_F_NO_INTERRUPT 1
 
 struct vnet {
@@ -205,7 +207,7 @@ static int vnet_attach(struct virtio_dev* d, void* ctx){
     const char* irq = "polled";
     int line = -1;
     bool poll = boot_cmdline_has("samos.net_poll");
-    if(!poll && !boot_cmdline_has("samos.net_intx")){
+    if(!poll && vnet_count < VNET_MSI_SLOTS && !boot_cmdline_has("samos.net_intx")){
         line = virtio_msix(d, VNET_MSI_SLOT + vnet_count, this_cpu(), vnet_msi);
         if(line >= 0){
             irq = "MSI-X vector";

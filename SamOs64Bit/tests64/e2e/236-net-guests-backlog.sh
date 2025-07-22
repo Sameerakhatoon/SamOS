@@ -10,7 +10,7 @@
 . "$(dirname "$0")/_net_lib.sh"
 
 E2E_MEM=${E2E_MEM:-256M}
-E2E_NET=pci
+net_transport
 limit=${E2E_SHELL_BOOT_TIMEOUT:-120}
 clients=8
 each=5
@@ -66,7 +66,7 @@ wait "$pa"
 net_hub_stop
 
 net_on b
-net_nic_check pci backlog/b "$ip_b"
+net_nic_check "$E2E_NET" backlog/b "$ip_b"
 net_expect_no_fault backlog/b
 tr -d '\r' < "$E2E_SERIAL" | grep -aE 'wget: (fetch|[0-9]+ of)' | sed 's/^/    /' >&2
 whole=$(net_count b "wget: $each of $each fetches whole, body 6 bytes, fnv1a $hello\$")
@@ -74,7 +74,7 @@ whole=$(net_count b "wget: $each of $each fetches whole, body 6 bytes, fnv1a $he
 [ "$(net_netstat_sockets b)" = 0 ] || e2e_fail "backlog/b: sockets left in use"
 
 net_on a
-net_nic_check pci backlog/a "$ip_a"
+net_nic_check "$E2E_NET" backlog/a "$ip_a"
 net_expect_no_fault backlog/a
 served=$(net_count a "httpd: request from $(net_re "$ip_b"):[0-9]+, 200, 89 bytes")
 [ "$served" -eq $((clients * each)) ] || e2e_fail "backlog/a: httpd served $served, expected $((clients * each))"

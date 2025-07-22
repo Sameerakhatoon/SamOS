@@ -18,6 +18,13 @@
 // datagrams for other hosts on (TTL-1, Time Exceeded at TTL 1).
 // Without it SamOS is a host and drops them.
 //
+// samos.ip=dhcp (eth0) or samos.ip.ethN=dhcp asks a DHCP server
+// for that NIC's address and mask at boot (net/dhcp.h); without
+// samos.gw, eth0's lease also gives the default route (its router
+// option; none if it has none). ifconfig shows the server and the
+// lease time. The lease is not renewed. Without a lease the NIC has
+// no address.
+//
 // Waiting: a syscall that has to wait for the network
 // records what it waits for and until when, blocks its task and lets
 // the CPU go (net_block, under the net lock, does not return); the

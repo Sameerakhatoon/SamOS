@@ -22,7 +22,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define NETDEV_MAX          4
+#define NETDEV_MAX          5           // Four virtio-net NICs and lo
 #define NETDEV_NAME_SIZE    16          // SamTcpIp's IF_NAME_SIZE
 #define NET_ETH_FRAME_MAX   1514        // without the FCS, which the NIC adds
 #define NET_MTU             1500

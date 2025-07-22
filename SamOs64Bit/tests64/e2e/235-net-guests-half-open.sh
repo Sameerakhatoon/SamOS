@@ -14,7 +14,7 @@
 . "$(dirname "$0")/_net_lib.sh"
 
 E2E_MEM=${E2E_MEM:-256M}
-E2E_NET=pci
+net_transport
 limit=${E2E_SHELL_BOOT_TIMEOUT:-120}
 net_hub 2 0 0 26
 ip_a=$(net_ip 0); ip_b=$(net_ip 1)
@@ -55,14 +55,14 @@ net_hub_stop
 e2e_log "$(grep -c '^hub: dropped SYN-ACK' "$NET_HUB_LOG") SYN-ACKs dropped"
 
 net_on b
-net_nic_check pci half/b "$ip_b"
+net_nic_check "$E2E_NET" half/b "$ip_b"
 net_expect_no_fault half/b
 expect_serial "wget: connect $(net_re "$ip_a"):80 failed \\(-[0-9]+\\)" "half/b: the first connect gave up"
 expect_serial "wget: body 6 bytes, fnv1a " "half/b: the second fetch worked"
 [ "$(net_netstat_sockets b)" = 0 ] || e2e_fail "half/b: sockets left in use"
 
 net_on a
-net_nic_check pci half/a "$ip_a"
+net_nic_check "$E2E_NET" half/a "$ip_a"
 net_expect_no_fault half/a
 expect_serial "httpd: request from $(net_re "$ip_b"):[0-9]+, 200, 89 bytes\$" "half/a: served the second fetch"
 tr -d '\r' < "$E2E_SERIAL" | sed -n '/TCP TCBs : samos :/,/sockets in use/p' | tail -n 6 | sed 's/^/    /' >&2

@@ -7,13 +7,15 @@
 # hub's flow times show the two transfers overlapping), byte for byte,
 # while a sends a datagram to b and c; then b and c echo off each
 # other and a. Every guest's ARP table holds the other two MACs.
+# E2E_NET=mmio runs it on virtio-net-device (net_transport;
+# e2e/244), as it does 233 to 236.
 # e2e-requires: net virtio-pci (a virtio-net-pci NIC)
 . "$(dirname "$0")/_lib.sh"
 . "$(dirname "$0")/_shell_lib.sh"
 . "$(dirname "$0")/_net_lib.sh"
 
 E2E_MEM=${E2E_MEM:-256M}
-E2E_NET=pci
+net_transport
 limit=${E2E_SHELL_BOOT_TIMEOUT:-120}
 kib=4096
 net_hub 3
@@ -87,7 +89,7 @@ ra=$(net_re "$ip_a"); rb=$(net_re "$ip_b"); rc=$(net_re "$ip_c")
 for k in 0 1 2; do
     n=${names[k]}
     net_on "$n"
-    net_nic_check pci "three/$n" "$(net_ip "$k")"
+    net_nic_check "$E2E_NET" "three/$n" "$(net_ip "$k")"
     net_expect_no_fault "three/$n"
     expect_serial "^virtio-net: eth0 $(net_mac "$k")," "three/$n: MAC $(net_mac "$k")"
     for j in 0 1 2; do

@@ -13,7 +13,7 @@
 . "$(dirname "$0")/_net_lib.sh"
 
 E2E_MEM=${E2E_MEM:-256M}
-E2E_NET=pci
+net_transport
 limit=${E2E_SHELL_BOOT_TIMEOUT:-120}
 net_hub 2 7 5
 net_host big "$E2E_TMP/big.expect"
@@ -57,7 +57,7 @@ grep -E '^hub: held TCP frame [0-9]+ 1>0 ' "$NET_HUB_LOG" > /dev/null || e2e_fai
 for n in a b; do
     case $n in a) k=0; other=$ip_b ;; b) k=1; other=$ip_a ;; esac
     net_on "$n"
-    net_nic_check pci "loss/$n" "$(net_ip "$k")"
+    net_nic_check "$E2E_NET" "loss/$n" "$(net_ip "$k")"
     net_expect_no_fault "loss/$n"
     expect_serial "httpd: GET /big from $(net_re "$other"):[0-9]+, 200, 65536 bytes\$" "loss/$n: served the peer's /big"
     expect_serial "wget: body 65536 bytes, fnv1a $big\$" "loss/$n: the peer's /big arrived whole (FNV-1a $big)"

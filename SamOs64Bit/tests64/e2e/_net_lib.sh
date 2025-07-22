@@ -320,7 +320,20 @@ net_two_guests_test() {
 #                                flows matching ERE, both directions of
 #                                a connection as one span from its first
 #                                data frame to its last
+#   net_transport                the network follow-ups: E2E_NET from the environment (pci
+#                                by default, or mmio: virtio-net-device),
+#                                skipped where the machine has no such
+#                                NIC; the hub is the same for both
 net_ip() { printf '10.0.2.%d' $((15 + $1)); }
+
+net_transport() {
+    E2E_NET=${E2E_NET:-pci}
+    case $E2E_NET in
+        pci)  e2e_arch_has virtio-pci || e2e_skip "E2E_NET=pci: no virtio-net-pci on $E2E_ARCH" ;;
+        mmio) e2e_arch_has virtio-mmio || e2e_skip "E2E_NET=mmio: no virtio-mmio on $E2E_ARCH" ;;
+        *)    e2e_fail "E2E_NET=$E2E_NET: pci or mmio" ;;
+    esac
+}
 net_mac() { printf '52:54:00:12:34:%02x' $((0x56 + $1)); }
 
 net_hub() {

@@ -88,3 +88,16 @@ gcc -O1 -g -std=gnu99 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sa
 n="$root/src/net/samtcpip"
 gcc -O1 -g -std=gnu99 -Wall -Wextra -Werror -Wno-unused-parameter -Wno-sign-compare -Wno-unused-function     -fsanitize=address,undefined -fno-sanitize-recover=all -DSAMTCPIP_HOST_TEST -I"$root/src"     -o "$out/net_test" "$here/net_test.c" "$n/log.c" "$n/gluethread/glthread.c" "$n/graph.c" "$n/net.c"     "$n/utils.c" "$n/comm.c" "$n/Layer2/layer2.c" "$n/Layer2/l2switch.c" "$n/Layer3/layer3.c"     "$n/Layer3/icmp.c" "$n/Layer3/pmtu.c" "$n/Layer4/udp.c" "$n/Layer4/tcp.c" "$n/Layer5/ping.c"
 "$out/net_test"
+
+# The DHCP client's frames (src/net/dhcp.c, its protocol half:
+# DHCP_HOST_TEST leaves the client out). Built freestanding first to
+# prove that half needs nothing from libc, then against a server played
+# by the test.
+gcc -ffreestanding -fno-builtin -O2 -std=gnu99 -Wall -Wextra -Werror -DDHCP_HOST_TEST -I"$root/src" \
+    -c "$root/src/net/dhcp.c" -o "$out/dhcp_free.o"
+if nm -u "$out/dhcp_free.o" | grep . > /dev/null; then
+    echo "FAIL: dhcp.c needs external symbols:"; nm -u "$out/dhcp_free.o"; exit 1
+fi
+gcc -O1 -g -std=gnu99 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-sanitize-recover=all \
+    -DDHCP_HOST_TEST -I"$root/src" -o "$out/dhcp_test" "$here/dhcp_test.c" "$root/src/net/dhcp.c"
+"$out/dhcp_test"

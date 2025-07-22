@@ -156,13 +156,19 @@ e2e_run_qemu() {
 # sets the NIC's MAC (QEMU's default is 52:54:00:12:34:56), for two
 # guests on one link (e2e/229). E2E_NETDEV2, a whole -netdev
 # with id net1, adds a second NIC of the same kind on it (the kernel's
-# eth1), with the MAC E2E_NET_MAC2 if set (e2e/232, a router).
+# eth1), with the MAC E2E_NET_MAC2 if set (e2e/232, a router). The network follow-ups:
+# E2E_NETDEV3 and E2E_NETDEV4 (ids net2, net3) and their E2E_NET_MAC3,
+# E2E_NET_MAC4 add a third and a fourth (e2e/247).
 e2e_net_args() {
     E2E_QEMU_ARGS+=(-netdev "${E2E_NETDEV:-user,id=net0${E2E_NET_OPTS:-}}"
                     -device "$1,netdev=net0${E2E_NET_MAC:+,mac=$E2E_NET_MAC}")
-    if [ -n "${E2E_NETDEV2:-}" ]; then
-        E2E_QEMU_ARGS+=(-netdev "$E2E_NETDEV2" -device "$1,netdev=net1${E2E_NET_MAC2:+,mac=$E2E_NET_MAC2}")
-    fi
+    local k nd mac
+    for k in 2 3 4; do
+        nd=E2E_NETDEV$k
+        mac=E2E_NET_MAC$k
+        [ -n "${!nd:-}" ] || continue
+        E2E_QEMU_ARGS+=(-netdev "${!nd}" -device "$1,netdev=net$((k - 1))${!mac:+,mac=${!mac}}")
+    done
 }
 
 # e2e_arch_has <feature>: the arch hook lists it in E2E_ARCH_PROVIDES,

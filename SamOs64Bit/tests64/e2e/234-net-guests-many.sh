@@ -15,7 +15,7 @@
 . "$(dirname "$0")/_net_lib.sh"
 
 E2E_MEM=${E2E_MEM:-256M}
-E2E_NET=pci
+net_transport
 limit=${E2E_SHELL_BOOT_TIMEOUT:-120}
 kib=2048
 seq_n=60
@@ -79,7 +79,7 @@ ra=$(net_re "$ip_a"); rb=$(net_re "$ip_b")
 # Program lines are matched anywhere on a line (the shell echoes keys
 # meanwhile).
 net_on b
-net_nic_check pci many/b "$ip_b"
+net_nic_check "$E2E_NET" many/b "$ip_b"
 net_expect_no_fault many/b
 [ "$(net_count b "wget: 10 of 10 fetches whole, body 6 bytes, fnv1a $hello\$")" -eq 3 ] \
     || e2e_fail "many/b: not all three bursts of 10 / were whole: $(grep -a 'wget: ' "$E2E_SERIAL" | tr -d '\r' | head -n 20)"
@@ -94,7 +94,7 @@ tr -d '\r' < "$E2E_SERIAL" | sed -n '/TCP TCBs : samos :/{n;p}' | tail -n 1 | gr
     || e2e_fail "many/b: TCBs left after the clients closed"
 
 net_on a
-net_nic_check pci many/a "$ip_a"
+net_nic_check "$E2E_NET" many/a "$ip_a"
 net_expect_no_fault many/a
 served=$(net_count a "httpd: (request|GET /big[0-9]*) from $rb:[0-9]+, 200, ")
 total=$((3 * 10 + 3 + seq_n + 1))

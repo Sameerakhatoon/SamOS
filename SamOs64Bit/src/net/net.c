@@ -5,6 +5,7 @@
 #include "net.h"
 #include "netdev.h"
 #include "socket.h"
+#include "dhcp.h"
 #include "samtcpip/port.h"
 #include "samtcpip/log.h"
 #include "samtcpip/graph.h"
@@ -246,6 +247,78 @@ static void net_static_routes(void){
     }
 }
 
+// Interfaces configured by DHCP and their leases (ifconfig).
+static struct net_dhcp_if {
+    Interface*        intf;
+    struct dhcp_lease lease;
+} dhcp_ifs[NETDEV_MAX];
+static int dhcp_count;
+
+static const struct dhcp_lease* net_dhcp_lease(Interface* intf){
+    for(int i = 0; i < dhcp_count; i++){
+        if(dhcp_ifs[i].intf == intf){
+            return &dhcp_ifs[i].lease;
+        }
+    }
+    return NULL;
+}
+
+static void net_ntoa(uint32_t a, char* ip){
+    uint32_t n = htonl(a);
+    inet_ntop(AF_INET, &n, ip, 16);
+}
+
+static bool net_is_dhcp(const char* v){
+    return strncmp(v, "dhcp", 4) == 0 && (v[4] == ' ' || !v[4]);
+}
+
+// samos.ip[.ethN]=dhcp. The address and mask from a DHCP server
+// (a mask the server did not give: /24), logged as
+//   net: eth0 DHCP 10.0.2.15/24 from 10.0.2.2, router 10.0.2.2, DNS 10.0.2.3, lease 86400 s
+// -1 without a lease.
+static int net_dhcp(Interface* intf, char* ip, int* mask){
+    struct dhcp_lease l;
+    if(dhcp_count == NETDEV_MAX || dhcp_configure(intf->dev, &l) < 0){
+        serial_write("net: ");
+        serial_write(intf->if_name);
+        serial_write(" DHCP: no lease, no address\n");
+        return -1;
+    }
+    int m = 0;
+    while(m < 32 && (l.mask << m) & 0x80000000u){
+        m++;
+    }
+    *mask = l.mask ? m : 24;
+    net_ntoa(l.yiaddr, ip);
+    dhcp_ifs[dhcp_count].intf  = intf;
+    dhcp_ifs[dhcp_count].lease = l;
+    dhcp_count++;
+    char a[16];
+    serial_write("net: ");
+    serial_write(intf->if_name);
+    serial_write(" DHCP ");
+    serial_write(ip);
+    serial_write("/");
+    serial_write(itoa(*mask));
+    net_ntoa(l.server, a);
+    serial_write(" from ");
+    serial_write(a);
+    if(l.router){
+        net_ntoa(l.router, a);
+        serial_write(", router ");
+        serial_write(a);
+    }
+    if(l.dns){
+        net_ntoa(l.dns, a);
+        serial_write(", DNS ");
+        serial_write(a);
+    }
+    serial_write(", lease ");
+    serial_write(l.lease_s == 0xffffffffu ? "infinite" : itoa((int)l.lease_s));
+    serial_write(l.lease_s == 0xffffffffu ? "\n" : " s\n");
+    return 0;
+}
+
 // eth0's address and the default route. Every NIC's
 // address (samos.ip.ethN), the default route out of the interface on
 // the gateway's subnet, samos.gw=none, the static routes and
@@ -269,7 +342,11 @@ static void net_configure(Interface* eth0){
         }
         char ip[16] = "10.0.2.15";
         int mask = 24;
-        if(v && net_addr(v, ip, &mask) < 0){
+        if(v && net_is_dhcp(v)){
+            if(net_dhcp(intf, ip, &mask) < 0){
+                continue;
+            }
+        } else if(v && net_addr(v, ip, &mask) < 0){
             net_log_bad(key, v);
             continue;
         }
@@ -285,6 +362,14 @@ static void net_configure(Interface* eth0){
     } else if(v && net_addr(v, gw, NULL) < 0){
         net_log_bad("samos.gw", v);
         gw[0] = 0;
+    } else if(!v && net_dhcp_lease(eth0)){
+        // eth0's DHCP router, if the server named one.
+        const struct dhcp_lease* l = net_dhcp_lease(eth0);
+        if(l->router){
+            net_ntoa(l->router, gw);
+        } else {
+            gw[0] = 0;
+        }
     }
     if(gw[0] && nifs){
         gw_if = node_get_matching_subnet_interface(node, gw);
@@ -367,6 +452,9 @@ void net_stack_init(void){
 }
 
 void net_stack_input(struct netdev* d, uint8_t* frame, uint32_t len){
+    if(dhcp_input(d, frame, len)){
+        return;                             // A DHCP exchange is running on d
+    }
     if(node && d->intf){
         pkt_receive(node, d->intf, (char*)frame, len);
     }
@@ -492,6 +580,17 @@ long net_info(int what, char* buf, size_t size){
             printf("\t rx %lu packets %lu bytes %lu dropped, tx %lu packets %lu bytes %lu dropped\n",
                    (unsigned long)d->rx_packets, (unsigned long)d->rx_bytes, (unsigned long)d->rx_dropped,
                    (unsigned long)d->tx_packets, (unsigned long)d->tx_bytes, (unsigned long)d->tx_dropped);
+            const struct dhcp_lease* l = net_dhcp_lease(node->intf[i]);
+            if(l){
+                // Where the address came from (dhcp.h: never renewed).
+                char a[16];
+                net_ntoa(l->server, a);
+                if(l->lease_s == 0xffffffffu){
+                    printf("\t address from DHCP server %s, lease infinite\n", a);
+                } else {
+                    printf("\t address from DHCP server %s, lease %u s, not renewed\n", a, l->lease_s);
+                }
+            }
         }
         break;
     case NET_INFO_ARP:
