@@ -24,6 +24,10 @@
 // option; none if it has none). ifconfig shows the server and the
 // lease time. The lease is not renewed. Without a lease the NIC has
 // no address.
+// samos.mtu.ethN=M (samos.mtu for eth0) the largest datagram ethN
+// sends whole, 68 to 1500 (default 1500): a router fragments a larger
+// forwarded datagram, or answers Fragmentation Needed when it has DF;
+// routes change at run time through net_route_add and net_route_del.
 //
 // Waiting: a syscall that has to wait for the network
 // records what it waits for and until when, blocks its task and lets
@@ -57,21 +61,48 @@ long net_info(int what, char* buf, size_t size);
 long net_ping(uint32_t dst, uint32_t timeout_ms);
 
 // What answered an echo request. Shared with user space
-// (samos.h, struct samos_ping_result).
+// (samos.h, struct samos_ping_result). Destination Unreachable
+// too, with its code and (Fragmentation Needed) the next-hop MTU; for
+// an echo reply the data's length and whether it came back as sent.
 #define NET_PING_ECHO_REPLY     0           // ICMP types
+#define NET_PING_DEST_UNREACH   3
 #define NET_PING_TIME_EXCEEDED  11
 struct net_ping_result {
     uint32_t from;                          // host order
     uint32_t rtt_us;
     uint8_t  ttl;                           // of the answer, as it arrived
     uint8_t  type;                          // NET_PING_*
-    uint8_t  pad[2];
+    uint8_t  code;                          // The ICMP code
+    uint8_t  data_ok;                       // Echo reply: the data as sent
+    uint16_t mtu;                           // Fragmentation Needed's next-hop MTU
+    uint16_t pad;
+    uint32_t bytes;                         // Echo reply: data bytes
 };
+
+// Syscall 70's third argument: the TTL in the low 8 bits, DF in
+// bit 8, the data bytes after the echo header in bits 16-31 (0: 16).
+#define NET_PING_TTL(opts)      ((opts) & 0xff)
+#define NET_PING_DF             0x100
+#define NET_PING_SIZE(opts)     ((opts) >> 16)
+#define NET_PING_SIZE_MAX       65507       // 65535 - IP header - echo header
 
 // net_ping with the request's IP TTL (0: the default, 64) and the
 // answer in *out: the round trip in microseconds for an echo reply or
 // a router's Time Exceeded (out->type says which), or -ETIMEOUT.
-long net_ping_ex(uint32_t dst, uint32_t timeout_ms, uint8_t ttl, struct net_ping_result* out);
+// `size` data bytes (0: 16), DF when `df`; a Destination
+// Unreachable answers it too.
+long net_ping_ex(uint32_t dst, uint32_t timeout_ms, uint8_t ttl, uint32_t size, bool df,
+                 struct net_ping_result* out);
+
+// Change the routing table at run time. `dest`/`bits` is the
+// prefix (host order; the host bits are cleared), `gw` the gateway,
+// which must be on a connected subnet (its interface is the route's).
+// Adding replaces a route to the same prefix. 0, -EINVARG (bad prefix,
+// gateway not on a subnet), -EEXIST (adding over a connected subnet's
+// route), -ENOENT (no such route to delete, or a connected subnet's
+// route, which goes only with its address).
+long net_route_add(uint32_t dest, uint32_t bits, uint32_t gw);
+long net_route_del(uint32_t dest, uint32_t bits);
 
 // The Node, for net/socket.c. NULL before net_init.
 struct Node* net_node(void);

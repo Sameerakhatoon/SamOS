@@ -319,6 +319,36 @@ static int net_dhcp(Interface* intf, char* ip, int* mask){
     return 0;
 }
 
+// samos.mtu.ethN=M (samos.mtu for eth0), 68 to 1500: the largest
+// datagram the interface sends whole (net.h). Logged as "net: ethN mtu M".
+static void net_configure_mtu(Interface* intf, bool is_eth0){
+    char key[32] = "samos.mtu.";
+    strcpy(key + 10, intf->if_name);
+    const char* v = boot_cmdline_value(key);
+    if(!v && is_eth0){
+        v = boot_cmdline_value("samos.mtu");
+    }
+    if(!v){
+        return;
+    }
+    unsigned int m = 0;
+    int n = 0;
+    while(v[n] >= '0' && v[n] <= '9' && n < 5){
+        m = m * 10 + (unsigned int)(v[n] - '0');
+        n++;
+    }
+    if(!n || (v[n] && v[n] != ' ') || m < 68 || m > ETH_MAX_PAYLOAD){
+        net_log_bad(key, v);
+        return;
+    }
+    IF_MTU(intf) = m;
+    serial_write("net: ");
+    serial_write(intf->if_name);
+    serial_write(" mtu ");
+    serial_write(itoa((int)m));
+    serial_write("\n");
+}
+
 // eth0's address and the default route. Every NIC's
 // address (samos.ip.ethN), the default route out of the interface on
 // the gateway's subnet, samos.gw=none, the static routes and
@@ -331,6 +361,7 @@ static void net_configure(Interface* eth0){
         if(intf->dev->loopback){
             continue;
         }
+        net_configure_mtu(intf, intf == eth0);
         char key[32] = "samos.ip.";
         strcpy(key + 9, intf->if_name);
         const char* v = boot_cmdline_value(key);
@@ -471,6 +502,7 @@ void net_stack_timer(void){
     }
     if(node){
         tcp_timer();
+        l3_timer();             // Reassembly deadlines
     }
 }
 
@@ -486,23 +518,27 @@ static struct net_ping {
     uint64_t     sent_us;
     uint64_t     deadline_ms;
     uint32_t     rtt_us;
-    uint32_t     from;              // Who answered, its TTL, the ICMP type
-    uint8_t      ttl;
-    uint8_t      type;
+    struct net_ping_result answer;  // What answered (rtt_us set on return)
 } pings[NET_PINGS];
 static uint16_t ping_seq;
 
 // ping.c's echo-reply branch reports here as well as
 // printing "Ping reply". And its Time Exceeded branch, with the
-// request's destination in `dst` and the router in `from`.
-void net_ping_reply(uint32_t dst, uint16_t seq, uint32_t from, uint8_t ttl, uint8_t type){
+// request's destination in `dst` and the router in `from`. And
+// Destination Unreachable, all through one PingAnswer (ping.h).
+void net_ping_answer(const PingAnswer* a){
     for(int i = 0; i < NET_PINGS; i++){
         struct net_ping* p = &pings[i];
-        if(p->state == PING_WAITING && p->seq == seq && p->dst == dst){
+        if(p->state == PING_WAITING && p->seq == a->seq && p->dst == a->dst){
             p->rtt_us = (uint32_t)(arch_uptime_us() - p->sent_us);
-            p->from   = from;
-            p->ttl    = ttl;
-            p->type   = type;
+            memset(&p->answer, 0, sizeof(p->answer));
+            p->answer.from    = a->from;
+            p->answer.ttl     = a->ttl;
+            p->answer.type    = a->type;
+            p->answer.code    = a->code;
+            p->answer.mtu     = a->mtu;
+            p->answer.bytes   = a->bytes;
+            p->answer.data_ok = a->data_ok;
             p->state  = PING_REPLIED;
             net_wake(p);
         }
@@ -511,11 +547,12 @@ void net_ping_reply(uint32_t dst, uint16_t seq, uint32_t from, uint8_t ttl, uint
 
 long net_ping(uint32_t dst, uint32_t timeout_ms){
     struct net_ping_result r;
-    long res = net_ping_ex(dst, timeout_ms, 0, &r);
+    long res = net_ping_ex(dst, timeout_ms, 0, 0, false, &r);
     return res >= 0 && r.type != NET_PING_ECHO_REPLY ? -ETIMEOUT : res;
 }
 
-long net_ping_ex(uint32_t dst, uint32_t timeout_ms, uint8_t ttl, struct net_ping_result* out){
+long net_ping_ex(uint32_t dst, uint32_t timeout_ms, uint8_t ttl, uint32_t size, bool df,
+                 struct net_ping_result* out){
     struct task* me = task_current();
     net_lock();
     bool timed_out = net_resume();
@@ -544,7 +581,7 @@ long net_ping_ex(uint32_t dst, uint32_t timeout_ms, uint8_t ttl, struct net_ping
         p->state       = PING_WAITING;
         p->sent_us     = arch_uptime_us();
         p->deadline_ms = net_now_ms() + timeout_ms;
-        ping_send_request_ttl(node, ip, (short)p->seq, ttl);
+        ping_send_request_ex(node, ip, (short)p->seq, ttl, size, df);
         net_poll();
     }
     if(p->state == PING_WAITING && !timed_out){
@@ -552,14 +589,67 @@ long net_ping_ex(uint32_t dst, uint32_t timeout_ms, uint8_t ttl, struct net_ping
     }
     long res = p->state == PING_REPLIED ? (long)p->rtt_us : -ETIMEOUT;
     if(res >= 0 && out){
-        out->from   = p->from;
+        *out = p->answer;
         out->rtt_us = p->rtt_us;
-        out->ttl    = p->ttl;
-        out->type   = p->type;
-        out->pad[0] = out->pad[1] = 0;
     }
     p->state = PING_FREE;
     p->task  = NULL;
+    net_unlock();
+    return res;
+}
+
+// ---- routes at run time -----------------------------------------------
+
+// The prefix dest/bits as "a.b.c.d" with the host bits cleared, or -1.
+static int net_prefix(uint32_t dest, uint32_t bits, char* out16){
+    if(bits > 32){
+        return -1;
+    }
+    uint32_t mask = bits ? 0xffffffffu << (32 - bits) : 0;
+    uint32_t net = htonl(dest & mask);
+    inet_ntop(AF_INET, &net, out16, 16);
+    return 0;
+}
+
+long net_route_add(uint32_t dest, uint32_t bits, uint32_t gw){
+    char prefix[16], gws[16];
+    if(net_prefix(dest, bits, prefix) < 0 || !gw){
+        return -EINVARG;
+    }
+    if(!node){
+        return -ENOENT;
+    }
+    uint32_t gnet = htonl(gw);
+    inet_ntop(AF_INET, &gnet, gws, 16);
+    net_lock();
+    Interface* oif = node_get_matching_subnet_interface(node, gws);
+    L3Route* old = rt_table_lookup(NODE_RT_TABLE(node), prefix, (char)bits);
+    long res = -EINVARG;
+    if(old && old->is_direct){
+        res = -EEXIST;          // a connected subnet's route stays
+    } else if(oif){
+        rt_table_add_route(NODE_RT_TABLE(node), prefix, (char)bits, gws, oif->if_name);
+        res = 0;
+    }
+    net_unlock();
+    return res;
+}
+
+long net_route_del(uint32_t dest, uint32_t bits){
+    char prefix[16];
+    if(net_prefix(dest, bits, prefix) < 0){
+        return -EINVARG;
+    }
+    if(!node){
+        return -ENOENT;
+    }
+    net_lock();
+    L3Route* r = rt_table_lookup(NODE_RT_TABLE(node), prefix, (char)bits);
+    long res = -ENOENT;
+    if(r && !r->is_direct){
+        delete_rt_table_entry(NODE_RT_TABLE(node), prefix, (char)bits);
+        res = 0;
+    }
     net_unlock();
     return res;
 }
@@ -599,10 +689,19 @@ long net_info(int what, char* buf, size_t size){
     case NET_INFO_ROUTE:
         dump_rt_table(NODE_RT_TABLE(node));
         // The forwarding counters (samtcpip/net.h).
-        printf("IP forwarding %s: %lu forwarded, %lu TTL expired, %lu refused, %lu no route\n",
+        // Then the unreachables sent, the datagrams fragmented
+        // and refused for DF, the ICMP errors the rate limit held back;
+        // and reassembly's counters on a line of their own.
+        printf("IP forwarding %s: %lu forwarded, %lu TTL expired, %lu refused, %lu no route, "
+               "%lu unreachable sent, %lu fragmented, %lu frag needed, %lu ICMP errors rate-limited\n",
                node->node_nw_prop.ip_forward ? "on" : "off", node->node_nw_prop.fwd_packets,
                node->node_nw_prop.fwd_ttl_expired, node->node_nw_prop.fwd_refused,
-               node->node_nw_prop.fwd_no_route);
+               node->node_nw_prop.fwd_no_route, node->node_nw_prop.fwd_unreach_sent,
+               node->node_nw_prop.fwd_fragmented, node->node_nw_prop.fwd_frag_needed,
+               node->node_nw_prop.icmp_err_limited);
+        printf("IP reassembly: %lu reassembled, %lu timed out, %lu dropped, %d in progress\n",
+               node->node_nw_prop.reasm_done, node->node_nw_prop.reasm_timeouts,
+               node->node_nw_prop.reasm_dropped, l3_reasm_count());
         break;
     case NET_INFO_TCP:
         tcp_dump(node);

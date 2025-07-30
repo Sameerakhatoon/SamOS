@@ -13,6 +13,11 @@
 //   ICMP          echo reply byte for byte, a bad checksum ignored
 //   IP            fragment reassembly in any order, an incomplete set
 //                 delivers nothing, and fragmentation of a large send
+//   router        forwarding, Time Exceeded, LPM; net
+//                 unreachable, Fragmentation Needed with the MTU,
+//                 fragmenting on forward, the ICMP error rate limit,
+//                 reassembly up to 65515 bytes with its deadline and
+//                 bound, large echoes both ways, DF on our own pings
 //   TCP           the state machine both ways (handshake, data, close,
 //                 RST, a closed port), the send buffer with cwnd and
 //                 the peer's window, retransmission on the timer with
@@ -67,15 +72,10 @@ int samtcpip_logf(const char* fmt, ...){
 }
 
 static int ping_replies;
-static struct { unsigned int dst, from; unsigned short seq; unsigned char ttl, type; } ping_last;
-void net_ping_reply(unsigned int dst_ip, unsigned short seq, unsigned int from_ip, unsigned char ttl,
-                    unsigned char type){
+static PingAnswer ping_last;
+void net_ping_answer(const PingAnswer* a){
     ping_replies++;
-    ping_last.dst  = dst_ip;
-    ping_last.seq  = seq;
-    ping_last.from = from_ip;
-    ping_last.ttl  = ttl;
-    ping_last.type = type;
+    ping_last = *a;
 }
 
 #define QMAX 256
@@ -548,7 +548,7 @@ static void test_lpm(void){
     free(rt);
 }
 
-static uint8_t udp_got[2048];
+static uint8_t udp_got[65536];
 static size_t udp_got_len;
 static int udp_calls;
 static void udp_handler(Node* n, Interface* iif, struct IpHdr* ip, UdpHdr* udp, char* payload, size_t len){
@@ -635,6 +635,321 @@ static void test_ip_fragments(void){
     CHECK(got == 1208 && get16(whole + 4) == 1208 && memcmp(whole + 8, big, 1200) == 0, "fragments carry the datagram");
     CHECK(l4sum(OUR_IP, PEER_IP, 17, whole, got) == 0, "UDP checksum over the whole datagram");
     udp_unbind(node, 7);
+    qclear();
+}
+
+// ---- router ICMP errors, fragmenting on forward, big reassembly -----
+
+// The ICMP error's checks: to the peer from eth0's address, type and
+// code, the quoted header and 8 bytes equal to `wire`.
+static void check_icmp_error(struct pkt* p, uint8_t type, uint8_t code, const uint8_t* wire, const char* what){
+    CHECK(p->ip && p->ip_ok && get32(p->ip + 12) == OUR_IP && get32(p->ip + 16) == PEER_IP,
+          "%s: to the peer from eth0's address", what);
+    if(!p->ip){
+        return;
+    }
+    CHECK(p->l4len == 36 && p->l4[0] == type && p->l4[1] == code, "%s: type %u code %u, 36 bytes (%u %u %zu)",
+          what, type, code, p->l4[0], p->l4[1], p->l4len);
+    CHECK(fold(sum16(0, p->l4, p->l4len)) == 0, "%s: ICMP checksum", what);
+    CHECK(p->l4len >= 36 && memcmp(p->l4 + 8, wire, 28) == 0, "%s: the header as it arrived and 8 bytes quoted",
+          what);
+}
+
+// The datagrams of protocol `proto` sent: put back together by offset
+// into `out`; their count, -1 if one is malformed or of another id, or
+// longer than `mtu`, or does not have TTL `ttl`. *len: the bytes up to
+// the end of the last fragment; *mf_last: MF of the highest offset.
+static int collect_frags(uint8_t proto, uint8_t* out, size_t cap, size_t* len, size_t mtu, int ttl,
+                         bool* mf_last, uint16_t* first_off){
+    struct pkt p;
+    int n = 0;
+    uint16_t id = 0;
+    size_t hi = 0;
+    *len = 0;
+    while(next_ip(&p, proto)){
+        size_t off = (size_t)(p.frag & 0x1fff) * 8;
+        if(!p.ip_ok || (n && p.id != id) || 20 + p.l4len > mtu || (ttl >= 0 && p.ip[8] != ttl)
+           || off + p.l4len > cap){
+            return -1;
+        }
+        if(first_off && !n){
+            *first_off = (uint16_t)(p.frag & 0x1fff);
+        }
+        id = p.id;
+        memcpy(out + off, p.l4, p.l4len);
+        if(off + p.l4len > *len){
+            *len = off + p.l4len;
+        }
+        if(off >= hi){
+            hi = off;
+            if(mf_last){
+                *mf_last = (p.frag & 0x2000) != 0;
+            }
+        }
+        n++;
+    }
+    return n;
+}
+
+static void test_router_errors(void){
+    static uint8_t data[1400], f[1600], wire[60], got[4096];
+    struct pkt p;
+    size_t n, len;
+    NodeNwProp* np = &node->node_nw_prop;
+    Interface* eth1 = get_node_if_by_name(node, "eth1");
+    for(int i = 0; i < 1400; i++){
+        data[i] = (uint8_t)(i * 13 + 1);
+    }
+    np->ip_forward = true;
+    now_ms += 10000;                        // a full token bucket
+    qclear();
+
+    // No route (the default route out for this): net unreachable.
+    delete_rt_table_entry(NODE_RT_TABLE(node), "0.0.0.0", 0);
+    unsigned long noroute = np->fwd_no_route, sent = np->fwd_unreach_sent;
+    n = ip_pkt_to(f, 17, 80, 0x4000, 0x0a4d0001u, 64, data, 32);
+    memcpy(wire, f + 14, 52);
+    deliver(f, n);
+    CHECK(next_ip(&p, 1), "no route: an ICMP message back");
+    check_icmp_error(&p, 3, 0, wire, "net unreachable");
+    CHECK(np->fwd_no_route == noroute + 1 && np->fwd_unreach_sent == sent + 1, "no route: counted");
+    qclear();
+    np->ip_forward = false;
+    deliver(f, ip_pkt_to(f, 17, 81, 0x4000, 0x0a4d0001u, 64, data, 32));
+    CHECK(qlen == 0, "no route, forwarding off: no answer (%d frames)", qlen);
+    np->ip_forward = true;
+    uint8_t err[36];
+    memset(err, 0, sizeof(err));
+    err[0] = 3;
+    put16(err + 2, fold(sum16(0, err, 36)));
+    deliver(f, ip_pkt_to(f, 1, 82, 0x4000, 0x0a4d0001u, 64, err, 36));
+    CHECK(qlen == 0, "no route for an ICMP error: no answer (%d frames)", qlen);
+    deliver(f, ip_pkt_to(f, 17, 83, 0x4000, 0xffffffffu, 64, data, 32));
+    deliver(f, ip_pkt_to(f, 17, 84, 0x4000, 0xe0000001u, 64, data, 32));
+    CHECK(qlen == 0, "no route to a broadcast or multicast address: no answer (%d frames)", qlen);
+    rt_table_add_route(NODE_RT_TABLE(node), "0.0.0.0", 0, "10.0.2.2", "eth0");
+
+    // Our echo request, and a router's net unreachable about it.
+    ping_send_request(node, "10.77.0.1", 21);
+    CHECK(next_ip(&p, 1) && p.l4[0] == 8, "echo request to 10.77.0.1 sent");
+    if(p.ip){
+        uint8_t du[36];
+        memset(du, 0, 8);
+        du[0] = 3;
+        memcpy(du + 8, p.ip, 28);
+        put16(du + 2, fold(sum16(0, du, 36)));
+        int before = ping_replies;
+        deliver(f, ip_pkt(f, 1, 85, 0x4000, du, 36));
+        CHECK(ping_replies == before + 1 && ping_last.type == 3 && ping_last.code == 0 && ping_last.seq == 21
+              && ping_last.dst == 0x0a4d0001u && ping_last.from == PEER_IP,
+              "Destination Unreachable reported: type %u code %u seq %u", ping_last.type, ping_last.code,
+              ping_last.seq);
+    }
+    qclear();
+
+    // eth1's MTU 576: a DF datagram of 1020 bytes is refused with
+    // Fragmentation Needed carrying 576.
+    IF_MTU(eth1) = 576;
+    unsigned long fneed = np->fwd_frag_needed, frag = np->fwd_fragmented;
+    n = ip_pkt_to(f, 17, 86, 0x4000, FAR_IP, 64, data, 1000);
+    memcpy(wire, f + 14, 28);
+    deliver(f, n);
+    CHECK(next_ip(&p, 1), "DF, too big: an ICMP message back");
+    check_icmp_error(&p, 3, 4, wire, "Fragmentation Needed");
+    CHECK(p.l4 && get16(p.l4 + 6) == 576, "Fragmentation Needed: next-hop MTU 576 (%u)", p.l4 ? get16(p.l4 + 6) : 0);
+    CHECK(!next_ip(&p, 17), "DF, too big: not forwarded");
+    CHECK(np->fwd_frag_needed == fneed + 1, "Fragmentation Needed: counted");
+    qclear();
+
+    // Without DF: forwarded in two fragments of at most 576 bytes,
+    // 552 + 448 bytes of payload, TTL 63, MF on the first.
+    deliver(f, ip_pkt_to(f, 17, 87, 0x0000, FAR_IP, 64, data, 1000));
+    bool mf = true;
+    int frags = collect_frags(17, got, sizeof(got), &len, 576, 63, &mf, NULL);
+    CHECK(frags == 2 && len == 1000 && !mf && memcmp(got, data, 1000) == 0,
+          "1020 bytes without DF: 2 fragments carrying it, the last without MF (%d, %zu)", frags, len);
+    CHECK(np->fwd_fragmented == frag + 1, "fragmented: counted");
+    // A fragment (offset 800, MF) split again: offsets continue from
+    // 800, MF on both pieces.
+    uint16_t off0 = 0;
+    deliver(f, ip_pkt_to(f, 17, 88, (uint16_t)(0x2000 | 100), FAR_IP, 64, data, 1000));
+    memset(got, 0, sizeof(got));
+    frags = collect_frags(17, got, sizeof(got), &len, 576, 63, &mf, &off0);
+    CHECK(frags == 2 && off0 == 100 && len == 1800 && mf && memcmp(got + 800, data, 1000) == 0,
+          "a fragment split again: offsets from 800, MF kept (%d, %u, %zu)", frags, off0, len);
+    IF_MTU(eth1) = 1500;
+    qclear();
+
+    // The rate limit: a burst of ICMP_ERR_BURST, then one per interval.
+    now_ms += 10000;
+    unsigned long limited = np->icmp_err_limited;
+    for(int i = 0; i < ICMP_ERR_BURST + 5; i++){
+        deliver(f, ip_pkt_to(f, 17, (uint16_t)(90 + i), 0x4000, FAR_IP, 1, data, 32));
+    }
+    int te = 0;
+    while(next_ip(&p, 1)){
+        te++;
+    }
+    CHECK(te == ICMP_ERR_BURST && np->icmp_err_limited == limited + 5,
+          "rate limit: %d Time Exceeded of %d, %lu held back", te, ICMP_ERR_BURST + 5, np->icmp_err_limited - limited);
+    now_ms += ICMP_ERR_INTERVAL_MS;
+    deliver(f, ip_pkt_to(f, 17, 120, 0x4000, FAR_IP, 1, data, 32));
+    deliver(f, ip_pkt_to(f, 17, 121, 0x4000, FAR_IP, 1, data, 32));
+    te = 0;
+    while(next_ip(&p, 1)){
+        te++;
+    }
+    CHECK(te == 1, "rate limit: one more after an interval (%d)", te);
+    now_ms += 10000;
+    qclear();
+    np->ip_forward = false;
+}
+
+// A datagram of `total` bytes (its L4 bytes in `msg`) from the peer in
+// fragments of `fsz` bytes (a multiple of 8), the fragment numbers in
+// `order` (-1 ends it; NULL: all, in order).
+static void send_frags(uint8_t proto, uint16_t id, const uint8_t* msg, size_t total, size_t fsz, const int* order){
+    static uint8_t f[1600];
+    size_t nf = (total + fsz - 1) / fsz;
+    for(size_t k = 0; order ? order[k] >= 0 : k < nf; k++){
+        size_t off = (order ? (size_t)order[k] : k) * fsz;
+        size_t len = total - off < fsz ? total - off : fsz;
+        bool more = off + len < total;
+        deliver(f, ip_pkt(f, proto, id, (uint16_t)((more ? 0x2000 : 0) | (off / 8)), msg + off, len));
+    }
+}
+
+static void test_reassembly_big(void){
+    static uint8_t dgram[65536], got[65536];
+    NodeNwProp* np = &node->node_nw_prop;
+    now_ms += IP_REASM_TIMEOUT_MS + 1;
+    l3_timer();
+    CHECK(l3_reasm_count() == 0, "no reassembly in progress (%d)", l3_reasm_count());
+    CHECK(udp_bind(node, 7, udp_handler), "udp_bind 7");
+    // 60000 bytes of UDP in 1480-byte fragments, last first.
+    size_t n = 60000, total = 8 + n;
+    put16(dgram, 5555);
+    put16(dgram + 2, 7);
+    put16(dgram + 4, (uint16_t)total);
+    put16(dgram + 6, 0);
+    for(size_t i = 0; i < n; i++){
+        dgram[8 + i] = (uint8_t)(i * 31 + 7);
+    }
+    put16(dgram + 6, l4sum(PEER_IP, OUR_IP, 17, dgram, total));
+    size_t nf = (total + 1479) / 1480;
+    int order[64];
+    for(size_t k = 0; k < nf; k++){
+        order[k] = (int)(nf - 1 - k);
+    }
+    order[nf] = -1;
+    int calls = udp_calls;
+    unsigned long done = np->reasm_done;
+    send_frags(17, 200, dgram, total, 1480, order);
+    CHECK(udp_calls == calls + 1 && udp_got_len == n && memcmp(udp_got, dgram + 8, n) == 0,
+          "60008 bytes in %zu fragments, last first: delivered whole (%zu)", nf, udp_got_len);
+    CHECK(np->reasm_done == done + 1 && l3_reasm_count() == 0, "reassembled: counted, nothing left over");
+
+    // The largest datagram, 65515 bytes of UDP, in order.
+    n = 65507;
+    total = 8 + n;
+    put16(dgram + 4, (uint16_t)total);
+    put16(dgram + 6, 0);
+    put16(dgram + 6, l4sum(PEER_IP, OUR_IP, 17, dgram, total));
+    send_frags(17, 201, dgram, total, 1480, NULL);
+    CHECK(udp_calls == calls + 2 && udp_got_len == n && memcmp(udp_got, dgram + 8, n) == 0,
+          "65515 bytes, the largest: delivered whole (%zu)", udp_got_len);
+
+    // Malformed: an MF fragment of a length not a multiple of 8; data
+    // past 65515 bytes.
+    unsigned long dropped = np->reasm_dropped;
+    static uint8_t f[1600];
+    deliver(f, ip_pkt(f, 17, 202, 0x2000, dgram, 100));
+    deliver(f, ip_pkt(f, 17, 203, (uint16_t)(65512 / 8), dgram, 16));
+    CHECK(np->reasm_dropped == dropped + 2 && l3_reasm_count() == 0,
+          "an odd-length MF fragment and one past 65515 bytes dropped");
+
+    // A set that never completes is dropped at its deadline; the
+    // missing fragment later delivers nothing.
+    static const int not_first[] = { 1, 2, -1 };
+    static const int first[] = { 0, -1 };
+    unsigned long timeouts = np->reasm_timeouts;
+    total = 8 + 3000;
+    put16(dgram + 4, (uint16_t)total);
+    put16(dgram + 6, 0);
+    put16(dgram + 6, l4sum(PEER_IP, OUR_IP, 17, dgram, total));
+    send_frags(17, 204, dgram, total, 1480, not_first);
+    CHECK(l3_reasm_count() == 1, "an incomplete set waits");
+    now_ms += IP_REASM_TIMEOUT_MS - 1;
+    l3_timer();
+    CHECK(l3_reasm_count() == 1, "still there just before its deadline");
+    now_ms += 1;
+    l3_timer();
+    CHECK(l3_reasm_count() == 0 && np->reasm_timeouts == timeouts + 1, "dropped at its deadline, counted");
+    send_frags(17, 204, dgram, total, 1480, first);
+    CHECK(udp_calls == calls + 2, "the late first fragment delivers nothing");
+    now_ms += IP_REASM_TIMEOUT_MS;
+    l3_timer();
+
+    // At most IP_REASM_MAX sets: one more pushes out the oldest.
+    dropped = np->reasm_dropped;
+    for(int i = 0; i <= IP_REASM_MAX; i++){
+        send_frags(17, (uint16_t)(210 + i), dgram, total, 1480, first);
+    }
+    CHECK(l3_reasm_count() == IP_REASM_MAX && np->reasm_dropped == dropped + 1,
+          "%d sets at most, the oldest pushed out (%d)", IP_REASM_MAX, l3_reasm_count());
+    send_frags(17, 211, dgram, total, 1480, not_first);
+    CHECK(udp_calls == calls + 3 && udp_got_len == 3000, "a set still there completes");
+    send_frags(17, 210, dgram, total, 1480, not_first);
+    CHECK(udp_calls == calls + 3, "the pushed-out set does not complete");
+    now_ms += IP_REASM_TIMEOUT_MS;
+    l3_timer();
+    udp_unbind(node, 7);
+    qclear();
+
+    // A 20008-byte echo request in fragments: answered with the same
+    // data in fragments of at most 1500 bytes.
+    size_t icmp_len = 8 + 20000;
+    memset(dgram, 0, 8);
+    dgram[0] = 8;
+    put16(dgram + 4, 0x4242);
+    put16(dgram + 6, 3);
+    for(size_t i = 8; i < icmp_len; i++){
+        dgram[i] = (uint8_t)(i * 5 + 11);
+    }
+    put16(dgram + 2, fold(sum16(0, dgram, icmp_len)));
+    send_frags(1, 220, dgram, icmp_len, 1480, NULL);
+    size_t len;
+    bool mf = true;
+    int frags = collect_frags(1, got, sizeof(got), &len, 1500, 64, &mf, NULL);
+    CHECK(frags == 14 && len == icmp_len && !mf, "20008-byte echo: the reply in 14 fragments (%d, %zu)", frags, len);
+    CHECK(got[0] == 0 && fold(sum16(0, got, icmp_len)) == 0 && memcmp(got + 4, dgram + 4, icmp_len - 4) == 0,
+          "20008-byte echo reply: type 0, checksum, id, seq and data echoed");
+
+    // Our own large echo request (3000 bytes of data) goes out in
+    // fragments; the peer's reply in fragments comes back to
+    // net_ping_answer with its size and the data checked.
+    ping_send_request_ex(node, "10.0.2.2", 31, 0, 3000, false);
+    frags = collect_frags(1, got, sizeof(got), &len, 1500, 64, &mf, NULL);
+    CHECK(frags == 3 && len == 3008 && got[0] == 8, "3000-byte ping: the request in 3 fragments (%d, %zu)", frags, len);
+    got[0] = 0;
+    put16(got + 2, 0);
+    put16(got + 2, fold(sum16(0, got, len)));
+    int before = ping_replies;
+    send_frags(1, 221, got, len, 1480, NULL);
+    CHECK(ping_replies == before + 1 && ping_last.type == 0 && ping_last.seq == 31 && ping_last.bytes == 3000
+          && ping_last.data_ok, "3000-byte reply: reported, 3000 bytes, data as sent (%u, %d)", ping_last.bytes,
+          ping_last.data_ok);
+    got[100] ^= 1;
+    put16(got + 2, 0);
+    put16(got + 2, fold(sum16(0, got, len)));
+    send_frags(1, 222, got, len, 1480, NULL);
+    CHECK(ping_replies == before + 2 && !ping_last.data_ok, "a reply with other data: data_ok false");
+    // DF on our own: set on the wire; too big for the link, not sent.
+    struct pkt p;
+    ping_send_request_ex(node, "10.0.2.2", 32, 0, 100, true);
+    CHECK(next_ip(&p, 1) && (p.frag & 0x4000) && !(p.frag & 0x2000), "ping -D: DF set (%04x)", p.frag);
+    ping_send_request_ex(node, "10.0.2.2", 33, 0, 3000, true);
+    CHECK(qlen == 0 || !next_ip(&p, 1), "ping -D larger than the MTU: not sent");
     qclear();
 }
 
@@ -1287,6 +1602,8 @@ int main(int argc, char** argv){
     test_ip_fragments();
     test_forward();
     test_lpm();
+    test_router_errors();
+    test_reassembly_big();
     test_tcp_passive();
     test_tcp_listener_close();
     test_tcp_accept_full();

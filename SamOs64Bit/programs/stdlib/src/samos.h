@@ -41,17 +41,38 @@ long samos_net_ping(unsigned int ip, unsigned int timeout_ms);
 // reply (type 0) or for a router's Time Exceeded (type 11, `from` is
 // the router), or a negative status. `ttl` is the answer's as it
 // arrived: 64 less one per router on the way back.
+// A router's Destination Unreachable (type 3) answers too, with
+// its code (0 net unreachable; 4 Fragmentation Needed, `mtu` the
+// next-hop MTU); for an echo reply `bytes` is its data's length and
+// `data_ok` whether the data came back as sent. `ttl` may also carry
+// SAMOS_PING_DF (DF set on the request) and SAMOS_PING_SIZE(n) (n data
+// bytes after the echo header, at most SAMOS_PING_SIZE_MAX; 0: 16):
+// samos_net_ping_ex(ip, ms, ttl | SAMOS_PING_DF | SAMOS_PING_SIZE(1400), &r).
 #define SAMOS_PING_ECHO_REPLY     0
+#define SAMOS_PING_DEST_UNREACH   3
 #define SAMOS_PING_TIME_EXCEEDED  11
+#define SAMOS_PING_DF             0x100
+#define SAMOS_PING_SIZE(n)        ((unsigned int)(n) << 16)
+#define SAMOS_PING_SIZE_MAX       65507
 struct samos_ping_result {
-    unsigned int  from;           // host order
-    unsigned int  rtt_us;
-    unsigned char ttl;
-    unsigned char type;
-    unsigned char pad[2];
+    unsigned int   from;          // host order
+    unsigned int   rtt_us;
+    unsigned char  ttl;
+    unsigned char  type;
+    unsigned char  code;
+    unsigned char  data_ok;
+    unsigned short mtu;
+    unsigned short pad;
+    unsigned int   bytes;
 };
 long samos_net_ping_ex(unsigned int ip, unsigned int timeout_ms, unsigned int ttl,
                        struct samos_ping_result* out);
+// Routes at run time: dest/bits (host order) via gw, which must
+// be on a connected subnet; adding replaces a route to the same prefix.
+// 0 or a negative status: -2 bad prefix or gateway not on a subnet, -16
+// over a connected subnet's route, -14 no such route to delete.
+long samos_net_route_add(unsigned int dest, unsigned int bits, unsigned int gw);
+long samos_net_route_del(unsigned int dest, unsigned int bits);
 // "a.b.c.d" to a host-order address: 0 or -1; and back (16 bytes).
 int  samos_inet_pton(const char* str, unsigned int* ip);
 void samos_inet_ntop(unsigned int ip, char* out);

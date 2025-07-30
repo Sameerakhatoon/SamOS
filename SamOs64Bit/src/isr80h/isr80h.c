@@ -124,4 +124,6 @@ void isr80h_register_commands(){
     isr80h_register_command(SYSTEM_COMMAND72_NONBLOCK,             isr80h_command72_nonblock);
     isr80h_register_command(SYSTEM_COMMAND73_GETSOCKNAME,          isr80h_command73_getsockname);
     isr80h_register_command(SYSTEM_COMMAND74_GETPEERNAME,          isr80h_command74_getpeername);
+    isr80h_register_command(SYSTEM_COMMAND76_NET_ROUTE_ADD,        isr80h_command76_net_route_add);
+    isr80h_register_command(SYSTEM_COMMAND77_NET_ROUTE_DEL,        isr80h_command77_net_route_del);
 }

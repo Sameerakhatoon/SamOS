@@ -11,6 +11,9 @@ void* isr80h_command71_poll(struct trap_frame* frame);
 void* isr80h_command72_nonblock(struct trap_frame* frame);
 void* isr80h_command73_getsockname(struct trap_frame* frame);
 void* isr80h_command74_getpeername(struct trap_frame* frame);
+// Routes at run time.
+void* isr80h_command76_net_route_add(struct trap_frame* frame);
+void* isr80h_command77_net_route_del(struct trap_frame* frame);
 // Sockets (net/socket.h).
 void* isr80h_command62_socket(struct trap_frame* frame);
 void* isr80h_command63_bind(struct trap_frame* frame);

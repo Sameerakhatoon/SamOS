@@ -57,3 +57,5 @@ SYSCALL samos_poll,                 71
 SYSCALL samos_nonblock,             72
 SYSCALL samos_getsockname,          73
 SYSCALL samos_getpeername,          74
+SYSCALL samos_net_route_add,        76
+SYSCALL samos_net_route_del,        77

@@ -85,6 +85,10 @@ enum SystemCommands {
     SYSTEM_COMMAND72_NONBLOCK,     // long nonblock(long s, long mode)
     SYSTEM_COMMAND73_GETSOCKNAME,  // long getsockname(long s, struct sock_addr* out)
     SYSTEM_COMMAND74_GETPEERNAME,  // long getpeername(long s, struct sock_addr* out)
+    // Routes at run time (net/net.h). Numbered explicitly: 71 to
+    // 75 belong to other the network follow-ups branches.
+    SYSTEM_COMMAND76_NET_ROUTE_ADD = 76, // long net_route_add(unsigned dest, unsigned bits, unsigned gw)
+    SYSTEM_COMMAND77_NET_ROUTE_DEL = 77, // long net_route_del(unsigned dest, unsigned bits)
 };
 
 void isr80h_register_commands();

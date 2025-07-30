@@ -131,6 +131,7 @@ mcopy -i "$P2" "$K/programs/net/udpecho.elf"     ::/UDPECHO.ELF
 mcopy -i "$P2" "$K/programs/net/httpd.elf"       ::/HTTPD.ELF
 mcopy -i "$P2" "$K/programs/net/wget.elf"        ::/WGET.ELF
 mcopy -i "$P2" "$K/programs/net/polltest.elf"    ::/POLLTEST.ELF
+mcopy -i "$P2" "$K/programs/net/tracert.elf"     ::/TRACERT.ELF
 mcopy -i "$P2" "$K/assets/sysfont.bmp"         ::/SYSFONT.BMP
 mcopy -i "$P2" "$K/hello.txt"                  ::/HELLO.TXT
 

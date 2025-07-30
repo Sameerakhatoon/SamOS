@@ -1,6 +1,6 @@
 # The network programs: ping, udpecho, httpd, wget, polltest (x86_64;
 # the ports build them from the top-level Makefile).
-PROGS=ping udpecho httpd wget polltest
+PROGS=ping udpecho httpd wget polltest tracert
 # The C compiler; the top Makefile sets it for USERCC=samcc.
 UCC ?= x86_64-elf-gcc
 INCLUDES=-I../stdlib/src

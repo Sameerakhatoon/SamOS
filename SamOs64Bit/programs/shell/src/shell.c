@@ -89,7 +89,7 @@ static const struct shell_builtin shell_builtins[] = {
     {"reboot",   "reboot            restart the machine",           shell_reboot},
     {"ifconfig", "ifconfig          network interfaces",            shell_ifconfig},
     {"arp",      "arp               the ARP cache",                 shell_arp},
-    {"route",    "route             the routing table",             shell_route},
+    {"route",    "route [add DEST/N GW | del DEST/N]  the routing table, or change it", shell_route},
     {"ping",     "ping ip [count]   ICMP echo, count times (default 4)", shell_ping},
     {"netstat",  "netstat           TCP connections and retransmissions", shell_netstat},
 };
@@ -254,8 +254,67 @@ static int shell_arp(int argc, char** argv){
     return shell_net_info(1);
 }
 
+// "DEST/N" (or "default", 0.0.0.0/0) into *ip and *bits; -1 if
+// it is not one.
+static int shell_prefix(const char* s, unsigned int* ip, unsigned int* bits){
+    char addr[16];
+    int n = 0;
+    if(strcmp(s, "default") == 0){
+        *ip = 0;
+        *bits = 0;
+        return 0;
+    }
+    while(s[n] && s[n] != '/' && n < 15){
+        addr[n] = s[n];
+        n++;
+    }
+    addr[n] = 0;
+    if(s[n] != '/' || !s[n + 1] || samos_inet_pton(addr, ip) < 0){
+        return -1;
+    }
+    int b = 0;
+    for(n++; s[n]; n++){
+        if(s[n] < '0' || s[n] > '9' || b > 32){
+            return -1;
+        }
+        b = b * 10 + (s[n] - '0');
+    }
+    if(b > 32){
+        return -1;
+    }
+    *bits = (unsigned int)b;
+    return 0;
+}
+
+// route: the table. Route add DEST/N GW, route del DEST/N
+// (DEST/N may be "default"), through syscalls 76 and 77.
 static int shell_route(int argc, char** argv){
-    return shell_net_info(2);
+    unsigned int dest, bits, gw;
+    if(argc == 1){
+        return shell_net_info(2);
+    }
+    int add = argc == 4 && strcmp(argv[1], "add") == 0;
+    int del = argc == 3 && strcmp(argv[1], "del") == 0;
+    if((!add && !del) || shell_prefix(argv[2], &dest, &bits) < 0
+       || (add && samos_inet_pton(argv[3], &gw) < 0)){
+        printf("usage: route [add DEST/N GW | del DEST/N]\n");
+        return 1;
+    }
+    long res = add ? samos_net_route_add(dest, bits, gw) : samos_net_route_del(dest, bits);
+    if(res < 0 && add && res == -SAMOS_EINVARG){
+        printf("route: %s is not on a connected subnet\n", argv[3]);
+    } else if(res < 0 && add && res == -SAMOS_EEXIST){
+        printf("route: %s is a connected subnet\n", argv[2]);
+    } else if(res < 0 && del && res == -SAMOS_ENOENT){
+        printf("route: no route %s\n", argv[2]);
+    } else if(res < 0){
+        printf("route: error %ld\n", res);
+    } else if(add){
+        printf("route: added %s via %s\n", argv[2], argv[3]);
+    } else {
+        printf("route: deleted %s\n", argv[2]);
+    }
+    return res < 0;
 }
 
 static int shell_netstat(int argc, char** argv){

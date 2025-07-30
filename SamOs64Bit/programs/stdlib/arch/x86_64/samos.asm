@@ -67,6 +67,8 @@ global samos_poll:function
 global samos_nonblock:function
 global samos_getsockname:function
 global samos_getpeername:function
+global samos_net_route_add:function
+global samos_net_route_del:function
 
 ; One wrapper per syscall: rax = number, int 0x80, return rax.
 %macro SYSCALL_WRAPPER 2
@@ -144,3 +146,5 @@ SYSCALL_WRAPPER  samos_poll,                 71  ; Long (struct samos_pollfd* fd
 SYSCALL_WRAPPER  samos_nonblock,             72  ; Long (long s, long mode)
 SYSCALL_WRAPPER  samos_getsockname,          73  ; Long (long s, struct samos_sockaddr* out)
 SYSCALL_WRAPPER  samos_getpeername,          74  ; Long (long s, struct samos_sockaddr* out)
+SYSCALL_WRAPPER  samos_net_route_add,        76  ; Long (unsigned dest, unsigned bits, unsigned gw)
+SYSCALL_WRAPPER  samos_net_route_del,        77  ; Long (unsigned dest, unsigned bits)

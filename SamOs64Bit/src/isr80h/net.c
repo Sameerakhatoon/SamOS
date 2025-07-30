@@ -58,21 +58,39 @@ void* isr80h_command61_net_ping(struct trap_frame* frame){
 // Long net_ping_ex(unsigned int ip, unsigned int timeout_ms,
 // unsigned int ttl, struct net_ping_result* out): net_ping with the
 // request's IP TTL (0: the default) and what answered in *out (may be
-// NULL): an echo reply or a router's Time Exceeded.
+// NULL): an echo reply or a router's Time Exceeded. The third
+// argument also carries DF (bit 8) and the data size (bits 16-31; 0:
+// 16, at most NET_PING_SIZE_MAX), net/net.h; a Destination Unreachable
+// answers too.
 void* isr80h_command70_net_ping_ex(struct trap_frame* frame){
     uint32_t ip      = (uint32_t)(uintptr_t)isr80h_arg(frame, 0);
     uint32_t timeout = (uint32_t)(uintptr_t)isr80h_arg(frame, 1);
-    uint32_t ttl     = (uint32_t)(uintptr_t)isr80h_arg(frame, 2);
+    uint32_t opts    = (uint32_t)(uintptr_t)isr80h_arg(frame, 2);
     void*    uout    = isr80h_arg(frame, 3);
-    if(!ip || !timeout || timeout > 60000 || ttl > 255){
+    if(!ip || !timeout || timeout > 60000 || (opts & 0xfe00) || NET_PING_SIZE(opts) > NET_PING_SIZE_MAX){
         return ERROR(-EINVARG);
     }
     struct net_ping_result r = {0};
-    long res = net_ping_ex(ip, timeout, (uint8_t)ttl, &r);
+    long res = net_ping_ex(ip, timeout, (uint8_t)NET_PING_TTL(opts), NET_PING_SIZE(opts),
+                           (opts & NET_PING_DF) != 0, &r);
     if(res >= 0 && uout && copy_to_user(task_current()->process, uout, &r, sizeof(r)) < 0){
         res = -EFAULT;
     }
     return ERROR(res);
+}
+
+// Long net_route_add(unsigned dest, unsigned bits, unsigned gw):
+// a route to dest/bits via gw (host order), out of the interface on
+// gw's subnet. long net_route_del(unsigned dest, unsigned bits).
+void* isr80h_command76_net_route_add(struct trap_frame* frame){
+    return ERROR(net_route_add((uint32_t)(uintptr_t)isr80h_arg(frame, 0),
+                               (uint32_t)(uintptr_t)isr80h_arg(frame, 1),
+                               (uint32_t)(uintptr_t)isr80h_arg(frame, 2)));
+}
+
+void* isr80h_command77_net_route_del(struct trap_frame* frame){
+    return ERROR(net_route_del((uint32_t)(uintptr_t)isr80h_arg(frame, 0),
+                               (uint32_t)(uintptr_t)isr80h_arg(frame, 1)));
 }
 
 // ---- sockets (net/socket.h) ------------------------------------------
