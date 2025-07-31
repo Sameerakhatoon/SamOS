@@ -36,7 +36,7 @@ _poll_host_mon() {
     done
     net_wait 'polltest: udp done' 60
     local t=0
-    while [ $t -lt 120 ] && [ "$(tr -d '\r' < "$E2E_SERIAL" | grep -cE 'polltest: conn (sent|refused|failed)')" -lt 2 ]; do
+    while [ $t -lt 120 ] && [ "$(tr -d '\r' < "$E2E_SERIAL" | grep -acE 'polltest: conn (sent|refused|failed)')" -lt 2 ]; do
         sleep 0.5
         t=$((t + 1))
     done
@@ -48,7 +48,7 @@ kill "$srv" 2> /dev/null
 wait "$srv" 2> /dev/null
 net_nic_check pci poll-host
 net_expect_no_fault poll-host
-tr -d '\r' < "$E2E_SERIAL" | grep -E 'polltest: ' | sed 's/^/    /' >&2
+tr -d '\r' < "$E2E_SERIAL" | grep -aE 'polltest: ' | sed 's/^/    /' >&2
 [ "$(grep -cx 'udpsend: echo ok' "$E2E_TMP/udpsend.log")" -eq 3 ] \
     || e2e_fail "poll-host: the host's datagrams: $(cat "$E2E_TMP/udpsend.log")"
 order=$(tr -d '\r' < "$E2E_SERIAL" | sed -n "s/^.*polltest: udp port \(700[123]\) readable alone, 'to-\(700[123]\)' from 10\.0\.2\.2, echoed\$/\1=\2/p" | tr '\n' ' ')

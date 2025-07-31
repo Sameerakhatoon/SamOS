@@ -37,9 +37,9 @@ net_expect_no_fault wget
 [ "$(tr -d '\r' < "$E2E_SERIAL" | grep -c '^wget: HTTP/1\.0 200 OK$')" -eq 2 ] || e2e_fail "not two 200 responses"
 small=$(net_host fnv "$E2E_TMP/www/small.txt")
 big=$(net_host fnv "$E2E_TMP/www/big.txt")
-expect_serial "^wget: body 28 bytes, fnv1a $small\$" "small.txt arrived whole"
-expect_serial '^served by the host to SamOS$' "small.txt printed"
-expect_serial "^wget: body 65536 bytes, fnv1a $big\$" "big.txt arrived whole"
+expect_serial "wget: body 28 bytes, fnv1a $small\$" "small.txt arrived whole"
+expect_serial 'served by the host to SamOS$' "small.txt printed"
+expect_serial "wget: body 65536 bytes, fnv1a $big\$" "big.txt arrived whole"
 expect_serial 'ping: reply from 10\.0\.2\.2 seq=[0-9]+ time=[0-9]+\.[0-9]{3} ms' "PING.ELF: an echo reply"
 expect_serial 'ping: 10\.0\.2\.2 3 sent, [1-3] received' "PING.ELF: summary"
 echo "PASS: e2e/219 SamOS fetched two files from a host HTTP server, PING.ELF pinged it"

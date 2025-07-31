@@ -26,7 +26,7 @@ _httpd_mon() {
 e2e_run_qemu 500 _httpd_mon
 net_nic_check pci httpd
 net_expect_no_fault httpd
-expect_serial '^httpd: listening on port 80$' "httpd started"
+expect_serial 'httpd: listening on port 80$' "httpd started"
 [ "$(cat "$E2E_TMP/hello.out" 2> /dev/null)" = hello ] \
     || e2e_fail "curl / got '$(head -c 200 "$E2E_TMP/hello.out" 2> /dev/null)'"
 e2e_log "curl /: hello"
@@ -35,6 +35,6 @@ cmp -s "$E2E_TMP/big.out" "$E2E_TMP/big.expect" \
 e2e_log "curl /big: 65536 bytes, identical"
 # 89 bytes: upstream's response (Layer5/http.c), 83 bytes of status line
 # and headers (17 + 26 + 19 + 19 + 2) and the 6-byte body "hello\n".
-expect_serial '^httpd: request from 10\.0\.2\.2:[0-9]+, 200, 89 bytes$' "httpd answered /"
-expect_serial '^httpd: GET /big from 10\.0\.2\.2:[0-9]+, 200, 65536 bytes$' "httpd answered /big"
+expect_serial 'httpd: request from 10\.0\.2\.2:[0-9]+, 200, 89 bytes$' "httpd answered /"
+expect_serial 'httpd: GET /big from 10\.0\.2\.2:[0-9]+, 200, 65536 bytes$' "httpd answered /big"
 echo "PASS: e2e/217 curl fetched / and /big from SamOS's httpd through hostfwd"

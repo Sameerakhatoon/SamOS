@@ -139,7 +139,9 @@ result $? "host: mtools reads the file SamOS wrote"
 
 if [ -s "$screen" ]; then
     python3 "$root/tests64/e2e/screen_text.py" "$screen" "$root/assets/sysfont.bmp" > "$tmp/screen.txt" 2>&1
-    grep -q 'typed over serial' "$tmp/screen.txt"
+    # The session's last line: the first ones scroll off the 48 rows
+    # once the ls of the boot disk is long enough.
+    grep -q 'serial-done' "$tmp/screen.txt"
     result $? "screen: the shell's output is on the ramfb (screendump)"
 else
     result 1 "screen: no screendump"

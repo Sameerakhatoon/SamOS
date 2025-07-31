@@ -23,7 +23,7 @@ _poll_mon() {
 e2e_run_qemu 400 _poll_mon
 net_nic_check pci poll-local
 net_expect_no_fault poll-local
-tr -d '\r' < "$E2E_SERIAL" | grep -E 'polltest: (ok|FAIL) ' | sed 's/^/    /' >&2
+tr -d '\r' < "$E2E_SERIAL" | grep -aE 'polltest: (ok|FAIL) ' | sed 's/^/    /' >&2
 expect_no_serial 'polltest: FAIL' "poll-local: no check failed"
 for what in 'poll timeout 0 returns 0 at once' 'poll timeout 300 returns 0 after [0-9]+ ms' \
     'connect non-blocking is -31' 'poll connecting socket: POLLOUT once connected' \
@@ -34,6 +34,6 @@ for what in 'poll timeout 0 returns 0 at once' 'poll timeout 300 returns 0 after
     expect_serial "polltest: ok $what" "poll-local: $what"
 done
 n=$(tr -d '\r' < "$E2E_SERIAL" | sed -n 's/^.*polltest: local done, \([0-9]*\) checks, 0 failures$/\1/p' | tail -n 1)
-[ "${n:-0}" -ge 30 ] || e2e_fail "poll-local: $(tr -d '\r' < "$E2E_SERIAL" | grep 'polltest: local done' || echo 'no end line')"
+[ "${n:-0}" -ge 30 ] || e2e_fail "poll-local: $(tr -d '\r' < "$E2E_SERIAL" | grep -a 'polltest: local done' || echo 'no end line')"
 e2e_log "poll-local: $n checks, 0 failures"
 echo "PASS: e2e/242 poll, non-blocking sockets and socket names on the loopback"

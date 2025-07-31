@@ -78,10 +78,10 @@ done
 [ "$(cat "$E2E_TMP/silent.out" 2> /dev/null)" = hello ] \
     || e2e_fail "the silent client got '$(head -c 200 "$E2E_TMP/silent.out" 2> /dev/null)'"
 e2e_log "the silent client, last, got hello"
-[ "$(tr -d '\r' < "$E2E_SERIAL" | grep -c "^httpd: GET /big$kib from 10\\.0\\.2\\.2:[0-9]*, 200, $((kib * 1024)) bytes\$")" -eq 3 ] \
+[ "$(tr -d '\r' < "$E2E_SERIAL" | grep -ac "^httpd: GET /big$kib from 10\\.0\\.2\\.2:[0-9]*, 200, $((kib * 1024)) bytes\$")" -eq 3 ] \
     || e2e_fail "httpd did not log three /big$kib"
 # The silent client's connection was accepted first and answered last.
-last=$(tr -d '\r' < "$E2E_SERIAL" | grep -E '^httpd: (GET|request)' | tail -n 1)
+last=$(tr -d '\r' < "$E2E_SERIAL" | grep -aE '^httpd: (GET|request)' | tail -n 1)
 case $last in
     'httpd: request from 10.0.2.2:'*', 200, 89 bytes') ;;
     *) e2e_fail "httpd's last line: '$last'" ;;

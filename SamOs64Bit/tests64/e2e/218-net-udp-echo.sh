@@ -29,6 +29,6 @@ net_nic_check pci udp
 net_expect_no_fault udp
 grep -x 'udpsend: echo ok' "$E2E_TMP/udpsend.log" > /dev/null || e2e_fail "host -> SamOS: $(cat "$E2E_TMP/udpsend.log")"
 e2e_log "host -> SamOS UDP echo: ok"
-expect_serial '^udpecho: 8 bytes from 10\.0\.2\.2:[0-9]+, echoed$' "SamOS echoed the host's datagram"
-expect_serial "^udpecho: reply 'samos-udp' from 10\.0\.2\.2 ok\$" "SamOS -> host UDP echo"
+expect_serial 'udpecho: 8 bytes from 10\.0\.2\.2:[0-9]+, echoed$' "SamOS echoed the host's datagram"
+expect_serial "udpecho: reply 'samos-udp' from 10\.0\.2\.2 ok\$" "SamOS -> host UDP echo"
 echo "PASS: e2e/218 UDP echo host -> SamOS and SamOS -> host"

@@ -58,7 +58,7 @@ _nics_boot() {
     expect_serial '^net: eth3 DHCP 10\.0\.5\.15/24 from 10\.0\.5\.2, ' "$tr: eth3 leased 10.0.5.15"
     expect_serial '^net: eth3 10\.0\.5\.15/24$' "$tr: eth3 configured"
     expect_serial "$SHELL_BANNER" "$tr: shell up"
-    [ "$(tr -d '\r' < "$E2E_SERIAL" | grep -c 'address from DHCP server')" -ge 2 ] \
+    [ "$(tr -d '\r' < "$E2E_SERIAL" | grep -ac 'address from DHCP server')" -ge 2 ] \
         || e2e_fail "$tr: ifconfig does not show eth1's and eth3's leases"
     for n in 2 3 4 5; do
         net_shell_ping_check "$tr" "10.0.$n.2" 2
